@@ -5,6 +5,34 @@ declare(strict_types=1);
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception as PHPMailerException;
 
+function db_server(): PDO
+{
+    static $pdo = null;
+    if ($pdo instanceof PDO) {
+        return $pdo;
+    }
+
+    $dsn = sprintf('mysql:host=%s;port=%d;charset=%s', DB_HOST, DB_PORT, DB_CHARSET);
+    $pdo = new PDO($dsn, DB_USERNAME, DB_PASSWORD, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    ]);
+
+    return $pdo;
+}
+
+function ensure_database_exists(): void
+{
+    static $ensured = false;
+    if ($ensured) {
+        return;
+    }
+
+    $databaseName = str_replace('`', '``', DB_NAME);
+    db_server()->exec('CREATE DATABASE IF NOT EXISTS `' . $databaseName . '` CHARACTER SET ' . DB_CHARSET . ' COLLATE ' . DB_COLLATION);
+    $ensured = true;
+}
+
 function db(): PDO
 {
     static $pdo = null;
@@ -12,75 +40,117 @@ function db(): PDO
         return $pdo;
     }
 
-    if (!is_dir(dirname(DB_PATH))) {
-        mkdir(dirname(DB_PATH), 0777, true);
-    }
+    ensure_database_exists();
 
-    $pdo = new PDO('sqlite:' . DB_PATH);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-    $pdo->exec('PRAGMA foreign_keys = ON');
+    $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=%s', DB_HOST, DB_PORT, DB_NAME, DB_CHARSET);
+    $pdo = new PDO($dsn, DB_USERNAME, DB_PASSWORD, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    ]);
+    $pdo->exec('SET NAMES ' . DB_CHARSET);
 
     return $pdo;
+}
+
+function table_has_column(PDO $pdo, string $table, string $column): bool
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name');
+    $stmt->execute([
+        'schema' => DB_NAME,
+        'table_name' => $table,
+        'column_name' => $column,
+    ]);
+
+    return (int) $stmt->fetchColumn() > 0;
+}
+
+function index_exists(PDO $pdo, string $table, string $indexName): bool
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :table_name AND INDEX_NAME = :index_name');
+    $stmt->execute([
+        'schema' => DB_NAME,
+        'table_name' => $table,
+        'index_name' => $indexName,
+    ]);
+
+    return (int) $stmt->fetchColumn() > 0;
 }
 
 function initialize_database(): void
 {
     $pdo = db();
-    $pdo->exec('CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        role TEXT NOT NULL CHECK(role IN ("admin", "employee")),
-        emp_id TEXT NULL,
-        name TEXT NOT NULL,
-        email TEXT NOT NULL UNIQUE,
-        phone TEXT NULL,
-        salary REAL NOT NULL DEFAULT 0,
-        password_hash TEXT NOT NULL,
-        created_at TEXT NOT NULL
-    )');
+    $pdo->exec("CREATE TABLE IF NOT EXISTS users (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        role ENUM('admin','employee') NOT NULL,
+        admin_id INT UNSIGNED NULL,
+        emp_id VARCHAR(100) NULL,
+        name VARCHAR(191) NOT NULL,
+        email VARCHAR(191) NOT NULL UNIQUE,
+        phone VARCHAR(50) NULL,
+        salary DECIMAL(12,2) NOT NULL DEFAULT 0,
+        password_hash VARCHAR(255) NOT NULL,
+        created_at DATETIME NOT NULL,
+        INDEX idx_users_role_admin_id (role, admin_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
-    $pdo->exec('CREATE TABLE IF NOT EXISTS employee_rules (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        rule_type TEXT NOT NULL,
-        slot_name TEXT NULL,
-        sort_order INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    )');
+    if (!table_has_column($pdo, 'users', 'admin_id')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN admin_id INT UNSIGNED NULL AFTER role');
+    }
+    if (!index_exists($pdo, 'users', 'idx_users_role_admin_id')) {
+        $pdo->exec('CREATE INDEX idx_users_role_admin_id ON users(role, admin_id)');
+    }
 
-    $pdo->exec('CREATE TABLE IF NOT EXISTS attendance_records (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        attend_date TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT "Absent",
-        punch_in_path TEXT NULL,
-        punch_in_lat TEXT NULL,
-        punch_in_lng TEXT NULL,
-        punch_in_time TEXT NULL,
-        biometric_in_time TEXT NULL,
-        biometric_out_time TEXT NULL,
+    $pdo->exec("CREATE TABLE IF NOT EXISTS employee_rules (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        user_id INT UNSIGNED NOT NULL,
+        rule_type VARCHAR(100) NOT NULL,
+        slot_name VARCHAR(191) NULL,
+        sort_order INT NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL,
+        INDEX idx_employee_rules_user_id (user_id),
+        CONSTRAINT fk_employee_rules_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS attendance_records (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        user_id INT UNSIGNED NOT NULL,
+        attend_date DATE NOT NULL,
+        status VARCHAR(50) NOT NULL DEFAULT 'Absent',
+        punch_in_path VARCHAR(255) NULL,
+        punch_in_lat VARCHAR(100) NULL,
+        punch_in_lng VARCHAR(100) NULL,
+        punch_in_time DATETIME NULL,
+        biometric_in_time DATETIME NULL,
+        biometric_out_time DATETIME NULL,
         leave_reason TEXT NULL,
-        admin_override_status TEXT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(user_id, attend_date),
-        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    )');
+        admin_override_status VARCHAR(50) NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        UNIQUE KEY uniq_user_attend_date (user_id, attend_date),
+        INDEX idx_attendance_records_user_id (user_id),
+        CONSTRAINT fk_attendance_records_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
-    $pdo->exec('CREATE TABLE IF NOT EXISTS attendance_sessions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        attendance_id INTEGER NOT NULL,
-        session_mode TEXT NOT NULL,
-        slot_name TEXT NULL,
-        college_name TEXT NULL,
-        session_name TEXT NULL,
-        day_portion TEXT NULL,
-        session_duration REAL NULL,
-        location TEXT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY(attendance_id) REFERENCES attendance_records(id) ON DELETE CASCADE
-    )');
+    $pdo->exec("CREATE TABLE IF NOT EXISTS attendance_sessions (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        attendance_id INT UNSIGNED NOT NULL,
+        session_mode VARCHAR(100) NOT NULL,
+        slot_name VARCHAR(191) NULL,
+        college_name VARCHAR(191) NULL,
+        session_name VARCHAR(191) NULL,
+        day_portion VARCHAR(100) NULL,
+        session_duration DECIMAL(10,2) NULL,
+        location VARCHAR(191) NULL,
+        created_at DATETIME NOT NULL,
+        INDEX idx_attendance_sessions_attendance_id (attendance_id),
+        CONSTRAINT fk_attendance_sessions_attendance FOREIGN KEY (attendance_id) REFERENCES attendance_records(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $earliestAdminId = (int) ($pdo->query("SELECT id FROM users WHERE role = 'admin' ORDER BY created_at, id LIMIT 1")->fetchColumn() ?: 0);
+    if ($earliestAdminId > 0) {
+        $pdo->prepare('UPDATE users SET admin_id = :admin_id WHERE role = "employee" AND admin_id IS NULL')
+            ->execute(['admin_id' => $earliestAdminId]);
+    }
 }
 
 function now(): string
@@ -136,9 +206,26 @@ function require_role(string $role): array
     return $user;
 }
 
+function current_admin_id(): ?int
+{
+    $user = current_user();
+    if (!$user || ($user['role'] ?? '') !== 'admin') {
+        return null;
+    }
+
+    return (int) $user['id'];
+}
+
 function employee_count(): int
 {
-    return (int) db()->query("SELECT COUNT(*) FROM users WHERE role = 'employee'")->fetchColumn();
+    $adminId = current_admin_id();
+    if ($adminId === null) {
+        return (int) db()->query("SELECT COUNT(*) FROM users WHERE role = 'employee'")->fetchColumn();
+    }
+
+    $stmt = db()->prepare("SELECT COUNT(*) FROM users WHERE role = 'employee' AND admin_id = :admin_id");
+    $stmt->execute(['admin_id' => $adminId]);
+    return (int) $stmt->fetchColumn();
 }
 
 function admin_count(): int
@@ -148,13 +235,30 @@ function admin_count(): int
 
 function employees(): array
 {
-    return db()->query("SELECT * FROM users WHERE role = 'employee' ORDER BY name")->fetchAll();
+    $adminId = current_admin_id();
+    if ($adminId === null) {
+        return db()->query("SELECT * FROM users WHERE role = 'employee' ORDER BY name")->fetchAll();
+    }
+
+    $stmt = db()->prepare("SELECT * FROM users WHERE role = 'employee' AND admin_id = :admin_id ORDER BY name");
+    $stmt->execute(['admin_id' => $adminId]);
+    return $stmt->fetchAll();
 }
 
 function employee_by_id(int $id): ?array
 {
-    $stmt = db()->prepare("SELECT * FROM users WHERE id = :id AND role = 'employee'");
-    $stmt->execute(['id' => $id]);
+    $adminId = current_admin_id();
+    if ($adminId === null) {
+        $stmt = db()->prepare("SELECT * FROM users WHERE id = :id AND role = 'employee'");
+        $stmt->execute(['id' => $id]);
+    } else {
+        $stmt = db()->prepare("SELECT * FROM users WHERE id = :id AND role = 'employee' AND admin_id = :admin_id");
+        $stmt->execute([
+            'id' => $id,
+            'admin_id' => $adminId,
+        ]);
+    }
+
     $row = $stmt->fetch();
     return $row ?: null;
 }
@@ -290,19 +394,17 @@ function ensure_mail_log_dir(): void
 function mail_sender_identity(): array
 {
     $user = current_user();
-    $defaultEmail = MAIL_SMTP_FROM_FALLBACK;
+    $transport = mail_transport_config();
+    $defaultEmail = filter_var((string) ($transport['username'] ?: MAIL_SMTP_FROM_FALLBACK), FILTER_VALIDATE_EMAIL) ?: MAIL_SMTP_FROM_FALLBACK;
     $defaultName = APP_NAME;
 
     if ($user && ($user['role'] ?? '') === 'admin') {
-        $candidateEmail = filter_var((string) ($user['email'] ?? ''), FILTER_VALIDATE_EMAIL);
-        if ($candidateEmail) {
-            $candidateName = trim((string) ($user['name'] ?? '')) ?: $defaultName;
-            $candidateName = preg_replace('/[\r\n]+/', ' ', $candidateName) ?? $candidateName;
-            return [
-                'name' => $candidateName,
-                'email' => $candidateEmail,
-            ];
-        }
+        $candidateName = trim((string) ($user['name'] ?? '')) ?: $defaultName;
+        $candidateName = preg_replace('/[\r\n]+/', ' ', $candidateName) ?? $candidateName;
+        return [
+            'name' => $candidateName,
+            'email' => $defaultEmail,
+        ];
     }
 
     return [
@@ -311,6 +413,26 @@ function mail_sender_identity(): array
     ];
 }
 
+function mail_reply_to_identity(): ?array
+{
+    $user = current_user();
+    if (!$user || ($user['role'] ?? '') !== 'admin') {
+        return null;
+    }
+
+    $candidateEmail = filter_var((string) ($user['email'] ?? ''), FILTER_VALIDATE_EMAIL);
+    if (!$candidateEmail) {
+        return null;
+    }
+
+    $candidateName = trim((string) ($user['name'] ?? '')) ?: APP_NAME;
+    $candidateName = preg_replace('/[\r\n]+/', ' ', $candidateName) ?? $candidateName;
+
+    return [
+        'name' => $candidateName,
+        'email' => $candidateEmail,
+    ];
+}
 function mail_transport_config(): array
 {
     $host = trim((string) (getenv('VTRACO_MAIL_HOST') ?: MAIL_SMTP_HOST));
@@ -334,6 +456,7 @@ function send_html_mail(string $to, string $subject, string $html): array
 {
     ensure_mail_log_dir();
     $sender = mail_sender_identity();
+    $replyTo = mail_reply_to_identity();
     $transport = mail_transport_config();
     $fromName = preg_replace('/[\r\n]+/', ' ', (string) ($sender['name'] ?? APP_NAME)) ?: APP_NAME;
     $fromEmail = filter_var((string) ($sender['email'] ?? ''), FILTER_VALIDATE_EMAIL) ?: MAIL_SMTP_FROM_FALLBACK;
@@ -361,7 +484,11 @@ function send_html_mail(string $to, string $subject, string $html): array
         $mailer->Body = $document;
         $mailer->AltBody = trim(html_entity_decode(strip_tags(str_replace(['<br>', '<br/>', '<br />'], "\n", $html)), ENT_QUOTES, 'UTF-8'));
         $mailer->setFrom($fromEmail, $fromName, false);
-        $mailer->addReplyTo($fromEmail, $fromName);
+        if ($replyTo) {
+            $mailer->addReplyTo($replyTo['email'], $replyTo['name']);
+        } else {
+            $mailer->addReplyTo($fromEmail, $fromName);
+        }
         $mailer->addAddress($to);
 
         if ($transport['use_smtp']) {
@@ -422,8 +549,14 @@ function employee_credentials_delivery_message(array $employee, array $mailResul
 function insert_employee(array $data, array $rules): array
 {
     $password = random_password(6);
-    db()->prepare('INSERT INTO users (role, emp_id, name, email, phone, salary, password_hash, created_at) VALUES ("employee", :emp_id, :name, :email, :phone, :salary, :password_hash, :created_at)')
+    $adminId = current_admin_id();
+    if ($adminId === null) {
+        throw new RuntimeException('An administrator must be signed in to add employees.');
+    }
+
+    db()->prepare('INSERT INTO users (role, admin_id, emp_id, name, email, phone, salary, password_hash, created_at) VALUES ("employee", :admin_id, :emp_id, :name, :email, :phone, :salary, :password_hash, :created_at)')
         ->execute([
+            'admin_id' => $adminId,
             'emp_id' => trim((string) $data['emp_id']),
             'name' => trim((string) $data['name']),
             'email' => trim((string) $data['email']),
@@ -849,11 +982,17 @@ function handle_post_action(string $action): void
             break;
 
         case 'employee_update':
-            require_role('admin');
+            $admin = require_role('admin');
+            $employeeId = (int) ($_POST['user_id'] ?? 0);
+            if (!employee_by_id($employeeId)) {
+                flash('error', 'Employee not found for this administrator.');
+                redirect_to('admin_employees');
+            }
             try {
-                db()->prepare('UPDATE users SET emp_id = :emp_id, name = :name, email = :email, phone = :phone, salary = :salary WHERE id = :id AND role = "employee"')
+                db()->prepare('UPDATE users SET emp_id = :emp_id, name = :name, email = :email, phone = :phone, salary = :salary WHERE id = :id AND role = "employee" AND admin_id = :admin_id')
                     ->execute([
-                        'id' => (int) ($_POST['user_id'] ?? 0),
+                        'id' => $employeeId,
+                        'admin_id' => (int) $admin['id'],
                         'emp_id' => trim((string) ($_POST['emp_id'] ?? '')),
                         'name' => trim((string) ($_POST['name'] ?? '')),
                         'email' => trim((string) ($_POST['email'] ?? '')),
@@ -868,8 +1007,17 @@ function handle_post_action(string $action): void
             break;
 
         case 'employee_delete':
-            require_role('admin');
-            db()->prepare('DELETE FROM users WHERE id = :id AND role = "employee"')->execute(['id' => (int) ($_POST['user_id'] ?? 0)]);
+            $admin = require_role('admin');
+            $employeeId = (int) ($_POST['user_id'] ?? 0);
+            if (!employee_by_id($employeeId)) {
+                flash('error', 'Employee not found for this administrator.');
+                redirect_to('admin_employees');
+            }
+            db()->prepare('DELETE FROM users WHERE id = :id AND role = "employee" AND admin_id = :admin_id')
+                ->execute([
+                    'id' => $employeeId,
+                    'admin_id' => (int) $admin['id'],
+                ]);
             flash('success', 'Employee deleted.');
             redirect_to('admin_employees');
             break;
@@ -882,27 +1030,35 @@ function handle_post_action(string $action): void
                 flash('error', 'Select at least one employee.');
                 redirect_to('admin_rules');
             }
+            $updated = 0;
             foreach ($ids as $id) {
                 $employee = employee_by_id($id);
                 if (!$employee) {
                     continue;
                 }
-                save_employee_rules($id, $rules);
+                save_employee_rules((int) $employee['id'], $rules);
                 send_rules_updated_email($employee, $rules);
+                $updated++;
             }
-            flash('success', 'Rules applied successfully.');
+            flash($updated > 0 ? 'success' : 'error', $updated > 0 ? 'Rules applied successfully.' : 'No employees were available for this administrator.');
             redirect_to('admin_rules');
             break;
 
         case 'admin_set_status':
             require_role('admin');
-            update_attendance_record((int) ($_POST['employee_id'] ?? 0), (string) ($_POST['attend_date'] ?? ''), [
+            $employeeId = (int) ($_POST['employee_id'] ?? 0);
+            $employee = employee_by_id($employeeId);
+            if (!$employee) {
+                flash('error', 'Employee not found for this administrator.');
+                redirect_to('admin_attendance');
+            }
+            update_attendance_record((int) $employee['id'], (string) ($_POST['attend_date'] ?? ''), [
                 'status' => (string) ($_POST['status'] ?? 'Absent'),
                 'admin_override_status' => (string) ($_POST['status'] ?? 'Absent'),
             ]);
             flash('success', 'Attendance status updated.');
             redirect_to('admin_attendance', [
-                'employee_id' => (int) ($_POST['employee_id'] ?? 0),
+                'employee_id' => (int) $employee['id'],
                 'month' => substr((string) ($_POST['attend_date'] ?? date('Y-m-d')), 0, 7),
             ]);
             break;

@@ -141,7 +141,7 @@ function render_admin_employees(): void
         <div>
             <span class="eyebrow">Admin - Employees</span>
             <h1>Employees</h1>
-            <p>Add employees manually, import a CSV batch, update records, and manage stored employee data.</p>
+            <p>Add employees manually, import a CSV batch, update records, and manage only the employees assigned to this administrator.</p>
         </div>
         <div class="action-bar">
             <button class="button outline" type="button" data-modal-target="bulk-import-modal">Bulk Import</button>
@@ -151,7 +151,7 @@ function render_admin_employees(): void
     <section class="table-wrap">
         <div class="data-toolbar">
             <div class="split">
-                <h2>All Employees</h2>
+                <h2>Your Employees</h2>
                 <span class="badge" id="admin-employees-count"><?= count($allEmployees) ?> total</span>
             </div>
             <div class="data-toolbar-search">
@@ -329,7 +329,7 @@ function render_admin_rules(): void
         <div>
             <span class="eyebrow">Admin - Rules</span>
             <h1>Assign Rules</h1>
-            <p>Select one or more employees, apply the allowed punch methods, and email the rule update instantly.</p>
+            <p>Select one or more of your employees, apply the allowed punch methods, and email the rule update instantly.</p>
         </div>
     </section>
     <section class="section-block scroll-panel">
@@ -422,7 +422,7 @@ function render_admin_attendance(): void
     $allEmployees = employees();
     $fallbackEmployee = $allEmployees[0] ?? null;
     $selectedId = (int) ($_GET['employee_id'] ?? ($fallbackEmployee['id'] ?? 0));
-    $employee = $selectedId ? employee_by_id($selectedId) : $fallbackEmployee;
+    $employee = $selectedId ? (employee_by_id($selectedId) ?: $fallbackEmployee) : $fallbackEmployee;
     $month = preg_match('/^\d{4}-\d{2}$/', $_GET['month'] ?? '') ? $_GET['month'] : date('Y-m');
 
     render_header('Attendance');
