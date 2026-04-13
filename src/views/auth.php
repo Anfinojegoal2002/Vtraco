@@ -29,6 +29,10 @@ function render_login(): void
                     <small class="field-error"><span>!</span>Password is required.</small>
                 </div>
                 <button class="button solid" type="submit">Login</button>
+                <?php if ($role === 'employee'): ?>
+                    <button class="button ghost" type="submit" name="forgot_password" value="1">Forgot your password?</button>
+                    <p class="hint">Enter your employee email above and we will send a fresh password to that inbox.</p>
+                <?php endif; ?>
             </form>
             <?php if ($role === 'admin'): ?>
                 <p><a href="<?= h(BASE_URL) ?>?page=register">Register admin</a></p>

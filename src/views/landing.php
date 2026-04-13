@@ -19,7 +19,7 @@ function render_landing(): void
                     <p>Manage your workforce, track attendance in real time, and automate salary calculations, all in one place built for growing teams that value control, accuracy, and simplicity.</p>
                     <div class="landing-cta">
                                                 <button class="button solid landing-button" type="button" data-modal-target="admin-login-modal">
-                            <strong>Admin Login</strong>
+                            <strong>Employer Login</strong>
                         </button>
                                                 <button class="button secondary landing-button" type="button" data-modal-target="employee-login-modal">
                             <strong>Employee Login</strong>
@@ -145,16 +145,8 @@ function render_landing(): void
                     </a>
                     <p>Designed to simplify attendance capture, payroll accuracy, and workforce accountability.</p>
                 </div>
-                <div>
-                    <h3>Connect</h3>
-                    <div class="social-links">
-                        <a href="#">LinkedIn</a>
-                        <a href="#">X</a>
-                        <a href="#">Instagram</a>
-                    </div>
-                </div>
             </div>
-            <div class="footer-bottom">&copy; <?= date('Y') ?> V Traco. All rights reserved.</div>
+            <div class="footer-bottom">&copy; 2020 Karyoun Innovations Pvt Ltd. All rights reserved.</div>
         </footer>
     </section>
     <?php

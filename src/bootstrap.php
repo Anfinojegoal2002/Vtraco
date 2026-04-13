@@ -2,25 +2,50 @@
 
 declare(strict_types=1);
 
+function load_config(string $name): array
+{
+    $path = __DIR__ . '/../config/' . $name . '.php';
+
+    if (!file_exists($path)) {
+        throw new RuntimeException('Missing config file: ' . $path);
+    }
+
+    $config = require $path;
+
+    if (!is_array($config)) {
+        throw new RuntimeException('Config file must return an array: ' . $path);
+    }
+
+    return $config;
+}
+
+$appConfig = load_config('app');
+$databaseConfig = load_config('database');
+$mailConfig = load_config('mail');
+
+$detectedBaseUrl = (string) ($_SERVER['SCRIPT_NAME'] ?? '/index.php');
+$configuredBaseUrl = trim((string) ($appConfig['base_url'] ?? ''));
+$baseUrl = $configuredBaseUrl !== '' ? $configuredBaseUrl : $detectedBaseUrl;
+
 session_start();
 
-date_default_timezone_set('Asia/Calcutta');
+date_default_timezone_set((string) ($appConfig['timezone'] ?? 'UTC'));
 
-const APP_NAME = 'V Traco';
-const DB_HOST = '127.0.0.1';
-const DB_PORT = 3306;
-const DB_NAME = 'vtraco';
-const DB_USERNAME = 'root';
-const DB_PASSWORD = '';
-const DB_CHARSET = 'utf8mb4';
-const DB_COLLATION = 'utf8mb4_unicode_ci';
-const SQLITE_MIGRATION_SOURCE = __DIR__ . '/../storage/data/app.sqlite';
-const MAIL_LOG_PATH = __DIR__ . '/../storage/emails';
-const UPLOAD_PATH = __DIR__ . '/../storage/uploads/punches';
-const BASE_URL = '/vtraco/index.php';
-const MAIL_SMTP_HOST = 'smtp.gmail.com';
-const MAIL_SMTP_PORT = 587;
-const MAIL_SMTP_USERNAME = 'anfinojegoal@gmail.com';
-const MAIL_SMTP_PASSWORD = 'fbrm apbm glsm mznr';
-const MAIL_SMTP_ENCRYPTION = 'tls';
-const MAIL_SMTP_FROM_FALLBACK = 'anfinojegoal@gmail.com';
+define('APP_NAME', (string) ($appConfig['name'] ?? 'V Traco'));
+define('DB_HOST', (string) ($databaseConfig['host'] ?? '127.0.0.1'));
+define('DB_PORT', (int) ($databaseConfig['port'] ?? 3306));
+define('DB_NAME', (string) ($databaseConfig['name'] ?? 'vtraco'));
+define('DB_USERNAME', (string) ($databaseConfig['username'] ?? 'root'));
+define('DB_PASSWORD', (string) ($databaseConfig['password'] ?? ''));
+define('DB_CHARSET', (string) ($databaseConfig['charset'] ?? 'utf8mb4'));
+define('DB_COLLATION', (string) ($databaseConfig['collation'] ?? 'utf8mb4_unicode_ci'));
+define('SQLITE_MIGRATION_SOURCE', (string) (($appConfig['paths']['sqlite_migration_source'] ?? __DIR__ . '/../storage/data/app.sqlite')));
+define('MAIL_LOG_PATH', (string) (($appConfig['paths']['mail_log'] ?? __DIR__ . '/../storage/emails')));
+define('UPLOAD_PATH', (string) (($appConfig['paths']['uploads'] ?? __DIR__ . '/../storage/uploads/punches')));
+define('BASE_URL', $baseUrl);
+define('MAIL_SMTP_HOST', (string) ($mailConfig['host'] ?? ''));
+define('MAIL_SMTP_PORT', (int) ($mailConfig['port'] ?? 0));
+define('MAIL_SMTP_USERNAME', (string) ($mailConfig['username'] ?? ''));
+define('MAIL_SMTP_PASSWORD', (string) ($mailConfig['password'] ?? ''));
+define('MAIL_SMTP_ENCRYPTION', (string) ($mailConfig['encryption'] ?? ''));
+define('MAIL_SMTP_FROM_FALLBACK', (string) ($mailConfig['from_fallback'] ?? ''));

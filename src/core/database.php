@@ -1,0 +1,232 @@
+<?php
+
+declare(strict_types=1);
+
+function db_server(): PDO
+{
+    static $pdo = null;
+    if ($pdo instanceof PDO) {
+        return $pdo;
+    }
+
+    $dsn = sprintf('mysql:host=%s;port=%d;charset=%s', DB_HOST, DB_PORT, DB_CHARSET);
+    $pdo = new PDO($dsn, DB_USERNAME, DB_PASSWORD, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    ]);
+
+    return $pdo;
+}
+
+function ensure_database_exists(): void
+{
+    static $ensured = false;
+    if ($ensured) {
+        return;
+    }
+
+    $databaseName = str_replace('`', '``', DB_NAME);
+    db_server()->exec('CREATE DATABASE IF NOT EXISTS `' . $databaseName . '` CHARACTER SET ' . DB_CHARSET . ' COLLATE ' . DB_COLLATION);
+    $ensured = true;
+}
+
+function db(): PDO
+{
+    static $pdo = null;
+    if ($pdo instanceof PDO) {
+        return $pdo;
+    }
+
+    ensure_database_exists();
+
+    $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=%s', DB_HOST, DB_PORT, DB_NAME, DB_CHARSET);
+    $pdo = new PDO($dsn, DB_USERNAME, DB_PASSWORD, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    ]);
+    $pdo->exec('SET NAMES ' . DB_CHARSET);
+
+    return $pdo;
+}
+
+function table_has_column(PDO $pdo, string $table, string $column): bool
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name');
+    $stmt->execute([
+        'schema' => DB_NAME,
+        'table_name' => $table,
+        'column_name' => $column,
+    ]);
+
+    return (int) $stmt->fetchColumn() > 0;
+}
+
+function index_exists(PDO $pdo, string $table, string $indexName): bool
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :table_name AND INDEX_NAME = :index_name');
+    $stmt->execute([
+        'schema' => DB_NAME,
+        'table_name' => $table,
+        'index_name' => $indexName,
+    ]);
+
+    return (int) $stmt->fetchColumn() > 0;
+}
+
+function unique_index_columns(PDO $pdo, string $table): array
+{
+    $stmt = $pdo->prepare('SELECT INDEX_NAME, COLUMN_NAME, SEQ_IN_INDEX FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :table_name AND NON_UNIQUE = 0 ORDER BY INDEX_NAME, SEQ_IN_INDEX');
+    $stmt->execute([
+        'schema' => DB_NAME,
+        'table_name' => $table,
+    ]);
+
+    $indexes = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $indexName = (string) $row['INDEX_NAME'];
+        if (!isset($indexes[$indexName])) {
+            $indexes[$indexName] = [];
+        }
+        $indexes[$indexName][] = (string) $row['COLUMN_NAME'];
+    }
+
+    return $indexes;
+}
+function initialize_database(): void
+{
+    $pdo = db();
+    $pdo->exec("CREATE TABLE IF NOT EXISTS users (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        role ENUM('admin','employee') NOT NULL,
+        admin_id INT UNSIGNED NULL,
+        emp_id VARCHAR(100) NULL,
+        name VARCHAR(191) NOT NULL,
+        email VARCHAR(191) NOT NULL,
+        phone VARCHAR(50) NULL,
+        shift VARCHAR(191) NULL,
+        salary DECIMAL(12,2) NOT NULL DEFAULT 0,
+        password_hash VARCHAR(255) NOT NULL,
+        created_at DATETIME NOT NULL,
+        UNIQUE KEY uniq_users_role_email (role, email),
+        INDEX idx_users_role_admin_id (role, admin_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    if (!table_has_column($pdo, 'users', 'admin_id')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN admin_id INT UNSIGNED NULL AFTER role');
+    }
+    if (!table_has_column($pdo, 'users', 'shift')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN shift VARCHAR(191) NULL AFTER phone');
+    }
+    if (!index_exists($pdo, 'users', 'idx_users_role_admin_id')) {
+        $pdo->exec('CREATE INDEX idx_users_role_admin_id ON users(role, admin_id)');
+    }
+    foreach (unique_index_columns($pdo, 'users') as $indexName => $columns) {
+        if ($indexName === 'PRIMARY' || $columns !== ['email']) {
+            continue;
+        }
+
+        $pdo->exec('ALTER TABLE users DROP INDEX `' . str_replace('`', '``', $indexName) . '`');
+    }
+    if (!index_exists($pdo, 'users', 'uniq_users_role_email')) {
+        $pdo->exec('CREATE UNIQUE INDEX uniq_users_role_email ON users(role, email)');
+    }
+    $pdo->exec("CREATE TABLE IF NOT EXISTS employee_rules (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        user_id INT UNSIGNED NOT NULL,
+        rule_type VARCHAR(100) NOT NULL,
+        slot_name VARCHAR(191) NULL,
+        sort_order INT NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL,
+        INDEX idx_employee_rules_user_id (user_id),
+        CONSTRAINT fk_employee_rules_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS shift_timings (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        admin_id INT UNSIGNED NOT NULL,
+        shift_name VARCHAR(191) NOT NULL,
+        start_time TIME NOT NULL,
+        end_time TIME NOT NULL,
+        created_at DATETIME NOT NULL,
+        INDEX idx_shift_timings_admin_id (admin_id),
+        CONSTRAINT fk_shift_timings_admin FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS attendance_records (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        user_id INT UNSIGNED NOT NULL,
+        attend_date DATE NOT NULL,
+        status VARCHAR(50) NOT NULL DEFAULT 'Absent',
+        punch_in_path VARCHAR(255) NULL,
+        punch_in_lat VARCHAR(100) NULL,
+        punch_in_lng VARCHAR(100) NULL,
+        punch_in_time DATETIME NULL,
+        biometric_in_time DATETIME NULL,
+        biometric_out_time DATETIME NULL,
+        leave_reason TEXT NULL,
+        admin_override_status VARCHAR(50) NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        UNIQUE KEY uniq_user_attend_date (user_id, attend_date),
+        INDEX idx_attendance_records_user_id (user_id),
+        CONSTRAINT fk_attendance_records_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS attendance_sessions (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        attendance_id INT UNSIGNED NOT NULL,
+        session_mode VARCHAR(100) NOT NULL,
+        slot_name VARCHAR(191) NULL,
+        punch_in_path VARCHAR(255) NULL,
+        punch_in_lat VARCHAR(100) NULL,
+        punch_in_lng VARCHAR(100) NULL,
+        punch_in_time DATETIME NULL,
+        punch_out_time DATETIME NULL,
+        college_name VARCHAR(191) NULL,
+        session_name VARCHAR(191) NULL,
+        day_portion VARCHAR(100) NULL,
+        session_duration DECIMAL(10,2) NULL,
+        location VARCHAR(191) NULL,
+        created_at DATETIME NOT NULL,
+        INDEX idx_attendance_sessions_attendance_id (attendance_id),
+        CONSTRAINT fk_attendance_sessions_attendance FOREIGN KEY (attendance_id) REFERENCES attendance_records(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $sessionColumns = [
+        'punch_in_path' => 'VARCHAR(255) NULL AFTER slot_name',
+        'punch_in_lat' => 'VARCHAR(100) NULL AFTER punch_in_path',
+        'punch_in_lng' => 'VARCHAR(100) NULL AFTER punch_in_lat',
+        'punch_in_time' => 'DATETIME NULL AFTER punch_in_lng',
+        'punch_out_time' => 'DATETIME NULL AFTER punch_in_time',
+    ];
+    foreach ($sessionColumns as $column => $definition) {
+        if (!table_has_column($pdo, 'attendance_sessions', $column)) {
+            $pdo->exec('ALTER TABLE attendance_sessions ADD COLUMN ' . $column . ' ' . $definition);
+        }
+    }
+
+    $pdo->exec("UPDATE attendance_sessions
+        SET punch_out_time = COALESCE(punch_out_time, created_at)
+        WHERE punch_out_time IS NULL
+          AND (college_name IS NOT NULL OR session_name IS NOT NULL OR location IS NOT NULL OR session_duration IS NOT NULL)");
+
+    $pdo->exec("UPDATE attendance_sessions s
+        JOIN (
+            SELECT MIN(id) AS first_session_id
+            FROM attendance_sessions
+            GROUP BY attendance_id
+        ) first_session ON first_session.first_session_id = s.id
+        JOIN attendance_records ar ON ar.id = s.attendance_id
+        SET s.punch_in_path = COALESCE(s.punch_in_path, ar.punch_in_path),
+            s.punch_in_lat = COALESCE(s.punch_in_lat, ar.punch_in_lat),
+            s.punch_in_lng = COALESCE(s.punch_in_lng, ar.punch_in_lng),
+            s.punch_in_time = COALESCE(s.punch_in_time, ar.punch_in_time)
+        WHERE ar.punch_in_path IS NOT NULL");
+
+    $earliestAdminId = (int) ($pdo->query("SELECT id FROM users WHERE role = 'admin' ORDER BY created_at, id LIMIT 1")->fetchColumn() ?: 0);
+    if ($earliestAdminId > 0) {
+        $pdo->prepare('UPDATE users SET admin_id = :admin_id WHERE role = "employee" AND admin_id IS NULL')
+            ->execute(['admin_id' => $earliestAdminId]);
+    }
+}
+

@@ -10,20 +10,18 @@ function render_employee_attendance(): void
 
     render_header('My Attendance');
     ?>
-    <section class="banner">
+    <section class="banner employee-banner">
         <div class="employee-topbar">
             <div>
-                <span class="eyebrow" style="background:rgba(255,255,255,0.14);color:#fff;">Employee Workspace</span>
+                <span class="eyebrow employee-workspace-badge">Employee Workspace</span>
                 <h1><?= h($employee['name']) ?></h1>
                 <p>Employee ID: <strong><?= h($employee['emp_id']) ?></strong></p>
+                <p>Shift: <strong><?= h((string) (($employee['shift'] ?? '') ?: 'Not assigned')) ?></strong></p>
             </div>
-            <form method="get" class="inline-actions">
-                <input type="hidden" name="page" value="employee_attendance">
-                <input type="month" name="month" value="<?= h($month) ?>">
-                <button class="button outline" style="background:rgba(255,255,255,0.12);color:#fff;border-color:rgba(255,255,255,0.28);" type="submit">Change Month</button>
-            </form>
+
         </div>
     </section>
+
     <div class="spacer"></div>
     <section class="page-title">
         <div>
@@ -36,7 +34,10 @@ function render_employee_attendance(): void
             <button class="button solid" type="submit">Change Month</button>
         </form>
     </section>
-    <?php render_calendar('employee', $employee, $month, $attendance); ?>
+    <div class="attendance-panel employee-attendance-panel">
+        <?php render_calendar('employee', $employee, $month, $attendance); ?>
+    </div>
     <?php
     render_footer();
 }
+
