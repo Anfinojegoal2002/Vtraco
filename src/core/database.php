@@ -97,7 +97,7 @@ function initialize_database(): void
     $pdo = db();
     $pdo->exec("CREATE TABLE IF NOT EXISTS users (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        role ENUM('admin','employee') NOT NULL,
+        role VARCHAR(50) NOT NULL,
         admin_id INT UNSIGNED NULL,
         emp_id VARCHAR(100) NULL,
         name VARCHAR(191) NOT NULL,
@@ -107,7 +107,7 @@ function initialize_database(): void
         salary DECIMAL(12,2) NOT NULL DEFAULT 0,
         password_hash VARCHAR(255) NOT NULL,
         created_at DATETIME NOT NULL,
-        UNIQUE KEY uniq_users_role_email (role, email),
+        INDEX idx_users_role_email (role, email),
         INDEX idx_users_role_admin_id (role, admin_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
@@ -117,18 +117,31 @@ function initialize_database(): void
     if (!table_has_column($pdo, 'users', 'shift')) {
         $pdo->exec('ALTER TABLE users ADD COLUMN shift VARCHAR(191) NULL AFTER phone');
     }
+    $pdo->exec('ALTER TABLE users MODIFY COLUMN role VARCHAR(50) NOT NULL');
     if (!index_exists($pdo, 'users', 'idx_users_role_admin_id')) {
         $pdo->exec('CREATE INDEX idx_users_role_admin_id ON users(role, admin_id)');
     }
     foreach (unique_index_columns($pdo, 'users') as $indexName => $columns) {
-        if ($indexName === 'PRIMARY' || $columns !== ['email']) {
+        if ($indexName === 'PRIMARY' || !in_array($columns, [['email'], ['role', 'email']], true)) {
             continue;
         }
 
         $pdo->exec('ALTER TABLE users DROP INDEX `' . str_replace('`', '``', $indexName) . '`');
     }
-    if (!index_exists($pdo, 'users', 'uniq_users_role_email')) {
-        $pdo->exec('CREATE UNIQUE INDEX uniq_users_role_email ON users(role, email)');
+    if (!index_exists($pdo, 'users', 'idx_users_role_email')) {
+        $pdo->exec('CREATE INDEX idx_users_role_email ON users(role, email)');
+    }
+    if (!table_has_column($pdo, 'users', 'force_password_change')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN force_password_change TINYINT(1) NOT NULL DEFAULT 0 AFTER password_hash');
+    }
+    if (!table_has_column($pdo, 'users', 'password_reset_requested_at')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN password_reset_requested_at DATETIME NULL AFTER force_password_change');
+    }
+    if (!table_has_column($pdo, 'users', 'password_changed_at')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN password_changed_at DATETIME NULL AFTER password_reset_requested_at');
+    }
+    if (!index_exists($pdo, 'users', 'idx_users_password_reset_requested_at')) {
+        $pdo->exec('CREATE INDEX idx_users_password_reset_requested_at ON users(password_reset_requested_at)');
     }
     $pdo->exec("CREATE TABLE IF NOT EXISTS employee_rules (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -151,6 +164,24 @@ function initialize_database(): void
         INDEX idx_shift_timings_admin_id (admin_id),
         CONSTRAINT fk_shift_timings_admin FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS projects (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        project_name VARCHAR(191) NOT NULL,
+        college_name VARCHAR(191) NOT NULL,
+        location VARCHAR(191) NOT NULL,
+        total_days INT NOT NULL,
+        session_type ENUM('FULL_DAY', 'FIRST_HALF', 'SECOND_HALF') NOT NULL,
+        start_date DATE NULL,
+        end_date DATE NULL,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_projects_active_dates (is_active, start_date, end_date),
+        INDEX idx_projects_name (project_name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec('ALTER TABLE projects MODIFY COLUMN start_date DATE NULL');
+    $pdo->exec('ALTER TABLE projects MODIFY COLUMN end_date DATE NULL');
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS attendance_records (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -175,6 +206,7 @@ function initialize_database(): void
     $pdo->exec("CREATE TABLE IF NOT EXISTS attendance_sessions (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         attendance_id INT UNSIGNED NOT NULL,
+        project_id INT UNSIGNED NULL,
         session_mode VARCHAR(100) NOT NULL,
         slot_name VARCHAR(191) NULL,
         punch_in_path VARCHAR(255) NULL,
@@ -189,10 +221,36 @@ function initialize_database(): void
         location VARCHAR(191) NULL,
         created_at DATETIME NOT NULL,
         INDEX idx_attendance_sessions_attendance_id (attendance_id),
+        INDEX idx_attendance_sessions_project_id (project_id),
         CONSTRAINT fk_attendance_sessions_attendance FOREIGN KEY (attendance_id) REFERENCES attendance_records(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
+    $pdo->exec("CREATE TABLE IF NOT EXISTS reimbursements (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        attendance_session_id INT UNSIGNED NOT NULL,
+        incentive_earned DECIMAL(12,2) NOT NULL DEFAULT 0,
+        reimbursement_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL,
+        INDEX idx_reimbursements_session_id (attendance_session_id),
+        CONSTRAINT fk_reimbursements_session FOREIGN KEY (attendance_session_id) REFERENCES attendance_sessions(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS activity_logs (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        actor_user_id INT UNSIGNED NULL,
+        actor_role VARCHAR(50) NOT NULL DEFAULT 'guest',
+        target_user_id INT UNSIGNED NULL,
+        action VARCHAR(100) NOT NULL,
+        details_json LONGTEXT NULL,
+        ip_address VARCHAR(64) NULL,
+        created_at DATETIME NOT NULL,
+        INDEX idx_activity_logs_actor_user (actor_user_id),
+        INDEX idx_activity_logs_target_user (target_user_id),
+        INDEX idx_activity_logs_action (action),
+        INDEX idx_activity_logs_created_at (created_at),
+        CONSTRAINT fk_activity_logs_actor FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL,
+        CONSTRAINT fk_activity_logs_target FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     $sessionColumns = [
+        'project_id' => 'INT UNSIGNED NULL AFTER attendance_id',
         'punch_in_path' => 'VARCHAR(255) NULL AFTER slot_name',
         'punch_in_lat' => 'VARCHAR(100) NULL AFTER punch_in_path',
         'punch_in_lng' => 'VARCHAR(100) NULL AFTER punch_in_lat',
@@ -202,14 +260,17 @@ function initialize_database(): void
     foreach ($sessionColumns as $column => $definition) {
         if (!table_has_column($pdo, 'attendance_sessions', $column)) {
             $pdo->exec('ALTER TABLE attendance_sessions ADD COLUMN ' . $column . ' ' . $definition);
+            if ($column === 'project_id') {
+                $pdo->exec('CREATE INDEX idx_attendance_sessions_project_id ON attendance_sessions(project_id)');
+            }
         }
     }
-
+ 
     $pdo->exec("UPDATE attendance_sessions
         SET punch_out_time = COALESCE(punch_out_time, created_at)
         WHERE punch_out_time IS NULL
           AND (college_name IS NOT NULL OR session_name IS NOT NULL OR location IS NOT NULL OR session_duration IS NOT NULL)");
-
+ 
     $pdo->exec("UPDATE attendance_sessions s
         JOIN (
             SELECT MIN(id) AS first_session_id
@@ -228,5 +289,6 @@ function initialize_database(): void
         $pdo->prepare('UPDATE users SET admin_id = :admin_id WHERE role = "employee" AND admin_id IS NULL')
             ->execute(['admin_id' => $earliestAdminId]);
     }
+    $pdo->exec("UPDATE users SET password_changed_at = created_at WHERE password_changed_at IS NULL AND role = 'admin'");
 }
 

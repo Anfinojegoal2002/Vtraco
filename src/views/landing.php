@@ -18,12 +18,12 @@ function render_landing(): void
                     <h1><span>Smart</span><span>Attendance.</span><span class="nowrap">Effortless Payroll.</span></h1>
                     <p>Manage your workforce, track attendance in real time, and automate salary calculations, all in one place built for growing teams that value control, accuracy, and simplicity.</p>
                     <div class="landing-cta">
-                                                <button class="button solid landing-button" type="button" data-modal-target="admin-login-modal">
-                            <strong>Employer Login</strong>
+                        <button class="button solid landing-button" type="button" data-modal-target="landing-login-modal">
+                            <strong>Login</strong>
                         </button>
-                                                <button class="button secondary landing-button" type="button" data-modal-target="employee-login-modal">
-                            <strong>Employee Login</strong>
-                        </button>
+                        <a class="button outline landing-button" href="<?= h(BASE_URL) ?>?page=register">
+                            <strong>Register</strong>
+                        </a>
                     </div>
                     <div class="trust-line">Trusted by growing teams to manage attendance and payroll seamlessly.</div>
                 </div>

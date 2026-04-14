@@ -4,27 +4,31 @@ declare(strict_types=1);
 
 function render_admin_dashboard(): void
 {
-    require_role('admin');
+    require_roles(['admin', 'freelancer']);
     $leaveRequests = recent_leave_requests();
     $snapshot = attendance_snapshot_for_date();
     $counts = $snapshot['counts'];
     $details = $snapshot['details'];
     $displayDate = date('d M Y', strtotime($snapshot['date']));
 
-    render_header('Admin Dashboard');
+    $user = current_user();
+    $isFreelancer = ($user['role'] ?? '') === 'freelancer';
+    $label = $isFreelancer ? 'Staff' : 'Employees';
+
+    render_header($isFreelancer ? 'Corporate Dashboard' : 'Admin Dashboard');
     ?>
     <section class="page-title">
         <div>
-            <span class="eyebrow">Admin Dashboard</span>
-            <h1>Admin Overview</h1>
-            <p>Review today&apos;s attendance totals, employee coverage, and half day or leave details for <?= h($displayDate) ?>.</p>
+            <span class="eyebrow"><?= h($isFreelancer ? 'Corporate Dashboard' : 'Admin Dashboard') ?></span>
+            <h1><?= h($isFreelancer ? 'Corporate Overview' : 'Admin Overview') ?></h1>
+            <p>Review today&apos;s attendance totals, <?= h(strtolower($label)) ?> coverage, and half day or leave details for <?= h($displayDate) ?>.</p>
         </div>
     </section>
     <section class="dashboard-grid">
         <div class="metric-card">
             <span class="eyebrow">Team</span>
             <strong><?= employee_count() ?></strong>
-            <span>Total Employees</span>
+            <span>Total <?= h($label) ?></span>
         </div>
         <div class="metric-card">
             <span class="eyebrow">Today</span>
@@ -152,36 +156,46 @@ function render_rules_editor(array $existing = [], ?string $submitLabel = null):
 
 function render_admin_employees(): void
 {
-    require_role('admin');
-    $stage = $_GET['stage'] ?? '';
+    require_roles(['admin', 'freelancer']);
+    $editEmployee = null;
+    $stage = $_GET['stage'] ?? null;
     $pendingEmployee = $_SESSION['pending_employee'] ?? null;
-    $pendingCsv = $_SESSION['pending_csv_import'] ?? [];
-    $editId = (int) ($_GET['edit'] ?? 0);
-    $editEmployee = $editId ? employee_by_id($editId) : null;
+    $pendingCsv = $_SESSION['pending_csv_import'] ?? null;
+
+    if (isset($_GET['edit'])) {
+        $editId = (int) $_GET['edit'];
+        $editEmployee = employee_by_id($editId);
+    }
+
     $allEmployees = employees();
     $leaveRequests = recent_leave_requests();
 
-    render_header('Employees');
+    $user = current_user();
+    $isFreelancer = ($user['role'] ?? '') === 'freelancer';
+    $label = $isFreelancer ? 'Corporate Staff' : 'Employees';
+    $singularLabel = $isFreelancer ? 'Staff Member' : 'Employee';
+
+    render_header($label);
     ?>
     <section class="page-title">
         <div>
-            <span class="eyebrow">Admin - Employees</span>
-            <h1>Employees</h1>
-            <p>Add employees manually, import a CSV batch, update records, and manage only the employees assigned to this administrator.</p>
+            <span class="eyebrow">Admin - <?= h($label) ?></span>
+            <h1><?= h($label) ?></h1>
+            <p>Add <?= h(strtolower($label)) ?> manually, import a CSV batch, update records, and manage only the <?= h(strtolower($label)) ?> assigned to this administrator.</p>
         </div>
         <div class="action-bar">
             <button class="button outline" type="button" data-modal-target="employee-csv-modal">Bulk Import</button>
-            <button class="button solid" type="button" data-modal-target="add-employee-modal">Add Employee</button>
+            <button class="button solid" type="button" data-modal-target="add-employee-modal">Add <?= h($singularLabel) ?></button>
         </div>
     </section>
     <section class="table-wrap">
         <div class="data-toolbar">
             <div class="split">
-                <h2>Your Employees</h2>
+                <h2>Your <?= h($label) ?></h2>
                 <span class="badge" id="admin-employees-count"><?= count($allEmployees) ?> total</span>
             </div>
             <div class="data-toolbar-search">
-                <input type="text" placeholder="Search by Emp ID, name, email, phone, shift, or rule..." data-table-filter="admin-employees-table" data-empty-target="admin-employees-empty" data-count-target="admin-employees-count">
+                <input type="text" placeholder="Search by ID, name, email, phone, shift, or rule..." data-table-filter="admin-employees-table" data-empty-target="admin-employees-empty" data-count-target="admin-employees-count">
             </div>
         </div>
         <table>
@@ -220,7 +234,7 @@ function render_admin_employees(): void
                         <td><?= h(number_format((float) $employee['salary'], 2)) ?></td>
                         <td><?= $rulesMarkup ?></td>
                         <td>
-                                                        <div class="inline-actions">
+                            <div class="inline-actions">
                                 <a class="button ghost small" href="<?= h(BASE_URL) ?>?page=admin_employees&edit=<?= (int) $employee['id'] ?>">Edit</a>
                                 <button class="button outline small" type="button" data-confirm-delete data-user-id="<?= (int) $employee['id'] ?>" data-user-name="<?= h($employee['name']) ?>">Delete</button>
                             </div>
@@ -235,9 +249,10 @@ function render_admin_employees(): void
         <div class="modal open" id="edit-employee-modal" data-open-on-load>
             <div class="modal-card" style="max-width:720px;">
                 <button class="modal-close" type="button" data-close-modal onclick="window.location='<?= h(BASE_URL) ?>?page=admin_employees'">&times;</button>
-                <span class="eyebrow">Edit Employee</span>
+                <span class="eyebrow">Edit <?= h($singularLabel) ?></span>
                 <h2><?= h($editEmployee['name']) ?></h2>
                 <form method="post" class="stack-form">
+                    <?= csrf_field() ?>
                     <input type="hidden" name="action" value="employee_update">
                     <input type="hidden" name="user_id" value="<?= (int) $editEmployee['id'] ?>">
                     <div class="form-grid">
@@ -269,6 +284,7 @@ function render_admin_employees(): void
                     <?= h($pendingEmployee['emp_id']) ?> | <?= h($pendingEmployee['email']) ?>
                 </div>
                 <form method="post" class="stack-form" data-rule-form>
+                    <?= csrf_field() ?>
                     <input type="hidden" name="action" value="employee_manual_submit">
                     <h3>Rules Assignment</h3>
                     <?php render_rules_editor(); ?>
@@ -279,8 +295,9 @@ function render_admin_employees(): void
                     <span class="step-pill active">Step 1 of 2</span>
                     <span class="step-pill">Step 2 of 2</span>
                 </div>
-                <h2>Add Employee</h2>
+                <h2>Add <?= h($singularLabel) ?></h2>
                 <form method="post" class="stack-form" data-validate data-watch-required>
+                    <?= csrf_field() ?>
                     <input type="hidden" name="action" value="employee_manual_next">
                     <div class="form-grid">
                         <div class="field"><label>Emp ID</label><div class="field-row"><input type="text" name="emp_id" required></div><small class="field-error"><span>!</span>Emp ID is required.</small></div>
@@ -303,8 +320,8 @@ function render_admin_employees(): void
                     <span class="step-pill active">Step 2 of 2</span>
                 </div>
                 <span class="eyebrow">Bulk Import</span>
-                <h2>Assign Rules to Imported Employees</h2>
-                <p><?= count($pendingCsv) ?> employee row(s) are ready. Review the sample below, then choose the rules to apply to every imported employee.</p>
+                <h2>Assign Rules to Imported <?= h($label) ?></h2>
+                <p><?= count($pendingCsv) ?> <?= h(strtolower($singularLabel)) ?> row(s) are ready. Review the sample below, then choose the rules to apply to every imported <?= h(strtolower($singularLabel)) ?>.</p>
                 <div class="preview-table">
                     <table>
                         <thead>
@@ -330,10 +347,11 @@ function render_admin_employees(): void
                     </table>
                 </div>
                 <form method="post" class="stack-form" data-rule-form>
+                    <?= csrf_field() ?>
                     <input type="hidden" name="action" value="employee_csv_submit">
                     <h3>Rules Assignment</h3>
                     <?php render_rules_editor(); ?>
-                    <button class="button solid" type="submit" data-rule-submit>Import Employees</button>
+                    <button class="button solid" type="submit" data-rule-submit>Import <?= h($label) ?></button>
                 </form>
             <?php else: ?>
                 <div class="steps">
@@ -341,12 +359,13 @@ function render_admin_employees(): void
                     <span class="step-pill">Step 2 of 2</span>
                 </div>
                 <span class="eyebrow">Bulk Import</span>
-                <h2>Import Employees from CSV</h2>
+                <h2>Import <?= h($label) ?> from CSV</h2>
                 <form method="post" enctype="multipart/form-data" class="stack-form" data-validate>
+                    <?= csrf_field() ?>
                     <input type="hidden" name="action" value="employee_csv_upload">
                     <label class="upload-drop">
-                        <strong>Select employee CSV</strong>
-                        <p>Upload a CSV with employee details. Supported columns include Emp ID, Name, Email, Phone, and Salary. Missing Emp ID or Name can be generated automatically.</p>
+                        <strong>Select <?= h(strtolower($singularLabel)) ?> CSV</strong>
+                        <p>Upload a CSV with <?= h(strtolower($singularLabel)) ?> details. Supported columns include ID, Name, Email, Phone, and Salary. Missing ID or Name can be generated automatically.</p>
                         <input type="file" name="csv_file" accept=".csv" required>
                     </label>
                     <button class="button solid" type="submit">Upload CSV</button>
@@ -359,16 +378,16 @@ function render_admin_employees(): void
         <div class="modal-card" style="max-width:560px;">
             <button class="modal-close" type="button" data-close-modal>&times;</button>
             <span class="eyebrow">Confirm Delete</span>
-            <h2>Delete Employee</h2>
-            <p>This will permanently remove <strong data-delete-name>employee</strong> and related attendance records.</p>
+            <h2>Delete <?= h($singularLabel) ?></h2>
+            <p>This will permanently remove <strong data-delete-name><?= h(strtolower($singularLabel)) ?></strong> and related attendance records.</p>
             <form method="post" class="inline-actions">
+                <?= csrf_field() ?>
                 <input type="hidden" name="action" value="employee_delete">
                 <input type="hidden" name="user_id" value="">
                 <button class="button outline" type="button" data-close-modal>Cancel</button>
-                <button class="button secondary" type="submit">Delete Employee</button>
+                <button class="button secondary" type="submit">Delete <?= h($singularLabel) ?></button>
             </form>
         </div>
-    </div>
     </div>
 
     <div class="spacer"></div>
@@ -405,6 +424,149 @@ function render_admin_employees(): void
     render_footer();
 }
 
+function render_admin_projects(): void
+{
+    require_role('admin');
+
+    $allProjects = projects();
+    $stage = (string) ($_GET['stage'] ?? '');
+    $editProject = isset($_GET['edit']) ? project_by_id((int) $_GET['edit']) : null;
+    $projectDraft = $_SESSION['project_form'] ?? null;
+    unset($_SESSION['project_form']);
+
+    $formValues = project_form_defaults();
+    if ($editProject) {
+        $formValues = array_merge($formValues, $editProject);
+    }
+    if (is_array($projectDraft)) {
+        $formValues = array_merge($formValues, $projectDraft);
+    }
+
+    $isEditing = $editProject !== null;
+    $shouldOpenModal = $stage === 'create' || $isEditing;
+    $modalTitle = $isEditing ? 'Edit Project' : 'Add Project';
+    $submitLabel = $isEditing ? 'Save Project' : 'Add Project';
+
+    render_header('Projects');
+    ?>
+    <section class="page-title">
+        <div>
+            <span class="eyebrow">Admin - Projects</span>
+            <h1>Projects</h1>
+            <p>Create and manage project colleges, locations, durations, and session types from one place.</p>
+        </div>
+        <div class="action-bar">
+            <button class="button solid" type="button" data-modal-target="project-modal">Add Project</button>
+        </div>
+    </section>
+
+    <section class="table-wrap">
+        <div class="data-toolbar">
+            <div class="split">
+                <h2>All Projects</h2>
+                <span class="badge"><?= count($allProjects) ?> total</span>
+            </div>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Project Name</th>
+                    <th>College Name</th>
+                    <th>Location</th>
+                    <th>Total Days</th>
+                    <th>Session Type</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($allProjects as $project): ?>
+                    <?php $statusLabel = !empty($project['is_active']) ? 'Active' : 'Inactive'; ?>
+                    <tr>
+                        <td><?= h((string) $project['project_name']) ?></td>
+                        <td><?= h((string) $project['college_name']) ?></td>
+                        <td><?= h((string) $project['location']) ?></td>
+                        <td><?= (int) $project['total_days'] ?></td>
+                        <td><?= h(project_session_label((string) $project['session_type'])) ?></td>
+                        <td><span class="status-pill status-<?= h($statusLabel) ?>"><?= h($statusLabel) ?></span></td>
+                        <td>
+                            <div class="inline-actions">
+                                <a class="button ghost small" href="<?= h(BASE_URL) ?>?page=admin_projects&edit=<?= (int) $project['id'] ?>">Edit</a>
+                                <form method="post">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="action" value="project_toggle_active">
+                                    <input type="hidden" name="project_id" value="<?= (int) $project['id'] ?>">
+                                    <button class="button outline small" type="submit"><?= !empty($project['is_active']) ? 'Deactivate' : 'Activate' ?></button>
+                                </form>
+                                <form method="post">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="action" value="project_delete">
+                                    <input type="hidden" name="project_id" value="<?= (int) $project['id'] ?>">
+                                    <button class="button secondary small" type="submit" onclick="return confirm('Delete this project?');">Delete</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php if (!$allProjects): ?>
+            <div class="list-item muted table-empty-state">No projects found. Add your first project to get started.</div>
+        <?php endif; ?>
+    </section>
+
+    <div class="modal <?= $shouldOpenModal ? 'open' : '' ?>" id="project-modal" <?= $shouldOpenModal ? 'data-open-on-load' : '' ?>>
+        <div class="modal-card project-modal-card">
+            <?php if ($isEditing): ?>
+                <button class="modal-close" type="button" data-close-modal onclick="window.location='<?= h(BASE_URL) ?>?page=admin_projects'">&times;</button>
+            <?php else: ?>
+                <button class="modal-close" type="button" data-close-modal>&times;</button>
+            <?php endif; ?>
+            <span class="eyebrow">Project Setup</span>
+            <h2><?= h($modalTitle) ?></h2>
+            <form method="post" class="stack-form" data-validate>
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="project_save">
+                <input type="hidden" name="project_id" value="<?= (int) ($formValues['id'] ?? 0) ?>">
+                <div class="form-grid">
+                    <label>Project Name
+                        <input type="text" name="project_name" value="<?= h((string) ($formValues['project_name'] ?? '')) ?>" placeholder="Summer Skill Development Program" required>
+                    </label>
+                    <label>College Name
+                        <input type="text" name="college_name" value="<?= h((string) ($formValues['college_name'] ?? '')) ?>" placeholder="ABC Engineering College" required>
+                    </label>
+                    <label>Location
+                        <input type="text" name="location" value="<?= h((string) ($formValues['location'] ?? '')) ?>" placeholder="Ahmedabad, Gujarat" required>
+                    </label>
+                    <label>Total Days
+                        <input type="number" min="1" name="total_days" value="<?= h((string) ($formValues['total_days'] ?? 1)) ?>" required>
+                    </label>
+                    <label>Session Type
+                        <select name="session_type" required>
+                            <?php foreach (project_session_types() as $sessionType): ?>
+                                <option value="<?= h($sessionType) ?>" <?= (string) ($formValues['session_type'] ?? '') === $sessionType ? 'selected' : '' ?>><?= h(project_session_label($sessionType)) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </label>
+                    <label class="project-checkbox-field">Active
+                        <input type="checkbox" name="is_active" value="1" <?= !empty($formValues['is_active']) ? 'checked' : '' ?>>
+                    </label>
+                </div>
+                <div class="inline-actions project-modal-actions">
+                    <?php if ($isEditing): ?>
+                        <a class="button outline" href="<?= h(BASE_URL) ?>?page=admin_projects">Cancel</a>
+                    <?php else: ?>
+                        <button class="button outline" type="button" data-close-modal>Cancel</button>
+                    <?php endif; ?>
+                    <button class="button solid" type="submit"><?= h($submitLabel) ?></button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <?php
+    render_footer();
+}
+
 function render_admin_rules(): void 
 {
     require_role('admin');
@@ -420,6 +582,7 @@ function render_admin_rules(): void
     </section>
     <section class="section-block scroll-panel">
         <form method="post" class="stack-form" data-rule-form data-employee-form>
+            <?= csrf_field() ?>
             <input type="hidden" name="action" value="apply_rules">
             <div class="employee-picker">
                 <div class="split">
@@ -574,12 +737,14 @@ function render_admin_shift(): void
         <p class="hint">Manual shifts used here: 9:00 AM to 6:00 PM and 10:30 AM to 8:30 PM. You can post either one directly or enter a custom time below.</p>
         <div class="inline-actions">
             <form method="post">
+                <?= csrf_field() ?>
                 <input type="hidden" name="action" value="admin_add_shift_timing">
                 <input type="hidden" name="start_time" value="09:00">
                 <input type="hidden" name="end_time" value="18:00">
                 <button class="button outline" type="submit">Add 9:00 AM - 6:00 PM</button>
             </form>
             <form method="post">
+                <?= csrf_field() ?>
                 <input type="hidden" name="action" value="admin_add_shift_timing">
                 <input type="hidden" name="start_time" value="10:30">
                 <input type="hidden" name="end_time" value="20:30">
@@ -588,6 +753,7 @@ function render_admin_shift(): void
         </div>
         <div class="spacer"></div>
         <form method="post" class="stack-form" data-validate>
+            <?= csrf_field() ?>
             <input type="hidden" name="action" value="admin_add_shift_timing">
             <div class="form-grid">
                 <label>Start Time<input type="time" name="start_time" required></label>
@@ -620,6 +786,7 @@ function render_admin_shift(): void
                         <td><?= h(date('d M Y h:i A', strtotime((string) $timing['created_at']))) ?></td>
                         <td>
                             <form method="post">
+                                <?= csrf_field() ?>
                                 <input type="hidden" name="action" value="admin_delete_shift_timing">
                                 <input type="hidden" name="shift_id" value="<?= (int) $timing['id'] ?>">
                                 <button class="button outline small" type="submit">Delete</button>
@@ -639,7 +806,7 @@ function render_admin_shift(): void
 
 function render_admin_attendance(): void
 {
-    require_role('admin');
+    require_roles(['admin', 'freelancer']);
     $allEmployees = employees();
     $fallbackEmployee = $allEmployees[0] ?? null;
     $selectedId = (int) ($_GET['employee_id'] ?? ($fallbackEmployee['id'] ?? 0));
@@ -684,6 +851,7 @@ function render_admin_attendance(): void
             <h2>Bulk Import Attendance</h2>
             <p>Upload the daily performance report from Excel or CSV. The importer reads employee rows using Empcode or Name, along with INTime, OUTTime, Status, and Remark, to mark attendance.</p>
             <form method="post" enctype="multipart/form-data" class="stack-form" data-validate>
+                <?= csrf_field() ?>
                 <input type="hidden" name="action" value="admin_attendance_csv_upload">
                 <label class="upload-drop">
                     <strong>Select attendance file</strong>
@@ -783,23 +951,6 @@ function render_admin_attendance(): void
     render_footer();
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 function render_admin_profile_settings(): void
 {
     $admin = require_role('admin');
@@ -849,6 +1000,7 @@ function render_admin_profile_settings(): void
         <span class="eyebrow">Update Details</span>
         <h2>Account Information</h2>
         <form method="post" class="stack-form" data-validate>
+            <?= csrf_field() ?>
             <input type="hidden" name="action" value="admin_profile_update">
             <div class="field">
                 <label>Name</label>
@@ -874,6 +1026,7 @@ function render_admin_profile_settings(): void
         <span class="eyebrow">Security</span>
         <h2>Change Password</h2>
         <form method="post" class="stack-form" data-validate>
+            <?= csrf_field() ?>
             <input type="hidden" name="action" value="admin_change_password">
             <div class="field">
                 <label>Current Password</label>
@@ -886,15 +1039,15 @@ function render_admin_profile_settings(): void
             <div class="field">
                 <label>New Password</label>
                 <div class="field-row">
-                    <input id="admin-new-password" type="password" name="new_password" minlength="6" placeholder="Minimum 6 characters" required>
+                    <input id="admin-new-password" type="password" name="new_password" minlength="8" placeholder="Minimum 8 characters with letters and numbers" required>
                     <button class="password-toggle" type="button" data-password-toggle="admin-new-password">Show</button>
                 </div>
-                <small class="field-error"><span>!</span>New password must be at least 6 characters.</small>
+                <small class="field-error"><span>!</span>Password must be at least 8 characters and include a letter and number.</small>
             </div>
             <div class="field">
                 <label>Confirm Password</label>
                 <div class="field-row">
-                    <input id="admin-confirm-password" type="password" name="confirm_password" minlength="6" placeholder="Repeat new password" required>
+                    <input id="admin-confirm-password" type="password" name="confirm_password" minlength="8" placeholder="Repeat new password" required>
                     <button class="password-toggle" type="button" data-password-toggle="admin-confirm-password">Show</button>
                 </div>
                 <small class="field-error"><span>!</span>Please confirm the new password.</small>
@@ -902,6 +1055,167 @@ function render_admin_profile_settings(): void
             <button class="button solid" type="submit">Update Password</button>
         </form>
     </section>
+    <?php
+    render_footer();
+
+function render_admin_reports(): void
+{
+    require_role('admin');
+
+    $filters = [
+        'employee_ids' => $_POST['employee_ids'] ?? [],
+        'project_ids' => $_POST['project_ids'] ?? [],
+        'from_date' => $_POST['from_date'] ?? date('Y-m-01'),
+        'to_date' => $_POST['to_date'] ?? date('Y-m-d'),
+    ];
+
+    $reportData = get_attendance_report_data($filters);
+    $allEmployees = employees();
+    $allProjects = projects();
+
+    render_header('Attendance Reports', 'admin-reports-page');
+    ?>
+    <section class="page-title">
+        <div>
+            <span class="eyebrow">Admin - Reports</span>
+            <h1>Attendance & Payroll Reports</h1>
+            <p>Filter by employees, projects, and date range to view detailed attendance and incentive data.</p>
+        </div>
+    </section>
+
+    <section class="section-block reports-filters">
+        <form method="post" id="reports-filter-form" class="stack-form">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="filter_reports">
+            
+            <div class="form-grid">
+                <!-- Employee Multi-Select -->
+                <div class="field">
+                    <label>Employees</label>
+                    <div class="multi-select-picker">
+                        <input type="text" placeholder="Search employees..." data-multi-filter="employee-report-options">
+                        <div class="multi-options scroll-panel" id="employee-report-options">
+                            <?php foreach ($allEmployees as $emp): ?>
+                                <label class="multi-option">
+                                    <input type="checkbox" name="employee_ids[]" value="<?= (int)$emp['id'] ?>" <?= in_array((int)$emp['id'], array_map('intval', $filters['employee_ids'])) ? 'checked' : '' ?>>
+                                    <span><?= h($emp['name']) ?> (<?= h($emp['emp_id']) ?>)</span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Project Multi-Select -->
+                <div class="field">
+                    <label>Projects</label>
+                    <div class="multi-select-picker">
+                        <input type="text" placeholder="Search projects..." data-multi-filter="project-report-options">
+                        <div class="multi-options scroll-panel" id="project-report-options">
+                            <?php foreach ($allProjects as $proj): ?>
+                                <label class="multi-option">
+                                    <input type="checkbox" name="project_ids[]" value="<?= (int)$proj['id'] ?>" <?= in_array((int)$proj['id'], array_map('intval', $filters['project_ids'])) ? 'checked' : '' ?>>
+                                    <span><?= h($proj['project_name']) ?></span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-grid" style="margin-top: 1rem;">
+                <div class="field">
+                    <label>From Date</label>
+                    <input type="date" name="from_date" value="<?= h($filters['from_date']) ?>" required>
+                </div>
+                <div class="field">
+                    <label>To Date</label>
+                    <input type="date" name="to_date" value="<?= h($filters['to_date']) ?>" required>
+                </div>
+                <div class="field align-end">
+                    <button class="button solid" type="submit">Apply Filters</button>
+                </div>
+            </div>
+        </form>
+    </section>
+
+    <div class="spacer"></div>
+
+    <section class="table-wrap">
+        <div class="data-toolbar">
+            <div class="split">
+                <h2>Report Results</h2>
+                <div class="action-bar report-actions">
+                    <form method="post" style="display:inline-block;">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="action" value="export_reports_csv">
+                        <?php foreach($filters['employee_ids'] as $id): ?><input type="hidden" name="employee_ids[]" value="<?= (int)$id ?>"><?php endforeach; ?>
+                        <?php foreach($filters['project_ids'] as $id): ?><input type="hidden" name="project_ids[]" value="<?= (int)$id ?>"><?php endforeach; ?>
+                        <input type="hidden" name="from_date" value="<?= h($filters['from_date']) ?>">
+                        <input type="hidden" name="to_date" value="<?= h($filters['to_date']) ?>">
+                        <button class="button outline small" type="submit">Download CSV</button>
+                    </form>
+                    <form method="post" style="display:inline-block;">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="action" value="export_reports_pdf">
+                        <?php foreach($filters['employee_ids'] as $id): ?><input type="hidden" name="employee_ids[]" value="<?= (int)$id ?>"><?php endforeach; ?>
+                        <?php foreach($filters['project_ids'] as $id): ?><input type="hidden" name="project_ids[]" value="<?= (int)$id ?>"><?php endforeach; ?>
+                        <input type="hidden" name="from_date" value="<?= h($filters['from_date']) ?>">
+                        <input type="hidden" name="to_date" value="<?= h($filters['to_date']) ?>">
+                        <button class="button outline small" type="submit">Download PDF</button>
+                    </form>
+                    <button class="button outline small" type="button" onclick="window.print();">Print</button>
+                </div>
+            </div>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Employee Name</th>
+                    <th>Project Name</th>
+                    <th>Session Type</th>
+                    <th>Attendance Status</th>
+                    <th>Incentive Earned</th>
+                    <th>Reimbursement Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php if ($reportData): ?>
+                    <?php foreach ($reportData as $row): ?>
+                        <tr>
+                            <td><?= h(date('d M Y', strtotime((string)$row['date']))) ?></td>
+                            <td><?= h((string)$row['employee_name']) ?></td>
+                            <td><?= h((string)($row['project_name'] ?: '-')) ?></td>
+                            <td><?= h(project_session_label((string)$row['session_type'])) ?></td>
+                            <td>
+                                <?php $statusClass = str_replace(' ', '-', (string)$row['attendance_status']); ?>
+                                <span class="status-pill status-<?= h($statusClass) ?>"><?= h((string)$row['attendance_status']) ?></span>
+                            </td>
+                            <td>Rs <?= number_format((float)($row['incentive_earned'] ?? 0), 2) ?></td>
+                            <td>Rs <?= number_format((float)($row['reimbursement_amount'] ?? 0), 2) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <tr>
+                        <td colspan="7" class="muted center">No records found for the selected filters.</td>
+                    </tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </section>
+
+    <style>
+        .multi-select-picker { border: 1px solid #ddd; padding: 10px; border-radius: 8px; background: #fff; }
+        .multi-options { max-height: 150px; margin-top: 10px; border-top: 1px solid #eee; padding-top: 5px; }
+        .multi-option { display: block; padding: 5px 0; cursor: pointer; }
+        .multi-option:hover { background: #f9f9f9; }
+        @media print {
+            .admin-sidebar, .reports-filters, .action-bar, .eyebrow, .spacer, .flash-stack { display: none !important; }
+            .admin-main { margin: 0 !important; padding: 0 !important; width: 100% !important; }
+            table { font-size: 10px !important; }
+            .status-pill { border: none !important; padding: 0 !important; }
+        }
+    </style>
     <?php
     render_footer();
 }

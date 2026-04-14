@@ -1,8 +1,13 @@
 const modal = document.getElementById('attendance-modal');
         const modalContent = document.getElementById('modal-content');
+        const csrfToken = window.VTRACO_CSRF_TOKEN || '';
 
         function escapeHtml(value) {
             return String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
+        }
+
+        function csrfInputMarkup() {
+            return csrfToken ? `<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">` : '';
         }
 
         function openModalById(id) {
@@ -44,6 +49,7 @@ const modal = document.getElementById('attendance-modal');
                     <section class="attendance-modal-section">
                         <h3>Update Attendance</h3>
                         <form method="post" class="stack-form">
+                            ${csrfInputMarkup()}
                             <input type="hidden" name="action" value="admin_set_status">
                             <input type="hidden" name="employee_id" value="${payload.employee_id}">
                             <input type="hidden" name="attend_date" value="${payload.date}">
@@ -122,6 +128,7 @@ const modal = document.getElementById('attendance-modal');
                                     <h3>Manual Punch In ${pairNumber}</h3>
                                     <p>Upload the photo for Manual Punch In ${pairNumber}.</p>
                                     <form method="post" enctype="multipart/form-data" class="stack-form">
+                                        ${csrfInputMarkup()}
                                         <input type="hidden" name="action" value="employee_manual_in">
                                         <input type="hidden" name="attend_date" value="${payload.date}">
                                         <input type="hidden" name="slot_index" value="${pairNumber}">
@@ -139,6 +146,7 @@ const modal = document.getElementById('attendance-modal');
                                     <h3>Manual Punch Out ${pairNumber}</h3>
                                     <p>${escapeHtml(manualOutNote)}</p>
                                     <form method="post" class="stack-form">
+                                        ${csrfInputMarkup()}
                                         <input type="hidden" name="action" value="employee_manual_out">
                                         <input type="hidden" name="attend_date" value="${payload.date}">
                                         <input type="hidden" name="slot_index" value="${pairNumber}">
@@ -199,12 +207,14 @@ const modal = document.getElementById('attendance-modal');
                             <p>Use biometric actions only if they are enabled by the admin.</p>
                             <div class="inline-actions">
                                 <form method="post">
+                                    ${csrfInputMarkup()}
                                     <input type="hidden" name="action" value="employee_biometric">
                                     <input type="hidden" name="attend_date" value="${payload.date}">
                                     <input type="hidden" name="stamp_type" value="in">
                                     <button class="button ghost small" type="submit" ${!payload.rule_bio_in ? 'disabled' : ''}>Biometric In</button>
                                 </form>
                                 <form method="post">
+                                    ${csrfInputMarkup()}
                                     <input type="hidden" name="action" value="employee_biometric">
                                     <input type="hidden" name="attend_date" value="${payload.date}">
                                     <input type="hidden" name="stamp_type" value="out">
@@ -217,6 +227,7 @@ const modal = document.getElementById('attendance-modal');
                     <div class="section-block">
                         <div class="split"><h3>Request for Leave</h3><button class="button outline small" type="button" data-toggle-leave>Request for Leave</button></div>
                         <form method="post" class="stack-form hidden" data-leave-form>
+                            ${csrfInputMarkup()}
                             <input type="hidden" name="action" value="employee_leave">
                             <input type="hidden" name="attend_date" value="${payload.date}">
                             <label>Leave Reason<textarea name="leave_reason" required>${escapeHtml(payload.leave_reason || '')}</textarea></label>
@@ -633,7 +644,13 @@ const modal = document.getElementById('attendance-modal');
                 reader.readAsDataURL(file);
             });
         }
-                document.querySelectorAll('[data-open-on-load]').forEach(element => openModalById(element.id));
+        document.querySelectorAll('[data-open-on-load]').forEach(element => openModalById(element.id));
+        document.querySelectorAll('form[method="post"]').forEach(form => {
+            if (!csrfToken || form.querySelector('input[name="_csrf"]')) {
+                return;
+            }
+            form.insertAdjacentHTML('afterbegin', csrfInputMarkup());
+        });
         document.querySelectorAll('form').forEach(form => {
             form.addEventListener('submit', () => {
                 const submit = form.querySelector('button[type="submit"]');

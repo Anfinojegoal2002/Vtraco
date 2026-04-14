@@ -286,16 +286,16 @@ function salary_for_month(float $salary, array $monthAttendance): float
     $daysInMonth = max(1, count($monthAttendance));
     return (working_days_total($monthAttendance) * $salary) / $daysInMonth;
 }
-
 function recent_leave_requests(int $limit = 10): array
 {
     $limit = max(1, $limit);
     $adminId = current_admin_id();
+    $role = current_manager_target_role();
     $sql = 'SELECT ar.attend_date, ar.leave_reason, ar.updated_at, u.id AS employee_id, u.emp_id, u.name, u.email
             FROM attendance_records ar
             JOIN users u ON u.id = ar.user_id
-            WHERE u.role = "employee" AND ar.status = "Leave"';
-    $params = [];
+            WHERE u.role = :role AND ar.status = "Leave"';
+    $params = ['role' => $role];
 
     if ($adminId !== null) {
         $sql .= ' AND u.admin_id = :admin_id';
@@ -307,6 +307,7 @@ function recent_leave_requests(int $limit = 10): array
     $stmt->execute($params);
     return $stmt->fetchAll();
 }
+
 function attendance_snapshot_for_date(?string $date = null): array
 {
     $date = $date && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) ? $date : date('Y-m-d');
@@ -1043,15 +1044,45 @@ function import_attendance_report_csv(string $path, ?string $overrideDate = null
         'unmatched' => array_values(array_unique($unmatched)),
     ];
 }
+
+function validate_attendance_report_upload(array $file): void
+{
+    validate_uploaded_file($file, ['xlsx', 'xls', 'csv', 'txt'], 8 * 1024 * 1024, 'attendance file');
+
+    $extension = uploaded_file_extension($file);
+    $path = (string) ($file['tmp_name'] ?? '');
+    $originalName = (string) ($file['name'] ?? '');
+
+    if ($extension === 'xlsx' && !attendance_is_xlsx_file($path, $originalName)) {
+        throw new RuntimeException('The uploaded attendance file does not look like a valid .xlsx workbook.');
+    }
+
+    if ($extension === 'xls' && !attendance_is_html_table_file($path, $originalName)) {
+        throw new RuntimeException('Legacy .xls imports must be HTML-style table exports. Save binary .xls files as .xlsx or .csv first.');
+    }
+}
+
+function validate_punch_photo_upload(array $file): void
+{
+    validate_uploaded_file($file, ['jpg', 'jpeg', 'png', 'webp'], 4 * 1024 * 1024, 'punch photo');
+
+    $mime = uploaded_file_mime_type($file);
+    if (!in_array($mime, ['image/jpeg', 'image/png', 'image/webp'], true)) {
+        throw new RuntimeException('Punch photo must be a JPG, PNG, or WebP image.');
+    }
+
+    if (@getimagesize((string) ($file['tmp_name'] ?? '')) === false) {
+        throw new RuntimeException('Punch photo upload is not a valid image.');
+    }
+}
+
 function handle_upload(array $file): string
 {
-    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-        throw new RuntimeException('Punch photo upload failed.');
-    }
+    validate_punch_photo_upload($file);
     if (!is_dir(UPLOAD_PATH)) {
         mkdir(UPLOAD_PATH, 0777, true);
     }
-    $ext = pathinfo((string) ($file['name'] ?? 'upload.jpg'), PATHINFO_EXTENSION) ?: 'jpg';
+    $ext = uploaded_file_extension($file) ?: 'jpg';
     $target = UPLOAD_PATH . '/' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . strtolower($ext);
     if (!move_uploaded_file((string) $file['tmp_name'], $target)) {
         throw new RuntimeException('Unable to save punch photo.');

@@ -17,6 +17,9 @@ function render_page(string $page): void
         case 'admin_employees':
             render_admin_employees();
             break;
+        case 'admin_projects':
+            render_admin_projects();
+            break;
         case 'admin_rules':
             render_admin_rules();
             break;
@@ -29,8 +32,14 @@ function render_page(string $page): void
         case 'admin_profile_settings':
             render_admin_profile_settings();
             break;
+        case 'admin_reports':
+            render_admin_reports();
+            break;
         case 'employee_attendance':
             render_employee_attendance();
+            break;
+        case 'member_dashboard':
+            render_member_dashboard();
             break;
         default:
             render_landing();
@@ -42,10 +51,11 @@ function render_header(string $title, string $pageClass = ''): void
 {
     $user = current_user();
     $page = $_GET['page'] ?? 'landing';
-    $isAdminShell = $user && $user['role'] === 'admin';
+    $isAdminShell = $user && in_array($user['role'], ['admin', 'freelancer'], true);
     $isEmployeeShell = $user && $user['role'] === 'employee';
     $isSidebarShell = $isAdminShell || $isEmployeeShell;
     $isLandingPage = !$user && $page === 'landing';
+    $showLoginChooser = !$user && in_array($page, ['landing', 'register'], true);
     ?>
     <!doctype html>
     <html lang="en">
@@ -78,30 +88,40 @@ function render_header(string $title, string $pageClass = ''): void
                 </div>
                 <nav class="sidebar-nav">
                     <?php if ($isAdminShell): ?>
+                        <?php if ($user['role'] === 'freelancer'): ?>
+                        <span class="sidebar-section-title">Employee</span>
+                        <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">E</span><span>Employees</span></a>
+                        <span class="sidebar-section-title">Attendance</span>
+                        <a class="sidebar-link <?= $page === 'admin_attendance' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_attendance"><span class="nav-icon">A</span><span>Attendance</span></a>
+                        <?php else: ?>
                         <a class="sidebar-link <?= $page === 'admin_dashboard' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_dashboard"><span class="nav-icon">D</span><span>Dashboard</span></a>
                         <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">E</span><span>Employees</span></a>
+                        <a class="sidebar-link <?= $page === 'admin_projects' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_projects"><span class="nav-icon">P</span><span>Projects</span></a>
                         <a class="sidebar-link <?= $page === 'admin_attendance' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_attendance"><span class="nav-icon">A</span><span>Attendance</span></a>
-                        <a class="sidebar-link <?= $page === 'admin_shift' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_shift"><span class="nav-icon">S</span><span>Shift</span></a>
-                        <a class="sidebar-link <?= $page === 'admin_rules' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_rules"><span class="nav-icon">R</span><span>Rules</span></a>
+                        <a class="sidebar-link <?= $page === 'admin_reports' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_reports"><span class="nav-icon">R</span><span>Reports</span></a>
+                        <a class="sidebar-link <?= $page === 'admin_rules' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_rules"><span class="nav-icon">S</span><span>Settings</span></a>
+                        <?php endif; ?>
                     <?php else: ?>
+                        <span class="sidebar-section-title">Employee</span>
+                        <button class="sidebar-link sidebar-link-button" type="button" data-modal-target="employee-profile-settings-modal">
+                            <span class="nav-icon">E</span>
+                            <span>Profile Settings</span>
+                        </button>
+                        <span class="sidebar-section-title">Attendance</span>
                         <a class="sidebar-link <?= $page === 'employee_attendance' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_attendance"><span class="nav-icon">M</span><span>My Attendance</span></a>
                     <?php endif; ?>
                 </nav>
+                <?php if ($isAdminShell && $user['role'] === 'admin'): ?>
                 <div class="sidebar-settings-wrap">
-                    <?php if ($isAdminShell): ?>
                         <button class="sidebar-link sidebar-link-button" type="button" data-modal-target="admin-profile-settings-modal">
                             <span class="nav-icon">P</span>
                             <span>Profile Settings</span>
                         </button>
-                    <?php else: ?>
-                        <button class="sidebar-link sidebar-link-button" type="button" data-modal-target="employee-profile-settings-modal">
-                            <span class="nav-icon">S</span>
-                            <span>Profile Settings</span>
-                        </button>
-                    <?php endif; ?>
                 </div>
+                <?php endif; ?>
                 <div class="sidebar-actions">
                     <form method="post">
+                        <?= csrf_field() ?>
                         <input type="hidden" name="action" value="logout">
                         <button class="button ghost <?= $isAdminShell ? 'admin-logout-button' : 'employee-logout-button' ?>" type="submit" style="width:100%;">Logout</button>
                     </form>
@@ -135,16 +155,20 @@ function render_header(string $title, string $pageClass = ''): void
                 <nav class="topbar-nav">
                     <?php if ($user): ?>
                         <form method="post">
+                            <?= csrf_field() ?>
                             <input type="hidden" name="action" value="logout">
                             <button class="button ghost" type="submit">Logout</button>
                         </form>
                     <?php else: ?>
-                        <?php if ($isLandingPage): ?>
+                        <?php if (!$isLandingPage): ?>
+                            <a class="button ghost" href="<?= h(BASE_URL) ?>">Home</a>
+                        <?php endif; ?>
+                        <?php if ($showLoginChooser): ?>
                             <button class="button outline" type="button" data-modal-target="landing-login-modal">Login</button>
                         <?php else: ?>
-                            <a class="button outline" href="<?= h(BASE_URL) ?>?page=login&role=admin">Login</a>
+                            <a class="button outline" href="<?= h(BASE_URL) ?>?page=login">Login</a>
                         <?php endif; ?>
-                        <a class="button solid" href="<?= h(BASE_URL) ?>?page=register">Admin Register</a>
+                        <a class="button solid" href="<?= h(BASE_URL) ?>?page=register">Register</a>
                     <?php endif; ?>
                 </nav>
             </header>
@@ -156,15 +180,39 @@ function render_header(string $title, string $pageClass = ''): void
                 </div>
             <?php endif; ?>
             <main class="content <?= h($pageClass) ?>">
-        <?php endif; ?>
+            <?php $flashItems = flashes(); if ($flashItems): ?>
+                <div class="flash-stack">
+                    <?php foreach ($flashItems as $flash): ?>
+                        <div class="flash <?= h($flash['type']) ?>"><?= h($flash['message']) ?></div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+            <main class="content <?= h($pageClass) ?>"><?php endif; ?>
     <?php
 }
 
 function render_landing_auth_modal(string $role, bool $isOpen): void
 {
-    $title = $role === 'admin' ? 'Employer Login' : 'Employee Login';
-    $eyebrow = $role === 'admin' ? 'Admin Access' : 'Employee Access';
-    $iconLabel = $role === 'admin' ? 'A' : 'E';
+    switch ($role) {
+        case 'admin':
+            $title = 'Admin Login'; $eyebrow = 'Admin Access'; $iconLabel = 'A';
+            $desc = 'Sign in to continue to your management workspace.';
+            break;
+        case 'external_vendor':
+            $title = 'External Vendor Login'; $eyebrow = 'Vendor Access'; $iconLabel = 'V';
+            $desc = 'Sign in with your self-registered vendor account.';
+            break;
+        case 'freelancer':
+            $title = 'Corporate Employee Login'; $eyebrow = 'Corporate Employee Access'; $iconLabel = 'F';
+            $desc = 'Freelancers can sign in with their self-registered account.';
+            break;
+        case 'employee':
+        default:
+            $title = 'Employee Login'; $eyebrow = 'Employee Access'; $iconLabel = 'E';
+            $desc = 'Employees cannot self-register. Use the email and password sent to you by your admin via email.';
+            break;
+    }
+
     $modalId = $role . '-login-modal';
     $passwordId = $role . '-modal-password';
     ?>
@@ -173,17 +221,14 @@ function render_landing_auth_modal(string $role, bool $isOpen): void
             <button class="modal-close" type="button" data-close-modal>&times;</button>
             <div class="landing-auth-shell">
                 <div class="landing-auth-copy">
-                    <span class="landing-login-icon <?= $role === 'employee' ? 'employee' : '' ?>"><?= h($iconLabel) ?></span>
+                    <span class="landing-login-icon <?= in_array($role, ['employee', 'freelancer']) ? 'employee' : '' ?>"><?= h($iconLabel) ?></span>
                     <span class="eyebrow"><?= h($eyebrow) ?></span>
                     <h2><?= h($title) ?></h2>
-                    <?php if ($role === 'admin'): ?>
-                    <p>Sign in to continue to your management workspace.</p>
-                    <?php else: ?>
-                    <p>Employees cannot self-register. Use the email and password sent to you by your admin via email.</p>
-                    <?php endif; ?>
+                    <p><?= h($desc) ?></p>
                     <button class="button ghost small" type="button" data-switch-modal-target="landing-login-modal">Back</button>
                 </div>
                 <form method="post" class="stack-form landing-auth-form" data-validate>
+                    <?= csrf_field() ?>
                     <input type="hidden" name="action" value="login">
                     <input type="hidden" name="role" value="<?= h($role) ?>">
                     <input type="hidden" name="return_page" value="landing">
@@ -203,10 +248,10 @@ function render_landing_auth_modal(string $role, bool $isOpen): void
                     <button class="button solid" type="submit"><?= h($title) ?></button>
                     <?php if ($role === 'employee'): ?>
                         <button class="button ghost" type="submit" name="forgot_password" value="1">Forgot your password?</button>
-                        <p class="hint">Enter your employee email above and we will send a fresh password to that inbox.</p>
+                        <p class="hint">Enter your employee email above and we will send or log a temporary password for that account.</p>
                     <?php endif; ?>
-                    <?php if ($role === 'admin'): ?>
-                        <p class="hint">Need an account? <a href="<?= h(BASE_URL) ?>?page=register">Register admin</a></p>
+                    <?php if (in_array($role, ['admin', 'external_vendor', 'freelancer'])): ?>
+                        <p class="hint">Need an account? <a href="<?= h(BASE_URL) ?>?page=register">Open registration</a></p>
                     <?php endif; ?>
                 </form>
             </div>
@@ -267,6 +312,7 @@ function render_employee_password_modal(): void
             <h2>Change Password</h2>
             <p>Update your sign-in password directly from the sidebar.</p>
             <form method="post" class="stack-form" data-validate>
+                <?= csrf_field() ?>
                 <input type="hidden" name="action" value="employee_change_password">
                 <div class="field">
                     <label>Current Password</label>
@@ -279,15 +325,15 @@ function render_employee_password_modal(): void
                 <div class="field">
                     <label>New Password</label>
                     <div class="field-row">
-                        <input id="employee-new-password" type="password" name="new_password" minlength="6" placeholder="Minimum 6 characters" required>
+                        <input id="employee-new-password" type="password" name="new_password" minlength="8" placeholder="Minimum 8 characters with letters and numbers" required>
                         <button class="password-toggle" type="button" data-password-toggle="employee-new-password">Show</button>
                     </div>
-                    <small class="field-error"><span>!</span>New password must be at least 6 characters.</small>
+                    <small class="field-error"><span>!</span>Password must be at least 8 characters and include a letter and number.</small>
                 </div>
                 <div class="field">
                     <label>Confirm Password</label>
                     <div class="field-row">
-                        <input id="employee-confirm-password" type="password" name="confirm_password" minlength="6" placeholder="Repeat new password" required>
+                        <input id="employee-confirm-password" type="password" name="confirm_password" minlength="8" placeholder="Repeat new password" required>
                         <button class="password-toggle" type="button" data-password-toggle="employee-confirm-password">Show</button>
                     </div>
                     <small class="field-error"><span>!</span>Please confirm the new password.</small>
@@ -336,6 +382,7 @@ function render_admin_profile_settings_modal(array $admin): void
             </label>
             <p class="hint" data-profile-photo-status>Stored only in this browser for this admin.</p>
             <form method="post" class="stack-form" data-validate>
+                <?= csrf_field() ?>
                 <input type="hidden" name="action" value="admin_profile_update">
                 <input type="hidden" name="return_page" value="<?= h($returnPage) ?>">
                 <div class="field">
@@ -376,6 +423,7 @@ function render_admin_password_modal(): void
             <h2>Change Password</h2>
             <p>Update your sign-in password directly from the sidebar.</p>
             <form method="post" class="stack-form" data-validate>
+                <?= csrf_field() ?>
                 <input type="hidden" name="action" value="admin_change_password">
                 <input type="hidden" name="return_page" value="<?= h($returnPage) ?>">
                 <div class="field">
@@ -389,15 +437,15 @@ function render_admin_password_modal(): void
                 <div class="field">
                     <label>New Password</label>
                     <div class="field-row">
-                        <input id="admin-new-password" type="password" name="new_password" minlength="6" placeholder="Minimum 6 characters" required>
+                        <input id="admin-new-password" type="password" name="new_password" minlength="8" placeholder="Minimum 8 characters with letters and numbers" required>
                         <button class="password-toggle" type="button" data-password-toggle="admin-new-password">Show</button>
                     </div>
-                    <small class="field-error"><span>!</span>New password must be at least 6 characters.</small>
+                    <small class="field-error"><span>!</span>Password must be at least 8 characters and include a letter and number.</small>
                 </div>
                 <div class="field">
                     <label>Confirm Password</label>
                     <div class="field-row">
-                        <input id="admin-confirm-password" type="password" name="confirm_password" minlength="6" placeholder="Repeat new password" required>
+                        <input id="admin-confirm-password" type="password" name="confirm_password" minlength="8" placeholder="Repeat new password" required>
                         <button class="password-toggle" type="button" data-password-toggle="admin-confirm-password">Show</button>
                     </div>
                     <small class="field-error"><span>!</span>Please confirm the new password.</small>
@@ -419,8 +467,8 @@ function render_footer(): void
     $isEmployeeShell = $user && $user['role'] === 'employee';
     $isSidebarShell = $isAdminShell || $isEmployeeShell;
     $page = $_GET['page'] ?? 'landing';
-    $showLandingLoginModal = !$user && $page === 'landing';
-    $landingAuthRole = in_array($_GET['auth'] ?? '', ['admin', 'employee'], true) ? $_GET['auth'] : '';
+    $showLandingLoginModal = !$user && in_array($page, ['landing', 'register'], true);
+    $landingAuthRole = in_array($_GET['auth'] ?? '', ['admin', 'employee', 'external_vendor', 'freelancer'], true) ? $_GET['auth'] : '';
     $employerName = '';
     if ($isEmployeeShell && !empty($user['admin_id'])) {
         $stmt = db()->prepare('SELECT name FROM users WHERE id = :id AND role = "admin"');
@@ -453,7 +501,7 @@ function render_footer(): void
                 <div class="landing-login-grid">
                     <button class="landing-login-option" type="button" data-switch-modal-target="admin-login-modal">
                         <span class="landing-login-icon">A</span>
-                        <strong>Employer Login</strong>
+                        <strong>Admin Login</strong>
                         <span>Manage employees, attendance rules, payroll, and reports.</span>
                     </button>
                     <button class="landing-login-option" type="button" data-switch-modal-target="employee-login-modal">
@@ -461,11 +509,23 @@ function render_footer(): void
                         <strong>Employee Login</strong>
                         <span>Use the credentials sent to your email by your admin to sign in.</span>
                     </button>
+                    <button class="landing-login-option" type="button" data-switch-modal-target="external_vendor-login-modal">
+                        <span class="landing-login-icon">V</span>
+                        <strong>External Vendor</strong>
+                        <span>Sign in with your self-registered vendor account.</span>
+                    </button>
+                    <button class="landing-login-option" type="button" data-switch-modal-target="freelancer-login-modal">
+                        <span class="landing-login-icon employee">F</span>
+                        <strong>Corporate Employee</strong>
+                        <span>Freelancers can sign in with their self-registered account.</span>
+                    </button>
                 </div>
             </div>
         </div>
         <?php render_landing_auth_modal('admin', $landingAuthRole === 'admin'); ?>
         <?php render_landing_auth_modal('employee', $landingAuthRole === 'employee'); ?>
+        <?php render_landing_auth_modal('external_vendor', $landingAuthRole === 'external_vendor'); ?>
+        <?php render_landing_auth_modal('freelancer', $landingAuthRole === 'freelancer'); ?>
     <?php endif; ?>
     <div class="modal" id="attendance-modal">
         <div class="modal-card">
@@ -473,6 +533,7 @@ function render_footer(): void
             <div class="modal-grid" id="modal-content"></div>
         </div>
     </div>
+    <script>window.VTRACO_CSRF_TOKEN = <?= json_encode(csrf_token(), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;</script>
     <script src="<?= h(asset_url('assets/js/app.js')) ?>"></script>
     </body>
     </html>

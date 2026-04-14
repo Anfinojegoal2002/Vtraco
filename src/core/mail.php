@@ -15,7 +15,8 @@ function mail_sender_identity(): array
 {
     $user = current_user();
     $transport = mail_transport_config();
-    $defaultEmail = filter_var((string) ($transport['username'] ?: MAIL_SMTP_FROM_FALLBACK), FILTER_VALIDATE_EMAIL) ?: MAIL_SMTP_FROM_FALLBACK;
+    $fallbackFrom = trim((string) (getenv('VTRACO_MAIL_FROM_FALLBACK') ?: MAIL_SMTP_FROM_FALLBACK));
+    $defaultEmail = filter_var((string) ($transport['username'] ?: $fallbackFrom), FILTER_VALIDATE_EMAIL) ?: ($fallbackFrom !== '' ? $fallbackFrom : 'no-reply@vtraco.local');
     $defaultName = APP_NAME;
 
     if ($user && ($user['role'] ?? '') === 'admin') {
@@ -79,7 +80,7 @@ function send_html_mail(string $to, string $subject, string $html): array
     $replyTo = mail_reply_to_identity();
     $transport = mail_transport_config();
     $fromName = preg_replace('/[\r\n]+/', ' ', (string) ($sender['name'] ?? APP_NAME)) ?: APP_NAME;
-    $fromEmail = filter_var((string) ($sender['email'] ?? ''), FILTER_VALIDATE_EMAIL) ?: MAIL_SMTP_FROM_FALLBACK;
+    $fromEmail = filter_var((string) ($sender['email'] ?? ''), FILTER_VALIDATE_EMAIL) ?: 'no-reply@vtraco.local';
     $safeRecipient = preg_replace('/[^a-z0-9]+/i', '_', strtolower($to)) ?: 'recipient';
     $filename = MAIL_LOG_PATH . '/' . date('Ymd_His') . '_' . $safeRecipient . '.html';
     $document = '<!doctype html><html><head><meta charset="utf-8"><title>' . h($subject) . '</title></head><body style="font-family:Inter,Segoe UI,Arial,sans-serif;color:#172554;line-height:1.65;">'
@@ -142,9 +143,9 @@ function send_employee_credentials_email(array $employee, string $password, arra
 {
     $html = '<p>Hello ' . h($employee['name']) . ',</p>'
         . '<p>Your V Traco employee account has been created.</p>'
-        . '<p>A password was created automatically for your account. Please use the credentials below to sign in.</p>'
+        . '<p>A temporary password was created for your account. Please use the credentials below to sign in and change your password immediately from Profile Settings.</p>'
         . '<p><strong>Employee Email:</strong> ' . h($employee['email']) . '<br>'
-        . '<strong>Auto-generated Password:</strong> ' . h($password) . '</p>'
+        . '<strong>Temporary Password:</strong> ' . h($password) . '</p>'
         . '<p><strong>Assigned Rules</strong><br>' . rules_explanation_html($rules) . '</p>';
     return send_html_mail((string) $employee['email'], 'Your V Traco Login Credentials', $html);
 }
@@ -161,15 +162,15 @@ function employee_credentials_delivery_message(array $employee, array $mailResul
 {
     $isReset = $context === 'reset';
     $baseMessage = $isReset
-        ? 'Password reset successfully for ' . $employee['name'] . '. '
+        ? 'Temporary password generated successfully for ' . $employee['name'] . '. '
         : 'Employee added successfully for ' . $employee['name'] . '. ';
 
-    $baseMessage .= 'Login email: ' . $employee['email'] . ' | Password: ' . $password . '.';
+    $baseMessage .= 'Login email: ' . $employee['email'] . '. The employee must change the temporary password after signing in.';
 
     if (!empty($mailResult['sent'])) {
         return $baseMessage . ' A notification email was sent successfully.';
     }
 
-    return $baseMessage . ' Email delivery is not configured yet, so a copy was saved in storage/emails/' . ($mailResult['log_file'] ?? '') . (($mailResult['error'] ?? '') !== '' ? ' | Error: ' . $mailResult['error'] : '') . '.';
+    return $baseMessage . ' Email delivery is not configured yet, so a copy containing the temporary password was saved in storage/emails/' . ($mailResult['log_file'] ?? '') . (($mailResult['error'] ?? '') !== '' ? ' | Error: ' . $mailResult['error'] : '') . '.';
 }
 

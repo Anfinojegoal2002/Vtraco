@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 function employee_emp_id_exists(string $empId): bool
 {
-    $stmt = db()->prepare('SELECT COUNT(*) FROM users WHERE role = "employee" AND emp_id = :emp_id');
+    $stmt = db()->prepare('SELECT COUNT(*) FROM users WHERE role IN ("employee", "corporate_employee") AND emp_id = :emp_id');
     $stmt->execute(['emp_id' => $empId]);
     return (int) $stmt->fetchColumn() > 0;
 }
@@ -98,7 +98,7 @@ function guessed_employee_name(array $row, array $columns, array $headerMap, str
 
 function insert_employee(array $data, array $rules): array
 {
-    $password = random_password(6);
+    $password = random_password();
     $adminId = current_admin_id();
     if ($adminId === null) {
         throw new RuntimeException('An administrator must be signed in to add employees.');
@@ -113,17 +113,36 @@ function insert_employee(array $data, array $rules): array
     if ($name === '') {
         $name = generated_employee_name(trim((string) ($data['email'] ?? '')), $empId);
     }
+    $email = trim((string) ($data['email'] ?? ''));
+    $phone = trim((string) ($data['phone'] ?? ''));
+    $salary = (float) ($data['salary'] ?? 0);
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw new RuntimeException('Employee email must be valid.');
+    }
+    if ($phone === '') {
+        throw new RuntimeException('Employee phone number is required.');
+    }
+    if ($salary < 0) {
+        throw new RuntimeException('Employee salary must be zero or greater.');
+    }
 
-    db()->prepare('INSERT INTO users (role, admin_id, emp_id, name, email, phone, shift, salary, password_hash, created_at) VALUES ("employee", :admin_id, :emp_id, :name, :email, :phone, :shift, :salary, :password_hash, :created_at)')
+    $role = current_manager_target_role();
+    if (role_requires_unique_email($role) && role_email_exists($role, $email)) {
+        throw new RuntimeException('This employee email is already assigned.');
+    }
+    db()->prepare('INSERT INTO users (role, admin_id, emp_id, name, email, phone, shift, salary, password_hash, force_password_change, password_changed_at, created_at) VALUES (:role, :admin_id, :emp_id, :name, :email, :phone, :shift, :salary, :password_hash, :force_password_change, :password_changed_at, :created_at)')
         ->execute([
+            'role' => $role,
             'admin_id' => $adminId,
             'emp_id' => $empId,
             'name' => $name,
-            'email' => trim((string) $data['email']),
-            'phone' => trim((string) $data['phone']),
+            'email' => $email,
+            'phone' => $phone,
             'shift' => trim((string) ($data['shift'] ?? '')),
-            'salary' => (float) $data['salary'],
+            'salary' => $salary,
             'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+            'force_password_change' => 1,
+            'password_changed_at' => null,
             'created_at' => now(),
         ]);
     $employee = employee_by_id((int) db()->lastInsertId());
@@ -149,13 +168,14 @@ function attendance_import_employee_email(string $empId): string
         $base = 'employee';
     }
 
+    $role = current_manager_target_role();
     for ($suffix = 0; $suffix < 1000; $suffix++) {
         $email = $suffix === 0
             ? sprintf('attendance.%s@vtraco.local', $base)
             : sprintf('attendance.%s.%d@vtraco.local', $base, $suffix);
 
-        $stmt = db()->prepare('SELECT COUNT(*) FROM users WHERE role = "employee" AND email = :email');
-        $stmt->execute(['email' => $email]);
+        $stmt = db()->prepare('SELECT COUNT(*) FROM users WHERE role = :role AND email = :email');
+        $stmt->execute(['role' => $role, 'email' => $email]);
         if ((int) $stmt->fetchColumn() === 0) {
             return $email;
         }
@@ -182,10 +202,12 @@ function create_employee_from_attendance_entry(array $entry): ?array
     }
 
     $email = attendance_import_employee_email($empId);
-    $password = random_password(6);
+    $password = random_password();
 
-    db()->prepare('INSERT INTO users (role, admin_id, emp_id, name, email, phone, shift, salary, password_hash, created_at) VALUES ("employee", :admin_id, :emp_id, :name, :email, :phone, :shift, :salary, :password_hash, :created_at)')
+    $role = current_manager_target_role();
+    db()->prepare('INSERT INTO users (role, admin_id, emp_id, name, email, phone, shift, salary, password_hash, force_password_change, password_changed_at, created_at) VALUES (:role, :admin_id, :emp_id, :name, :email, :phone, :shift, :salary, :password_hash, :force_password_change, :password_changed_at, :created_at)')
         ->execute([
+            'role' => $role,
             'admin_id' => $adminId,
             'emp_id' => $empId,
             'name' => $name,
@@ -194,11 +216,34 @@ function create_employee_from_attendance_entry(array $entry): ?array
             'shift' => trim((string) ($entry['shift'] ?? '')),
             'salary' => 0,
             'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+            'force_password_change' => 1,
+            'password_changed_at' => null,
             'created_at' => now(),
         ]);
 
     return employee_by_id((int) db()->lastInsertId());
 }
+
+function validate_employee_csv_upload(array $file): void
+{
+    validate_uploaded_file($file, ['csv'], 2 * 1024 * 1024, 'employee CSV');
+}
+
+function employee_reset_is_rate_limited(array $employee): bool
+{
+    $requestedAt = trim((string) ($employee['password_reset_requested_at'] ?? ''));
+    if ($requestedAt === '') {
+        return false;
+    }
+
+    $timestamp = strtotime($requestedAt);
+    if ($timestamp === false) {
+        return false;
+    }
+
+    return $timestamp + forgot_password_cooldown_seconds() > time();
+}
+
 function reset_employee_password(int $employeeId): array
 {
     $employee = employee_by_id($employeeId);
@@ -206,12 +251,15 @@ function reset_employee_password(int $employeeId): array
         throw new RuntimeException('Employee not found for this administrator.');
     }
 
-    $password = random_password(6);
-    db()->prepare('UPDATE users SET password_hash = :password_hash WHERE id = :id AND role = "employee" AND admin_id = :admin_id')
+    $password = random_password();
+    $role = current_manager_target_role();
+    db()->prepare('UPDATE users SET password_hash = :password_hash, force_password_change = 1, password_reset_requested_at = :password_reset_requested_at, password_changed_at = NULL WHERE id = :id AND role = :role AND admin_id = :admin_id')
         ->execute([
+            'role' => $role,
             'id' => $employeeId,
             'admin_id' => (int) current_admin_id(),
             'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+            'password_reset_requested_at' => now(),
         ]);
 
     $mailResult = send_employee_credentials_email($employee, $password, employee_rules($employeeId));
@@ -230,7 +278,7 @@ function employee_by_email(string $email): ?array
         return null;
     }
 
-    $stmt = db()->prepare('SELECT * FROM users WHERE role = "employee" AND LOWER(email) = LOWER(:email) LIMIT 1');
+    $stmt = db()->prepare('SELECT * FROM users WHERE role IN ("employee", "corporate_employee") AND LOWER(email) = LOWER(:email) LIMIT 1');
     $stmt->execute(['email' => $email]);
     $row = $stmt->fetch();
     return $row ?: null;
@@ -240,19 +288,37 @@ function reset_employee_password_by_email(string $email): array
 {
     $employee = employee_by_email($email);
     if (!$employee) {
-        throw new RuntimeException('No employee account found for that email.');
+        return [
+            'handled' => false,
+            'rate_limited' => false,
+            'employee' => null,
+            'mail_result' => [],
+        ];
     }
 
-    $password = random_password(6);
-    db()->prepare('UPDATE users SET password_hash = :password_hash WHERE id = :id AND role = "employee"')
+    if (employee_reset_is_rate_limited($employee)) {
+        return [
+            'handled' => true,
+            'rate_limited' => true,
+            'employee' => $employee,
+            'mail_result' => [],
+        ];
+    }
+
+    $password = random_password();
+    db()->prepare('UPDATE users SET password_hash = :password_hash, force_password_change = 1, password_reset_requested_at = :password_reset_requested_at, password_changed_at = NULL WHERE id = :id AND role = :role')
         ->execute([
             'id' => (int) $employee['id'],
+            'role' => $employee['role'],
             'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+            'password_reset_requested_at' => now(),
         ]);
 
     $mailResult = send_employee_credentials_email($employee, $password, employee_rules((int) $employee['id']));
 
     return [
+        'handled' => true,
+        'rate_limited' => false,
         'employee' => $employee,
         'mail_result' => $mailResult,
         'password' => $password,
@@ -316,7 +382,9 @@ function parse_employee_csv(string $path): array
 
     $rows = [];
     $reservedEmpIds = [];
+    $rowNumber = 1;
     while (($row = fgetcsv($handle)) !== false) {
+        $rowNumber++;
         $email = trim((string) ($row[$columns['email']] ?? ''));
         $phone = trim((string) ($row[$columns['phone']] ?? ''));
         $salaryText = trim((string) ($row[$columns['salary']] ?? '0'));
@@ -330,6 +398,19 @@ function parse_employee_csv(string $path): array
             $empId = generate_employee_emp_id($reservedEmpIds);
         }
         $reservedEmpIds[] = $empId;
+
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            fclose($handle);
+            throw new RuntimeException('Employee CSV row ' . $rowNumber . ' has an invalid email address.');
+        }
+        if ($phone === '') {
+            fclose($handle);
+            throw new RuntimeException('Employee CSV row ' . $rowNumber . ' is missing a phone number.');
+        }
+        if (!is_numeric($salaryText) || (float) $salaryText < 0) {
+            fclose($handle);
+            throw new RuntimeException('Employee CSV row ' . $rowNumber . ' has an invalid salary value.');
+        }
 
         $name = guessed_employee_name($row, $columns, $headerMap, $email, $empId);
 

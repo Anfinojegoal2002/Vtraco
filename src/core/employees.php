@@ -5,12 +5,15 @@ declare(strict_types=1);
 function employee_count(): int
 {
     $adminId = current_admin_id();
+    $role = current_manager_target_role();
     if ($adminId === null) {
-        return (int) db()->query("SELECT COUNT(*) FROM users WHERE role = 'employee'")->fetchColumn();
+        $stmt = db()->prepare("SELECT COUNT(*) FROM users WHERE role = :role");
+        $stmt->execute(['role' => $role]);
+        return (int) $stmt->fetchColumn();
     }
 
-    $stmt = db()->prepare("SELECT COUNT(*) FROM users WHERE role = 'employee' AND admin_id = :admin_id");
-    $stmt->execute(['admin_id' => $adminId]);
+    $stmt = db()->prepare("SELECT COUNT(*) FROM users WHERE role = :role AND admin_id = :admin_id");
+    $stmt->execute(['role' => $role, 'admin_id' => $adminId]);
     return (int) $stmt->fetchColumn();
 }
 
@@ -22,25 +25,30 @@ function admin_count(): int
 function employees(): array
 {
     $adminId = current_admin_id();
+    $role = current_manager_target_role();
     if ($adminId === null) {
-        return db()->query("SELECT * FROM users WHERE role = 'employee' ORDER BY name")->fetchAll();
+        $stmt = db()->prepare("SELECT * FROM users WHERE role = :role ORDER BY name");
+        $stmt->execute(['role' => $role]);
+        return $stmt->fetchAll();
     }
 
-    $stmt = db()->prepare("SELECT * FROM users WHERE role = 'employee' AND admin_id = :admin_id ORDER BY name");
-    $stmt->execute(['admin_id' => $adminId]);
+    $stmt = db()->prepare("SELECT * FROM users WHERE role = :role AND admin_id = :admin_id ORDER BY name");
+    $stmt->execute(['role' => $role, 'admin_id' => $adminId]);
     return $stmt->fetchAll();
 }
 
 function employee_by_id(int $id): ?array
 {
     $adminId = current_admin_id();
+    $role = current_manager_target_role();
     if ($adminId === null) {
-        $stmt = db()->prepare("SELECT * FROM users WHERE id = :id AND role = 'employee'");
-        $stmt->execute(['id' => $id]);
+        $stmt = db()->prepare("SELECT * FROM users WHERE id = :id AND role = :role");
+        $stmt->execute(['id' => $id, 'role' => $role]);
     } else {
-        $stmt = db()->prepare("SELECT * FROM users WHERE id = :id AND role = 'employee' AND admin_id = :admin_id");
+        $stmt = db()->prepare("SELECT * FROM users WHERE id = :id AND role = :role AND admin_id = :admin_id");
         $stmt->execute([
             'id' => $id,
+            'role' => $role,
             'admin_id' => $adminId,
         ]);
     }
@@ -57,13 +65,15 @@ function employee_by_emp_code(string $empCode): ?array
     }
 
     $adminId = current_admin_id();
+    $role = current_manager_target_role();
     if ($adminId === null) {
-        $stmt = db()->prepare("SELECT * FROM users WHERE emp_id = :emp_id AND role = 'employee' LIMIT 1");
-        $stmt->execute(['emp_id' => $empCode]);
+        $stmt = db()->prepare("SELECT * FROM users WHERE emp_id = :emp_id AND role = :role LIMIT 1");
+        $stmt->execute(['emp_id' => $empCode, 'role' => $role]);
     } else {
-        $stmt = db()->prepare("SELECT * FROM users WHERE emp_id = :emp_id AND role = 'employee' AND admin_id = :admin_id LIMIT 1");
+        $stmt = db()->prepare("SELECT * FROM users WHERE emp_id = :emp_id AND role = :role AND admin_id = :admin_id LIMIT 1");
         $stmt->execute([
             'emp_id' => $empCode,
+            'role' => $role,
             'admin_id' => $adminId,
         ]);
     }
@@ -80,13 +90,15 @@ function employee_by_name(string $name): ?array
     }
 
     $adminId = current_admin_id();
+    $role = current_manager_target_role();
     if ($adminId === null) {
-        $stmt = db()->prepare("SELECT * FROM users WHERE role = 'employee' AND LOWER(name) = LOWER(:name) ORDER BY id LIMIT 1");
-        $stmt->execute(['name' => $name]);
+        $stmt = db()->prepare("SELECT * FROM users WHERE role = :role AND LOWER(name) = LOWER(:name) ORDER BY id LIMIT 1");
+        $stmt->execute(['name' => $name, 'role' => $role]);
     } else {
-        $stmt = db()->prepare("SELECT * FROM users WHERE role = 'employee' AND admin_id = :admin_id AND LOWER(name) = LOWER(:name) ORDER BY id LIMIT 1");
+        $stmt = db()->prepare("SELECT * FROM users WHERE role = :role AND admin_id = :admin_id AND LOWER(name) = LOWER(:name) ORDER BY id LIMIT 1");
         $stmt->execute([
             'name' => $name,
+            'role' => $role,
             'admin_id' => $adminId,
         ]);
     }
@@ -94,9 +106,9 @@ function employee_by_name(string $name): ?array
     $row = $stmt->fetch();
     return $row ?: null;
 }
-function random_password(int $length = 6): string
+function random_password(int $length = 12): string
 {
-    $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
     $out = '';
     for ($i = 0; $i < $length; $i++) {
         $out .= $chars[random_int(0, strlen($chars) - 1)];
