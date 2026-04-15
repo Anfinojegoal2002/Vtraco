@@ -88,8 +88,11 @@ function render_employee_reimbursements(): void
             <div class="hint">Previous months are disabled for employee reimbursement submissions.</div>
         </div>
         <div class="spacer"></div>
-        <div class="calendar-shell reimbursement-calendar-shell">
-            <div class="calendar-grid scroll-panel reimbursement-calendar-grid">
+        <div
+            class="reimbursement-calendar-scroll"
+            style="height:260px; max-height:260px; overflow:auto; border-radius:18px; border:1px solid rgba(36,52,109,0.1); background:rgba(255,255,255,0.55); overscroll-behavior:contain; scrollbar-gutter:stable;"
+        >
+            <div class="calendar-grid reimbursement-calendar-grid" style="height:auto; min-height:0; overflow:visible; padding:6px 6px 6px 0; align-content:start;">
                 <?php foreach ($dayLabels as $label): ?>
                     <div class="weekday"><?= h($label) ?></div>
                 <?php endforeach; ?>
@@ -131,39 +134,6 @@ function render_employee_reimbursements(): void
                 <?php endfor; ?>
             </div>
         </div>
-    </section>
-
-    <div class="spacer"></div>
-
-    <section class="section-block">
-        <div class="split">
-            <div>
-                <span class="eyebrow">Submitted This Month</span>
-                <h2>Reimbursement Requests</h2>
-            </div>
-            <span class="badge"><?= count($allClaims) ?> submitted</span>
-        </div>
-        <div class="spacer"></div>
-        <?php if ($allClaims): ?>
-            <div class="reimbursement-history-list">
-                <?php foreach ($allClaims as $claim): ?>
-                    <article class="reimbursement-history-card">
-                        <div class="split">
-                            <div>
-                                <strong><?= h(date('d M Y', strtotime((string) $claim['expense_date']))) ?> | <?= h((string) $claim['category']) ?></strong><br>
-                                <span class="hint">Requested Rs <?= h(number_format((float) $claim['amount_requested'], 2)) ?></span>
-                            </div>
-                            <span class="status-pill reimbursement-status <?= h(reimbursement_status_badge_class((string) $claim['status'])) ?>"><?= h((string) $claim['status']) ?></span>
-                        </div>
-                        <div class="spacer"></div>
-                        <p><?= h((string) $claim['expense_description']) ?></p>
-                        <div class="hint">Paid: Rs <?= h(number_format((float) $claim['amount_paid'], 2)) ?> | Remaining: Rs <?= h(number_format((float) $claim['remaining_balance'], 2)) ?></div>
-                    </article>
-                <?php endforeach; ?>
-            </div>
-        <?php else: ?>
-            <div class="list-item muted">No reimbursement requests have been submitted in the current month yet.</div>
-        <?php endif; ?>
     </section>
 
     <div class="modal" id="employee-reimbursement-modal">
@@ -226,10 +196,13 @@ function render_employee_reimbursements(): void
 
     <style>
         .reimbursement-calendar-block { overflow: hidden; }
-        .reimbursement-calendar-shell { box-shadow: none; border: 0; padding: 0; background: transparent; }
-        .reimbursement-calendar-grid { height: auto; min-height: 0; max-height: none; padding-right: 0; }
-        .reimbursement-history-list { display: grid; gap: 14px; }
-        .reimbursement-history-card { padding: 18px; border-radius: 22px; background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(246,248,255,0.96)); border: 1px solid rgba(36, 52, 109, 0.1); }
+        /* Keep a stable visible calendar area. */
+        .reimbursement-calendar-grid {
+            display: grid !important;
+            overflow: visible;
+            align-content: start;
+        }
+        .reimbursement-calendar-scroll { margin: 0; }
         .reimbursement-modal-card { max-width: 760px; }
         .reimbursement-existing-list { max-height: 220px; overflow: auto; }
         .reimbursement-radio-group { display: flex; gap: 12px; flex-wrap: wrap; }

@@ -189,6 +189,27 @@ function admin_reimbursements(array $filters = []): array
     return $stmt->fetchAll();
 }
 
+function admin_recent_reimbursements(int $limit = 5, ?string $status = null): array
+{
+    $admin = require_role('admin');
+    $limit = max(1, min(50, (int) $limit));
+    $sql = reimbursement_admin_query_base() . ' WHERE er.admin_id = :admin_id';
+    $params = ['admin_id' => (int) $admin['id']];
+
+    if ($status !== null && $status !== '') {
+        $sql .= ' AND er.status = :status';
+        $params['status'] = reimbursement_status_label($status);
+    }
+
+    $sql .= ' ORDER BY er.created_at DESC, er.expense_date DESC, er.id DESC';
+    $sql .= ' LIMIT ' . $limit;
+
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+
+    return $stmt->fetchAll();
+}
+
 function admin_reimbursement_by_id(int $reimbursementId): ?array
 {
     $admin = require_role('admin');

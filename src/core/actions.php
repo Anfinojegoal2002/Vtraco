@@ -950,6 +950,59 @@ function handle_post_action(string $action): void
             redirect_to('admin_reimbursements', $redirectParams);
             break;
 
+        case 'admin_record_reimbursement_payment':
+            $admin = require_role('admin');
+            $reimbursementId = (int) ($_POST['reimbursement_id'] ?? 0);
+            $redirectParams = reimbursement_admin_filter_params($_POST);
+
+            try {
+                $reimbursement = admin_reimbursement_by_id($reimbursementId);
+                if (!$reimbursement) {
+                    throw new RuntimeException('Reimbursement request not found.');
+                }
+
+                // Reuse the Accounts Payments module for reimbursement settlements.
+                $payment = create_payment([
+                    'employee_id' => (int) ($reimbursement['user_id'] ?? 0),
+                    'payment_type' => 'REIMBURSEMENT',
+                    'reimbursement_id' => $reimbursementId,
+                    'amount' => $_POST['amount'] ?? 0,
+                    'bank_name' => $_POST['bank_name'] ?? '',
+                    'transfer_mode' => $_POST['transfer_mode'] ?? '',
+                    'transaction_id' => $_POST['transaction_id'] ?? '',
+                    'payment_date' => $_POST['payment_date'] ?? date('Y-m-d'),
+                    'remarks' => $_POST['remarks'] ?? '',
+                ], $_FILES['proof_upload'] ?? []);
+
+                $updated = admin_reimbursement_by_id($reimbursementId);
+                if (!$updated) {
+                    throw new RuntimeException('Unable to reload the reimbursement request.');
+                }
+
+                $employee = reimbursement_user_by_id((int) ($updated['user_id'] ?? 0));
+                if ($employee) {
+                    notify_employee_reimbursement_status($updated, $employee, (float) ($payment['amount'] ?? 0));
+                }
+
+                audit_log('admin_reimbursement_payment_recorded', [
+                    'reimbursement_id' => $reimbursementId,
+                    'payment_id' => (int) ($payment['id'] ?? 0),
+                    'amount' => (float) ($payment['amount'] ?? 0),
+                    'bank_name' => (string) ($payment['bank_name'] ?? ''),
+                ], (int) ($updated['user_id'] ?? 0), $admin);
+
+                flash('success', 'Reimbursement payment recorded successfully.');
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Admin reimbursement payment recording failed.', [
+                    'admin_id' => (int) $admin['id'],
+                    'reimbursement_id' => $reimbursementId,
+                ]);
+                flash('error', $exception->getMessage() ?: 'Unable to record the reimbursement payment.');
+            }
+
+            redirect_to('admin_reimbursements', $redirectParams);
+            break;
+
         case 'admin_save_payment':
             $admin = require_role('admin');
             $paymentId = max(0, (int) ($_POST['payment_id'] ?? 0));
@@ -1048,5 +1101,4 @@ function handle_post_action(string $action): void
             break;
     }
 }
-
 

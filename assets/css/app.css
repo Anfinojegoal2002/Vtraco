@@ -77,6 +77,8 @@
             .button.outline { background: transparent; color: var(--ink); border: 1px solid rgba(67,56,202,0.18); }
             .content { flex: 1; width: 100%; padding: 8px 0 0; overflow: hidden; }
             .admin-main .content, .employee-main .content { padding-top: 0; }
+            /* Make the main area the scroll container so sections (like reimbursement calendar) don't collapse. */
+            .admin-main .content, .employee-main .content { flex: 1; overflow: auto; }
             .employee-main .content { display: flex; flex-direction: column; min-height: 0; }
             .employee-attendance-panel { flex: 1; min-height: 0; display: flex; }
             .employee-attendance-panel .calendar-shell { flex: 1; }
@@ -435,6 +437,30 @@
             .employee-main .calendar-summary { order: 3; flex-shrink: 0; margin-top: 14px; margin-bottom: 0; }
             .employee-main .summary-card { min-height: 82px; padding: 14px; }
             .employee-main .summary-card strong { font-size: 1.3rem; }
+            /* Employee reimbursements calendar should always remain visible (above the submitted list). */
+            .employee-reimbursements-page .reimbursement-calendar-block { margin-bottom: 18px; }
+            .employee-reimbursements-page .reimbursement-calendar-scroll {
+              display: block !important;
+              height: 260px;
+              min-height: 260px;
+              max-height: 260px;
+              overflow: auto;
+              border-radius: 18px;
+              border: 1px solid rgba(36,52,109,0.18);
+              background: rgba(255,255,255,0.92);
+              scrollbar-gutter: stable;
+              overscroll-behavior: contain;
+            }
+            .employee-reimbursements-page .reimbursement-calendar-grid {
+              display: grid !important;
+              height: auto !important;
+              min-height: 0 !important;
+              overflow: visible !important;
+              align-content: start;
+              padding: 6px 6px 6px 0;
+            }
+            .employee-reimbursements-page .reimbursement-calendar-grid .weekday { display: block !important; }
+            .employee-reimbursements-page .reimbursement-calendar-grid .day-card { display: flex !important; }
             .profile-settings-modal-card { width: min(560px, 100%); }
             .profile-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 18px 0; }
             .profile-settings-grid .list-item { display: grid; gap: 4px; }

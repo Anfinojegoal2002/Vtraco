@@ -14,6 +14,10 @@ function render_admin_dashboard(): void
     $user = current_user();
     $isFreelancer = ($user['role'] ?? '') === 'freelancer';
     $label = $isFreelancer ? 'Staff' : 'Employees';
+    $recentReimbursements = [];
+    if (!$isFreelancer) {
+        $recentReimbursements = admin_recent_reimbursements(5);
+    }
 
     render_header($isFreelancer ? 'Corporate Dashboard' : 'Admin Dashboard');
     ?>
@@ -112,6 +116,39 @@ function render_admin_dashboard(): void
             <div class="list-item muted">No leave requests have been submitted yet.</div>
         <?php endif; ?>
     </section>
+
+    <?php if (!$isFreelancer): ?>
+        <div class="spacer"></div>
+        <section class="section-block">
+            <div class="split">
+                <div>
+                    <span class="eyebrow">Accounts</span>
+                    <h2>Reimbursement Requests</h2>
+                </div>
+                <a class="button outline" href="<?= h(BASE_URL) ?>?page=admin_reimbursements">View All</a>
+            </div>
+            <div class="spacer"></div>
+            <?php if ($recentReimbursements): ?>
+                <div class="list">
+                    <?php foreach ($recentReimbursements as $item): ?>
+                        <div class="list-item">
+                            <div class="split">
+                                <div>
+                                    <strong><?= h((string) ($item['employee_name'] ?? '')) ?></strong><br>
+                                    <span class="hint"><?= h((string) ($item['employee_emp_id'] ?? '')) ?> | <?= h(date('d M Y', strtotime((string) ($item['expense_date'] ?? 'now')))) ?></span>
+                                </div>
+                                <span class="status-pill reimbursement-status <?= h(reimbursement_status_badge_class((string) ($item['status'] ?? 'PENDING'))) ?>"><?= h((string) ($item['status'] ?? 'PENDING')) ?></span>
+                            </div>
+                            <div class="spacer"></div>
+                            <div class="hint"><?= h((string) ($item['category'] ?? '')) ?> | Requested Rs <?= h(number_format((float) ($item['amount_requested'] ?? 0), 2)) ?></div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php else: ?>
+                <div class="list-item muted">No reimbursement requests found yet.</div>
+            <?php endif; ?>
+        </section>
+    <?php endif; ?>
     <?php
     render_footer();
 }
@@ -1528,7 +1565,8 @@ function render_admin_reimbursements(): void
     $allEmployees = employees();
     $items = admin_reimbursements($filters);
     $statusOptions = reimbursement_statuses();
-    $paymentMethods = reimbursement_payment_methods();
+    $bankNames = payment_bank_names();
+    $transferModesMap = payment_transfer_modes_map();
 
     render_header('Reimbursement', 'admin-reimbursements-page');
     ?>
@@ -1639,6 +1677,7 @@ function render_admin_reimbursements(): void
                         class="stack-form reimbursement-status-form"
                         data-reimbursement-status-form
                         data-reimbursement-id="<?= (int) $item['id'] ?>"
+                        data-reimbursement-user-id="<?= (int) $item['user_id'] ?>"
                         data-reimbursement-remaining="<?= h(number_format((float) $item['remaining_balance'], 2, '.', '')) ?>"
                         data-filter-employee="<?= (int) $filters['employee_id'] ?>"
                         data-filter-category="<?= h($filters['category']) ?>"
@@ -1676,73 +1715,84 @@ function render_admin_reimbursements(): void
         </div>
     </div>
 
-    <div class="modal" id="reimbursement-partial-modal">
-        <div class="modal-card" style="max-width:560px;">
-            <button class="modal-close" type="button" data-close-modal>&times;</button>
-            <span class="eyebrow">Partial Payment</span>
-            <h2>Record Partial Reimbursement</h2>
-            <p id="reimbursement-partial-copy" class="hint">Enter the partial amount to mark this request as partially paid.</p>
-            <form method="post" class="stack-form" id="reimbursement-partial-form" data-validate>
-                <?= csrf_field() ?>
-                <input type="hidden" name="action" value="admin_mark_reimbursement_partial">
-                <input type="hidden" name="reimbursement_id" id="partial-reimbursement-id">
-                <input type="hidden" name="filter_employee_id" id="partial-filter-employee">
-                <input type="hidden" name="filter_category" id="partial-filter-category">
-                <div class="field">
-                    <label>Partial Amount</label>
-                    <div class="field-row"><input type="number" name="partial_amount" id="partial-amount-input" min="0.01" step="0.01" required></div>
-                    <small class="field-error"><span>!</span>Enter a valid partial amount.</small>
-                </div>
-                <button class="button solid" type="submit">Save Partial Payment</button>
-            </form>
-        </div>
-    </div>
-
-    <div class="modal" id="reimbursement-paid-modal">
-        <div class="modal-card" style="max-width:640px;">
+    <div class="modal" id="reimbursement-payment-modal">
+        <div class="modal-card" style="max-width:920px;">
             <button class="modal-close" type="button" data-close-modal>&times;</button>
             <span class="eyebrow">Accounts Payment</span>
-            <h2>Mark Reimbursement as Paid</h2>
-            <p id="reimbursement-paid-copy" class="hint">Capture the payment details before closing this reimbursement as paid.</p>
-            <form method="post" enctype="multipart/form-data" class="stack-form" id="reimbursement-paid-form" data-validate>
+            <h2 id="reimbursement-payment-title">Reimbursement Payment</h2>
+            <p id="reimbursement-payment-copy" class="hint">Capture the payment details to settle this reimbursement request.</p>
+            <form method="post" enctype="multipart/form-data" class="stack-form" id="reimbursement-payment-form" data-validate>
                 <?= csrf_field() ?>
-                <input type="hidden" name="action" value="admin_mark_reimbursement_paid">
-                <input type="hidden" name="reimbursement_id" id="paid-reimbursement-id">
-                <input type="hidden" name="filter_employee_id" id="paid-filter-employee">
-                <input type="hidden" name="filter_category" id="paid-filter-category">
+                <input type="hidden" name="action" value="admin_record_reimbursement_payment">
+                <input type="hidden" name="reimbursement_id" id="reimbursement-payment-reimbursement-id">
+                <input type="hidden" name="filter_employee_id" id="reimbursement-payment-filter-employee">
+                <input type="hidden" name="filter_category" id="reimbursement-payment-filter-category">
 
-                <div class="field">
-                    <label>Payment Method</label>
-                    <div class="field-row">
-                        <select name="payment_method" required>
-                            <option value="" selected disabled>Select method</option>
-                            <?php foreach ($paymentMethods as $method): ?>
-                                <option value="<?= h($method) ?>"><?= h(reimbursement_payment_method_label($method)) ?></option>
-                            <?php endforeach; ?>
-                        </select>
+                <div class="accounts-payment-grid">
+                    <div class="field">
+                        <label>Amount</label>
+                        <div class="field-row">
+                            <input type="number" name="amount" id="reimbursement-payment-amount" min="0.01" step="0.01" required>
+                        </div>
+                        <small class="field-error"><span>!</span>Amount is required.</small>
                     </div>
-                    <small class="field-error"><span>!</span>Select a payment method.</small>
+
+                    <div class="field">
+                        <label>Bank Name</label>
+                        <div class="field-row">
+                            <select name="bank_name" id="reimbursement-payment-bank" required>
+                                <option value="" selected disabled>Select bank</option>
+                                <?php foreach ($bankNames as $bankName): ?>
+                                    <option value="<?= h($bankName) ?>"><?= h($bankName) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <small class="field-error"><span>!</span>Bank name is required.</small>
+                    </div>
+
+                    <div class="field" id="reimbursement-payment-transfer-mode-field">
+                        <label>Transfer Mode</label>
+                        <div class="field-row">
+                            <select name="transfer_mode" id="reimbursement-payment-transfer-mode">
+                                <option value="" selected disabled>Select transfer mode</option>
+                            </select>
+                        </div>
+                        <small class="field-error"><span>!</span>Transfer mode is required for the selected bank.</small>
+                    </div>
+
+                    <div class="field" id="reimbursement-payment-transaction-id-field">
+                        <label>Transaction ID</label>
+                        <div class="field-row">
+                            <input type="text" name="transaction_id" id="reimbursement-payment-transaction-id">
+                        </div>
+                        <small class="field-error"><span>!</span>Transaction ID is required unless the payment is cash.</small>
+                    </div>
+
+                    <div class="field">
+                        <label>Payment Date</label>
+                        <div class="field-row">
+                            <input type="date" name="payment_date" id="reimbursement-payment-date" required>
+                        </div>
+                        <small class="field-error"><span>!</span>Payment date is required.</small>
+                    </div>
+
+                    <div class="field">
+                        <label>Proof Upload</label>
+                        <div class="field-row">
+                            <input type="file" name="proof_upload" id="reimbursement-payment-proof" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf">
+                        </div>
+                        <small class="hint">Accepted formats: JPG, PNG, PDF.</small>
+                    </div>
                 </div>
 
                 <div class="field">
-                    <label>Bank Details</label>
-                    <div class="field-row"><textarea name="bank_details" rows="3" placeholder="Enter bank or settlement details" required></textarea></div>
-                    <small class="field-error"><span>!</span>Bank details are required.</small>
+                    <label>Remarks</label>
+                    <div class="field-row">
+                        <textarea name="remarks" id="reimbursement-payment-remarks" rows="3" placeholder="Optional notes for this payment"></textarea>
+                    </div>
                 </div>
 
-                <div class="field">
-                    <label>Transaction ID</label>
-                    <div class="field-row"><input type="text" name="transaction_id" placeholder="Enter transaction ID" required></div>
-                    <small class="field-error"><span>!</span>Transaction ID is required.</small>
-                </div>
-
-                <div class="field">
-                    <label>Proof Upload</label>
-                    <div class="field-row"><input type="file" name="payment_proof" accept=".jpg,.jpeg,.pdf,image/jpeg,application/pdf" required></div>
-                    <small class="field-error"><span>!</span>Upload JPG or PDF proof up to 1MB.</small>
-                </div>
-
-                <button class="button solid" type="submit">Complete Payment</button>
+                <button class="button solid" type="submit" id="reimbursement-payment-submit">Save Payment</button>
             </form>
         </div>
     </div>
@@ -1775,12 +1825,73 @@ function render_admin_reimbursements(): void
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
+            const transferModesMap = <?= json_encode($transferModesMap, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
             const openPageModal = id => {
                 const target = document.getElementById(id);
                 if (target) {
                     target.classList.add('open');
                 }
             };
+
+            const paymentModal = document.getElementById('reimbursement-payment-modal');
+            const paymentForm = document.getElementById('reimbursement-payment-form');
+            const paymentTitle = document.getElementById('reimbursement-payment-title');
+            const paymentCopy = document.getElementById('reimbursement-payment-copy');
+            const paymentIdInput = document.getElementById('reimbursement-payment-reimbursement-id');
+            const paymentFilterEmployee = document.getElementById('reimbursement-payment-filter-employee');
+            const paymentFilterCategory = document.getElementById('reimbursement-payment-filter-category');
+            const amountInput = document.getElementById('reimbursement-payment-amount');
+            const bankSelect = document.getElementById('reimbursement-payment-bank');
+            const transferField = document.getElementById('reimbursement-payment-transfer-mode-field');
+            const transferSelect = document.getElementById('reimbursement-payment-transfer-mode');
+            const txnField = document.getElementById('reimbursement-payment-transaction-id-field');
+            const txnInput = document.getElementById('reimbursement-payment-transaction-id');
+            const dateInput = document.getElementById('reimbursement-payment-date');
+
+            const setSelectValue = (select, value) => {
+                if (!select) return;
+                const target = String(value ?? '');
+                const option = Array.from(select.options).find(opt => String(opt.value) === target);
+                if (option) {
+                    select.value = target;
+                } else {
+                    select.value = '';
+                }
+            };
+
+            const updateTransferModes = selectedMode => {
+                if (!bankSelect || !transferField || !transferSelect || !txnInput || !txnField) return;
+                const bank = String(bankSelect.value || '').toUpperCase();
+                const modes = Array.isArray(transferModesMap[bank]) ? transferModesMap[bank] : [];
+                const requiresTransfer = modes.length > 0;
+                const requiresTxn = bank !== 'CASH';
+
+                transferField.classList.toggle('hidden', !requiresTransfer);
+                transferSelect.required = requiresTransfer;
+                transferSelect.disabled = !requiresTransfer;
+
+                txnInput.required = requiresTxn;
+                txnInput.disabled = !requiresTxn;
+                txnField.classList.toggle('hidden', !requiresTxn);
+                if (!requiresTxn) {
+                    txnInput.value = '';
+                }
+
+                if (!requiresTransfer) {
+                    transferSelect.innerHTML = '<option value="" selected disabled>Select transfer mode</option>';
+                    return;
+                }
+
+                transferSelect.innerHTML = '<option value=\"\" selected disabled>Select transfer mode</option>' +
+                    modes.map(mode => `<option value=\"${mode}\">${mode}</option>`).join('');
+                if (selectedMode) {
+                    setSelectValue(transferSelect, selectedMode);
+                }
+            };
+
+            if (bankSelect) {
+                bankSelect.addEventListener('change', () => updateTransferModes(''));
+            }
 
             document.querySelectorAll('[data-reimbursement-preview]').forEach(button => {
                 button.addEventListener('click', () => {
@@ -1817,23 +1928,51 @@ function render_admin_reimbursements(): void
                         return;
                     }
 
-                    if (select.value === 'PARTIALLY PAID') {
+                    if (select.value === 'PARTIALLY PAID' || select.value === 'PAID') {
                         event.preventDefault();
-                        document.getElementById('partial-reimbursement-id').value = form.dataset.reimbursementId || '';
-                        document.getElementById('partial-filter-employee').value = form.dataset.filterEmployee || '';
-                        document.getElementById('partial-filter-category').value = form.dataset.filterCategory || '';
-                        document.getElementById('reimbursement-partial-copy').textContent = `Remaining balance before this payment: Rs ${form.dataset.reimbursementRemaining || '0.00'}.`;
-                        document.getElementById('partial-amount-input').value = '';
-                        openPageModal('reimbursement-partial-modal');
-                    }
+                        const remaining = Number(form.dataset.reimbursementRemaining || 0);
+                        const mode = String(select.value || '');
 
-                    if (select.value === 'PAID') {
-                        event.preventDefault();
-                        document.getElementById('paid-reimbursement-id').value = form.dataset.reimbursementId || '';
-                        document.getElementById('paid-filter-employee').value = form.dataset.filterEmployee || '';
-                        document.getElementById('paid-filter-category').value = form.dataset.filterCategory || '';
-                        document.getElementById('reimbursement-paid-copy').textContent = `Settlement amount for this payment: Rs ${form.dataset.reimbursementRemaining || '0.00'}.`;
-                        openPageModal('reimbursement-paid-modal');
+                        if (paymentIdInput) paymentIdInput.value = form.dataset.reimbursementId || '';
+                        if (paymentFilterEmployee) paymentFilterEmployee.value = form.dataset.filterEmployee || '';
+                        if (paymentFilterCategory) paymentFilterCategory.value = form.dataset.filterCategory || '';
+
+                        if (paymentTitle) {
+                            paymentTitle.textContent = mode === 'PAID' ? 'Mark Reimbursement as Paid' : 'Record Partial Reimbursement';
+                        }
+                        if (paymentCopy) {
+                            paymentCopy.textContent = mode === 'PAID'
+                                ? `Settlement amount for this payment: Rs ${remaining.toFixed(2)}.`
+                                : `Enter the partial payment amount (must be less than or equal to remaining): Rs ${remaining.toFixed(2)}.`;
+                        }
+
+                        if (paymentForm) {
+                            paymentForm.reset();
+                        }
+                        if (dateInput) {
+                            const today = new Date();
+                            const yyyy = today.getFullYear();
+                            const mm = String(today.getMonth() + 1).padStart(2, '0');
+                            const dd = String(today.getDate()).padStart(2, '0');
+                            dateInput.value = `${yyyy}-${mm}-${dd}`;
+                        }
+
+                        if (amountInput) {
+                            amountInput.max = remaining > 0 ? String(remaining.toFixed(2)) : '';
+                            amountInput.readOnly = mode === 'PAID';
+                            amountInput.value = mode === 'PAID' ? String(remaining.toFixed(2)) : '';
+                        }
+
+                        // Reset conditional banking fields.
+                        if (bankSelect) {
+                            bankSelect.value = '';
+                        }
+                        if (txnInput) {
+                            txnInput.value = '';
+                        }
+                        updateTransferModes('');
+
+                        openPageModal('reimbursement-payment-modal');
                     }
                 });
             });
