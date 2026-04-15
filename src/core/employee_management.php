@@ -130,7 +130,13 @@ function insert_employee(array $data, array $rules): array
     if (role_requires_unique_email($role) && role_email_exists($role, $email)) {
         throw new RuntimeException('This employee email is already assigned.');
     }
-    db()->prepare('INSERT INTO users (role, admin_id, emp_id, name, email, phone, shift, salary, password_hash, force_password_change, password_changed_at, created_at) VALUES (:role, :admin_id, :emp_id, :name, :email, :phone, :shift, :salary, :password_hash, :force_password_change, :password_changed_at, :created_at)')
+    
+    $employeeType = trim((string) ($data['employee_type'] ?? 'regular'));
+    if (!in_array($employeeType, ['regular', 'vendor', 'corporate'], true)) {
+        $employeeType = 'regular';
+    }
+    
+    db()->prepare('INSERT INTO users (role, admin_id, emp_id, name, email, phone, shift, salary, employee_type, password_hash, force_password_change, password_changed_at, created_at) VALUES (:role, :admin_id, :emp_id, :name, :email, :phone, :shift, :salary, :employee_type, :password_hash, :force_password_change, :password_changed_at, :created_at)')
         ->execute([
             'role' => $role,
             'admin_id' => $adminId,
@@ -140,6 +146,7 @@ function insert_employee(array $data, array $rules): array
             'phone' => $phone,
             'shift' => trim((string) ($data['shift'] ?? '')),
             'salary' => $salary,
+            'employee_type' => $employeeType,
             'password_hash' => password_hash($password, PASSWORD_DEFAULT),
             'force_password_change' => 1,
             'password_changed_at' => null,

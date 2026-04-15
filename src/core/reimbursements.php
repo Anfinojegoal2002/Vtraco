@@ -326,6 +326,16 @@ function create_employee_reimbursement(array $employee, string $date, array $sou
     }
 
     validate_reimbursement_expense_date($date);
+
+    $stmt = db()->prepare('SELECT COUNT(*) FROM employee_reimbursements WHERE user_id = :user_id AND expense_date = :expense_date');
+    $stmt->execute([
+        'user_id' => (int) $employee['id'],
+        'expense_date' => $date,
+    ]);
+    if ((int) $stmt->fetchColumn() > 0) {
+        throw new RuntimeException('You have already submitted a reimbursement request for this date.');
+    }
+
     $category = validate_reimbursement_category((string) ($source['category'] ?? ''));
     $description = trim((string) ($source['expense_description'] ?? ''));
     if ($description === '') {
@@ -335,23 +345,34 @@ function create_employee_reimbursement(array $employee, string $date, array $sou
     $amountRequested = validate_reimbursement_amount((string) ($source['amount_requested'] ?? '0'));
     $attachment = store_reimbursement_upload($file, 'claims', 'reimbursement proof');
 
-    db()->prepare('INSERT INTO employee_reimbursements (user_id, admin_id, expense_date, category, expense_description, amount_requested, amount_paid, remaining_balance, status, attachment_path, attachment_name, attachment_mime, payment_id, created_at, updated_at)
-        VALUES (:user_id, :admin_id, :expense_date, :category, :expense_description, :amount_requested, 0, :remaining_balance, :status, :attachment_path, :attachment_name, :attachment_mime, NULL, :created_at, :updated_at)')
-        ->execute([
-            'user_id' => (int) $employee['id'],
-            'admin_id' => (int) $employee['admin_id'],
-            'expense_date' => $date,
-            'category' => $category,
-            'expense_description' => $description,
-            'amount_requested' => $amountRequested,
-            'remaining_balance' => $amountRequested,
-            'status' => 'PENDING',
-            'attachment_path' => $attachment['path'],
-            'attachment_name' => $attachment['name'],
-            'attachment_mime' => $attachment['mime'],
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+    try {
+        db()->prepare('INSERT INTO employee_reimbursements (user_id, admin_id, expense_date, category, expense_description, amount_requested, amount_paid, remaining_balance, status, attachment_path, attachment_name, attachment_mime, payment_id, created_at, updated_at)
+            VALUES (:user_id, :admin_id, :expense_date, :category, :expense_description, :amount_requested, 0, :remaining_balance, :status, :attachment_path, :attachment_name, :attachment_mime, NULL, :created_at, :updated_at)')
+            ->execute([
+                'user_id' => (int) $employee['id'],
+                'admin_id' => (int) $employee['admin_id'],
+                'expense_date' => $date,
+                'category' => $category,
+                'expense_description' => $description,
+                'amount_requested' => $amountRequested,
+                'remaining_balance' => $amountRequested,
+                'status' => 'PENDING',
+                'attachment_path' => $attachment['path'],
+                'attachment_name' => $attachment['name'],
+                'attachment_mime' => $attachment['mime'],
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+    } catch (PDOException $exception) {
+        // If the DB already has (or later gets) a UNIQUE(user_id, expense_date),
+        // a double-submit can still race past the COUNT(*) check. Convert that into a friendly error.
+        $sqlState = (string) ($exception->getCode() ?? '');
+        $message = (string) ($exception->getMessage() ?? '');
+        if ($sqlState === '23000' || stripos($message, 'Duplicate') !== false) {
+            throw new RuntimeException('You have already submitted a reimbursement request for this date.');
+        }
+        throw $exception;
+    }
 
     $createdId = (int) db()->lastInsertId();
     $created = employee_reimbursement_by_id($createdId, (int) $employee['id']);

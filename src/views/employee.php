@@ -88,44 +88,48 @@ function render_employee_reimbursements(): void
             <div class="hint">Previous months are disabled for employee reimbursement submissions.</div>
         </div>
         <div class="spacer"></div>
-        <div class="reimbursement-weekdays">
-            <?php foreach ($dayLabels as $label): ?>
-                <span><?= h($label) ?></span>
-            <?php endforeach; ?>
-        </div>
-        <div class="reimbursement-calendar-grid">
-            <?php for ($blank = 0; $blank < $startOffset; $blank++): ?>
-                <div class="reimbursement-day placeholder" aria-hidden="true"></div>
-            <?php endfor; ?>
+        <div class="calendar-shell reimbursement-calendar-shell">
+            <div class="calendar-grid scroll-panel reimbursement-calendar-grid">
+                <?php foreach ($dayLabels as $label): ?>
+                    <div class="weekday"><?= h($label) ?></div>
+                <?php endforeach; ?>
 
-            <?php for ($day = 1; $day <= $daysInMonth; $day++):
-                $date = $monthStart->setDate((int) $monthStart->format('Y'), (int) $monthStart->format('m'), $day)->format('Y-m-d');
-                $isFuture = $date > $today;
-                $summary = $claimsByDate[$date] ?? ['count' => 0, 'total' => 0];
-                $count = (int) ($summary['count'] ?? 0);
-                $total = (float) ($summary['total'] ?? 0);
-                ?>
-                <?php if ($isFuture): ?>
-                    <div class="reimbursement-day future">
-                        <strong><?= $day ?></strong>
-                        <span>Locked</span>
-                    </div>
-                <?php else: ?>
-                    <button
-                        class="reimbursement-day <?= $date === $today ? 'today' : '' ?>"
-                        type="button"
-                        data-modal-target="employee-reimbursement-modal"
-                        data-reimbursement-date="<?= h($date) ?>"
-                        data-reimbursement-display="<?= h(date('d M Y', strtotime($date))) ?>"
-                    >
-                        <strong><?= $day ?></strong>
-                        <span><?= $count > 0 ? $count . ' claim' . ($count > 1 ? 's' : '') : 'Add claim' ?></span>
-                        <?php if ($count > 0): ?>
-                            <small>Rs <?= h(number_format($total, 2)) ?></small>
-                        <?php endif; ?>
-                    </button>
-                <?php endif; ?>
-            <?php endfor; ?>
+                <?php for ($blank = 0; $blank < $startOffset; $blank++): ?>
+                    <div class="day-card blank"></div>
+                <?php endfor; ?>
+
+                <?php for ($day = 1; $day <= $daysInMonth; $day++):
+                    $date = $monthStart->setDate((int) $monthStart->format('Y'), (int) $monthStart->format('m'), $day)->format('Y-m-d');
+                    $isFuture = $date > $today;
+                    $summary = $claimsByDate[$date] ?? ['count' => 0, 'total' => 0];
+                    $count = (int) ($summary['count'] ?? 0);
+                    $total = (float) ($summary['total'] ?? 0);
+                    $dayCopy = $isFuture ? 'Locked' : ($count > 0 ? ($count . ' claim' . ($count > 1 ? 's' : '')) : 'Add claim');
+                    ?>
+                    <?php if ($isFuture): ?>
+                        <div class="day-card static">
+                            <span class="day-dot dot-Pending" aria-hidden="true"></span>
+                            <span class="day-number"><?= sprintf('%02d', $day) ?></span>
+                            <span class="day-copy"><?= h($dayCopy) ?></span>
+                        </div>
+                    <?php else: ?>
+                        <button
+                            class="day-card"
+                            type="button"
+                            data-modal-target="employee-reimbursement-modal"
+                            data-reimbursement-date="<?= h($date) ?>"
+                            data-reimbursement-display="<?= h(date('d M Y', strtotime($date))) ?>"
+                        >
+                            <span class="day-dot <?= $count > 0 ? 'dot-Present' : 'dot-Pending' ?>" aria-hidden="true"></span>
+                            <span class="day-number"><?= sprintf('%02d', $day) ?></span>
+                            <span class="day-copy"><?= h($dayCopy) ?></span>
+                            <?php if ($count > 0): ?>
+                                <span class="day-copy">Rs <?= h(number_format($total, 2)) ?></span>
+                            <?php endif; ?>
+                        </button>
+                    <?php endif; ?>
+                <?php endfor; ?>
+            </div>
         </div>
     </section>
 
@@ -171,6 +175,8 @@ function render_employee_reimbursements(): void
                 <div class="list-item muted">No reimbursement requests recorded for this date yet.</div>
             </div>
             <div class="spacer"></div>
+            <div class="list-item muted hidden" id="employee-reimbursement-locked-note">A reimbursement request has already been submitted for this date.</div>
+            <div class="spacer hidden" id="employee-reimbursement-locked-spacer"></div>
             <form method="post" enctype="multipart/form-data" class="stack-form" id="employee-reimbursement-form" data-validate>
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="employee_submit_reimbursement">
@@ -220,15 +226,8 @@ function render_employee_reimbursements(): void
 
     <style>
         .reimbursement-calendar-block { overflow: hidden; }
-        .reimbursement-weekdays { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px; }
-        .reimbursement-weekdays span { text-align: center; font-weight: 700; color: #24346d; }
-        .reimbursement-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; }
-        .reimbursement-day { min-height: 112px; padding: 14px 12px; border: 1px solid rgba(36, 52, 109, 0.14); border-radius: 18px; background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(243,246,255,0.95)); display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; color: #1f2f67; text-align: left; }
-        .reimbursement-day.today { border-color: rgba(67, 56, 202, 0.35); box-shadow: 0 14px 26px rgba(67, 56, 202, 0.12); }
-        .reimbursement-day.future { opacity: 0.58; cursor: not-allowed; background: #eef2ff; }
-        .reimbursement-day.placeholder { visibility: hidden; min-height: 0; padding: 0; border: 0; }
-        .reimbursement-day strong { font-size: 1.1rem; }
-        .reimbursement-day small { color: #475569; font-weight: 700; }
+        .reimbursement-calendar-shell { box-shadow: none; border: 0; padding: 0; background: transparent; }
+        .reimbursement-calendar-grid { height: auto; min-height: 0; max-height: none; padding-right: 0; }
         .reimbursement-history-list { display: grid; gap: 14px; }
         .reimbursement-history-card { padding: 18px; border-radius: 22px; background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(246,248,255,0.96)); border: 1px solid rgba(36, 52, 109, 0.1); }
         .reimbursement-modal-card { max-width: 760px; }
@@ -242,8 +241,7 @@ function render_employee_reimbursements(): void
         .reimbursement-status.partially-paid { background: #e0f2fe; color: #0369a1; }
         .reimbursement-status.paid { background: #dcfce7; color: #166534; }
         @media (max-width: 900px) {
-            .reimbursement-calendar-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-            .reimbursement-weekdays { display: none; }
+            .reimbursement-calendar-grid { grid-template-columns: repeat(7, minmax(38px, 1fr)); }
         }
     </style>
 
@@ -254,6 +252,26 @@ function render_employee_reimbursements(): void
             const modalDateInput = document.getElementById('employee-reimbursement-date-input');
             const claimsList = document.getElementById('employee-reimbursement-existing-list');
             const form = document.getElementById('employee-reimbursement-form');
+            const lockedNote = document.getElementById('employee-reimbursement-locked-note');
+            const lockedSpacer = document.getElementById('employee-reimbursement-locked-spacer');
+            const formControls = form ? Array.from(form.querySelectorAll('input, textarea, select, button')) : [];
+            const submitButton = form ? form.querySelector('button[type="submit"]') : null;
+            const submitButtonText = submitButton ? submitButton.textContent : 'Submit Reimbursement';
+
+            if (form) {
+                form.addEventListener('submit', (event) => {
+                    // Prevent double-submit (fast clicks / slow uploads).
+                    if (form.dataset.submitting === '1') {
+                        event.preventDefault();
+                        return;
+                    }
+                    form.dataset.submitting = '1';
+                    if (submitButton) {
+                        submitButton.disabled = true;
+                        submitButton.textContent = 'Submitting...';
+                    }
+                });
+            }
 
             document.querySelectorAll('[data-reimbursement-date]').forEach(button => {
                 button.addEventListener('click', () => {
@@ -263,6 +281,7 @@ function render_employee_reimbursements(): void
 
                     if (form) {
                         form.reset();
+                        form.dataset.submitting = '0';
                     }
                     if (modalDateInput) {
                         modalDateInput.value = date;
@@ -272,6 +291,26 @@ function render_employee_reimbursements(): void
                     }
                     if (!claimsList) {
                         return;
+                    }
+
+                    const hasClaim = dayClaims.length > 0;
+
+                    if (lockedNote && lockedSpacer) {
+                        lockedNote.classList.toggle('hidden', !hasClaim);
+                        lockedSpacer.classList.toggle('hidden', !hasClaim);
+                    }
+                    formControls.forEach(control => {
+                        if (control && control.name === '_csrf') {
+                            return;
+                        }
+                        if (control && control.type === 'hidden') {
+                            return;
+                        }
+                        control.disabled = hasClaim;
+                    });
+                    if (submitButton) {
+                        submitButton.textContent = submitButtonText;
+                        submitButton.disabled = hasClaim;
                     }
 
                     if (!dayClaims.length) {

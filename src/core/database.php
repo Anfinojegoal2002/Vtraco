@@ -143,6 +143,9 @@ function initialize_database(): void
     if (!index_exists($pdo, 'users', 'idx_users_password_reset_requested_at')) {
         $pdo->exec('CREATE INDEX idx_users_password_reset_requested_at ON users(password_reset_requested_at)');
     }
+    if (!table_has_column($pdo, 'users', 'employee_type')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN employee_type VARCHAR(50) DEFAULT NULL AFTER salary');
+    }
     $pdo->exec("CREATE TABLE IF NOT EXISTS employee_rules (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         user_id INT UNSIGNED NOT NULL,

@@ -116,6 +116,216 @@ function render_admin_dashboard(): void
     render_footer();
 }
 
+function render_corporate_dashboard(): void
+{
+    $freelancer = require_role('freelancer');
+
+    $leaveRequests = recent_leave_requests();
+    $snapshot = attendance_snapshot_for_date();
+    $counts = $snapshot['counts'];
+    $details = $snapshot['details'];
+    $displayDate = date('d M Y', strtotime($snapshot['date']));
+
+    render_header('Corporate Dashboard', 'corporate-dashboard-page');
+    ?>
+    <section class="page-title">
+        <div>
+            <span class="eyebrow">Corporate Dashboard</span>
+            <h1>Corporate Dashboard</h1>
+            <p>Track attendance for <?= h($displayDate) ?>.</p>
+        </div>
+    </section>
+
+    <section class="dashboard-grid">
+        <div class="metric-card">
+            <span class="eyebrow">Team</span>
+            <strong><?= employee_count() ?></strong>
+            <span>Total Employees</span>
+        </div>
+        <div class="metric-card">
+            <span class="eyebrow">Today</span>
+            <strong><?= (int) ($counts['Present'] ?? 0) ?></strong>
+            <span>Present</span>
+        </div>
+        <div class="metric-card">
+            <span class="eyebrow">Today</span>
+            <strong><?= (int) ($counts['Absent'] ?? 0) ?></strong>
+            <span>Absent</span>
+        </div>
+    </section>
+
+    <div class="spacer"></div>
+
+    <section class="section-block">
+        <div class="split">
+            <div>
+                <span class="eyebrow">Request Details</span>
+                <h2>Half Day &amp; Leave Details</h2>
+            </div>
+            <span class="badge"><?= h($displayDate) ?></span>
+        </div>
+        <div class="spacer"></div>
+        <?php if ($details): ?>
+            <div class="list">
+                <?php foreach ($details as $detail): $statusClass = str_replace(' ', '-', (string) $detail['status']); ?>
+                    <div class="list-item">
+                        <div class="split">
+                            <div>
+                                <strong><?= h($detail['employee']['name']) ?></strong><br>
+                                <span class="hint"><?= h((string) $detail['employee']['emp_id']) ?> | <?= h((string) $detail['employee']['email']) ?></span>
+                            </div>
+                            <span class="status-pill status-<?= h($statusClass) ?>"><?= h((string) $detail['status']) ?></span>
+                        </div>
+                        <div class="spacer"></div>
+                        <div class="hint"><?= h((string) $detail['detail']) ?></div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php else: ?>
+            <div class="list-item muted">No half day or leave details recorded for <?= h($displayDate) ?>.</div>
+        <?php endif; ?>
+    </section>
+
+    <div class="spacer"></div>
+
+    <section class="section-block">
+        <div class="split">
+            <div>
+                <span class="eyebrow">Attendance</span>
+                <h2>Leave Requests</h2>
+            </div>
+            <span class="badge"><?= count($leaveRequests) ?> recent</span>
+        </div>
+        <div class="spacer"></div>
+        <?php if ($leaveRequests): ?>
+            <div class="list">
+                <?php foreach ($leaveRequests as $request): ?>
+                    <div class="list-item">
+                        <div class="split">
+                            <div>
+                                <strong><?= h((string) $request['name']) ?></strong><br>
+                                <span class="hint"><?= h((string) $request['emp_id']) ?> | <?= h((string) $request['email']) ?></span>
+                            </div>
+                            <span class="badge"><?= h(date('d M Y', strtotime((string) $request['attend_date']))) ?></span>
+                        </div>
+                        <div class="spacer"></div>
+                        <div class="hint"><?= h(trim((string) $request['leave_reason']) ?: 'No leave reason provided.') ?></div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php else: ?>
+            <div class="list-item muted">No leave requests have been submitted yet.</div>
+        <?php endif; ?>
+    </section>
+    <?php
+    render_footer();
+}
+
+function render_vendor_dashboard(): void
+{
+    $vendor = require_role('external_vendor');
+
+    $leaveRequests = recent_leave_requests();
+    $snapshot = attendance_snapshot_for_date();
+    $counts = $snapshot['counts'];
+    $details = $snapshot['details'];
+    $displayDate = date('d M Y', strtotime($snapshot['date']));
+
+    render_header('Vendor Dashboard', 'vendor-dashboard-page');
+    ?>
+    <section class="page-title">
+        <div>
+            <span class="eyebrow">Vendor Dashboard</span>
+            <h1>Vendor Dashboard</h1>
+            <p>Track attendance for <?= h($displayDate) ?>.</p>
+        </div>
+    </section>
+
+    <section class="dashboard-grid">
+        <div class="metric-card">
+            <span class="eyebrow">Team</span>
+            <strong><?= employee_count() ?></strong>
+            <span>Total Employees</span>
+        </div>
+        <div class="metric-card">
+            <span class="eyebrow">Today</span>
+            <strong><?= (int) ($counts['Present'] ?? 0) ?></strong>
+            <span>Present</span>
+        </div>
+        <div class="metric-card">
+            <span class="eyebrow">Today</span>
+            <strong><?= (int) ($counts['Absent'] ?? 0) ?></strong>
+            <span>Absent</span>
+        </div>
+    </section>
+
+    <div class="spacer"></div>
+
+    <section class="section-block">
+        <div class="split">
+            <div>
+                <span class="eyebrow">Request Details</span>
+                <h2>Half Day &amp; Leave Details</h2>
+            </div>
+            <span class="badge"><?= h($displayDate) ?></span>
+        </div>
+        <div class="spacer"></div>
+        <?php if ($details): ?>
+            <div class="list">
+                <?php foreach ($details as $detail): $statusClass = str_replace(' ', '-', (string) $detail['status']); ?>
+                    <div class="list-item">
+                        <div class="split">
+                            <div>
+                                <strong><?= h($detail['employee']['name']) ?></strong><br>
+                                <span class="hint"><?= h((string) $detail['employee']['emp_id']) ?> | <?= h((string) $detail['employee']['email']) ?></span>
+                            </div>
+                            <span class="status-pill status-<?= h($statusClass) ?>"><?= h((string) $detail['status']) ?></span>
+                        </div>
+                        <div class="spacer"></div>
+                        <div class="hint"><?= h((string) $detail['detail']) ?></div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php else: ?>
+            <div class="list-item muted">No half day or leave details recorded for <?= h($displayDate) ?>.</div>
+        <?php endif; ?>
+    </section>
+
+    <div class="spacer"></div>
+
+    <section class="section-block">
+        <div class="split">
+            <div>
+                <span class="eyebrow">Attendance</span>
+                <h2>Leave Requests</h2>
+            </div>
+            <span class="badge"><?= count($leaveRequests) ?> recent</span>
+        </div>
+        <div class="spacer"></div>
+        <?php if ($leaveRequests): ?>
+            <div class="list">
+                <?php foreach ($leaveRequests as $request): ?>
+                    <div class="list-item">
+                        <div class="split">
+                            <div>
+                                <strong><?= h((string) $request['name']) ?></strong><br>
+                                <span class="hint"><?= h((string) $request['emp_id']) ?> | <?= h((string) $request['email']) ?></span>
+                            </div>
+                            <span class="badge"><?= h(date('d M Y', strtotime((string) $request['attend_date']))) ?></span>
+                        </div>
+                        <div class="spacer"></div>
+                        <div class="hint"><?= h(trim((string) $request['leave_reason']) ?: 'No leave reason provided.') ?></div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php else: ?>
+            <div class="list-item muted">No leave requests have been submitted yet.</div>
+        <?php endif; ?>
+    </section>
+    <?php
+    render_footer();
+}
+
 function render_rules_editor(array $existing = [], ?string $submitLabel = null): void
 {
     $defaults = array_merge([
@@ -156,7 +366,7 @@ function render_rules_editor(array $existing = [], ?string $submitLabel = null):
 
 function render_admin_employees(): void
 {
-    require_roles(['admin', 'freelancer']);
+    require_roles(['admin', 'freelancer', 'external_vendor']);
     $editEmployee = null;
     $stage = $_GET['stage'] ?? null;
     $pendingEmployee = $_SESSION['pending_employee'] ?? null;
@@ -172,14 +382,17 @@ function render_admin_employees(): void
 
     $user = current_user();
     $isFreelancer = ($user['role'] ?? '') === 'freelancer';
-    $label = $isFreelancer ? 'Corporate Staff' : 'Employees';
-    $singularLabel = $isFreelancer ? 'Staff Member' : 'Employee';
+    $isVendor = ($user['role'] ?? '') === 'external_vendor';
+    $label = $isFreelancer ? 'Corporate Employee' : ($isVendor ? 'Vendor Employees' : 'Employees');
+    $singularLabel = 'Employee';
 
     render_header($label);
+    
+    $employeeType = $_GET['type'] ?? 'regular';
     ?>
     <section class="page-title">
         <div>
-            <span class="eyebrow">Admin - <?= h($label) ?></span>
+            <span class="eyebrow"><?= ($isFreelancer || $isVendor) ? h($label) : ('Admin - ' . h($label)) ?></span>
             <h1><?= h($label) ?></h1>
             <p>Add <?= h(strtolower($label)) ?> manually, import a CSV batch, update records, and manage only the <?= h(strtolower($label)) ?> assigned to this administrator.</p>
         </div>
@@ -192,10 +405,28 @@ function render_admin_employees(): void
         <div class="data-toolbar">
             <div class="split">
                 <h2>Your <?= h($label) ?></h2>
-                <span class="badge" id="admin-employees-count"><?= count($allEmployees) ?> total</span>
+                <span class="badge" id="admin-employees-count"><?php
+                    $filteredEmployees = array_filter($allEmployees, function($emp) use ($employeeType) {
+                        $type = (string) ($emp['employee_type'] ?? 'regular');
+                        if ($employeeType === 'regular') {
+                            return $type === 'regular' || $type === '';
+                        }
+                        return $type === $employeeType;
+                    });
+                    echo count($filteredEmployees);
+                ?> total</span>
             </div>
-            <div class="data-toolbar-search">
-                <input type="text" placeholder="Search by ID, name, email, phone, shift, or rule..." data-table-filter="admin-employees-table" data-empty-target="admin-employees-empty" data-count-target="admin-employees-count">
+            <div class="data-toolbar-right">
+                <?php if (!$isFreelancer && !$isVendor): ?>
+                    <nav class="employee-tabs inline" aria-label="Employee type filters">
+                        <a href="<?= h(BASE_URL) ?>?page=admin_employees&type=regular" class="tab-link <?= $employeeType === 'regular' ? 'active' : '' ?>">Employee</a>
+                        <a href="<?= h(BASE_URL) ?>?page=admin_employees&type=vendor" class="tab-link <?= $employeeType === 'vendor' ? 'active' : '' ?>">Vendor</a>
+                        <a href="<?= h(BASE_URL) ?>?page=admin_employees&type=corporate" class="tab-link <?= $employeeType === 'corporate' ? 'active' : '' ?>">Corporate Employee</a>
+                    </nav>
+                <?php endif; ?>
+                <div class="data-toolbar-search">
+                    <input type="text" placeholder="Search by ID, name, email, phone, shift, or rule..." data-table-filter="admin-employees-table" data-empty-target="admin-employees-empty" data-count-target="admin-employees-count">
+                </div>
             </div>
         </div>
         <table>
@@ -212,7 +443,15 @@ function render_admin_employees(): void
                 </tr>
             </thead>
             <tbody id="admin-employees-table">
-                <?php foreach ($allEmployees as $employee):
+                <?php 
+                $filteredEmployees = array_filter($allEmployees, function($emp) use ($employeeType) {
+                    $type = (string) ($emp['employee_type'] ?? 'regular');
+                    if ($employeeType === 'regular') {
+                        return $type === 'regular' || $type === '';
+                    }
+                    return $type === $employeeType;
+                });
+                foreach ($filteredEmployees as $employee):
                     $rules = employee_rules((int) $employee['id']);
                     $rulesMarkup = rules_summary($rules);
                     $rulesText = strtolower(trim(preg_replace('/\s+/', ' ', strip_tags(str_replace('<br>', ' ', $rulesMarkup)))));
@@ -248,7 +487,7 @@ function render_admin_employees(): void
     <?php if ($editEmployee): ?>
         <div class="modal open" id="edit-employee-modal" data-open-on-load>
             <div class="modal-card" style="max-width:720px;">
-                <button class="modal-close" type="button" data-close-modal onclick="window.location='<?= h(BASE_URL) ?>?page=admin_employees'">&times;</button>
+                <button class="modal-close" type="button" data-close-modal onclick="window.location='<?= h(BASE_URL) ?>?page=admin_employees&type=<?= h($employeeType) ?>'">&times;</button>
                 <span class="eyebrow">Edit <?= h($singularLabel) ?></span>
                 <h2><?= h($editEmployee['name']) ?></h2>
                 <form method="post" class="stack-form">
@@ -262,10 +501,11 @@ function render_admin_employees(): void
                         <label>Phone Number<input type="text" name="phone" value="<?= h($editEmployee['phone']) ?>" required></label>
                         <label>Shift<input type="text" name="shift" value="<?= h((string) ($editEmployee['shift'] ?? '')) ?>" placeholder="Enter shift"></label>
                         <label>Salary<input type="number" step="0.01" name="salary" value="<?= h((string) $editEmployee['salary']) ?>" required></label>
+                        <label>Employee Type<select name="employee_type"><option value="regular" <?= ((string) ($editEmployee['employee_type'] ?? 'regular')) === 'regular' ? 'selected' : '' ?>>Regular Employee</option><option value="vendor" <?= ((string) ($editEmployee['employee_type'] ?? '')) === 'vendor' ? 'selected' : '' ?>>Vendor</option><option value="corporate" <?= ((string) ($editEmployee['employee_type'] ?? '')) === 'corporate' ? 'selected' : '' ?>>Corporate Employee</option></select></label>
                     </div>
                     <div class="inline-actions">
                         <button class="button solid" type="submit">Save Changes</button>
-                        <a class="button outline" href="<?= h(BASE_URL) ?>?page=admin_employees">Cancel</a>
+                        <a class="button outline" href="<?= h(BASE_URL) ?>?page=admin_employees&type=<?= h($employeeType) ?>">Cancel</a>
                     </div>
                 </form>
             </div>
@@ -305,6 +545,7 @@ function render_admin_employees(): void
                         <div class="field"><label>Email</label><div class="field-row"><input type="email" name="email" required></div><small class="field-error"><span>!</span>Valid email required.</small></div>
                         <div class="field"><label>Phone Number</label><div class="field-row"><input type="text" name="phone" required></div><small class="field-error"><span>!</span>Phone number required.</small></div>
                         <div class="field"><label>Salary</label><div class="field-row"><input type="number" step="0.01" min="0" name="salary" required></div><small class="field-error"><span>!</span>Salary is required.</small></div>
+                        <div class="field"><label>Employee Type</label><div class="field-row"><select name="employee_type" required><option value="regular">Regular Employee</option><option value="vendor">Vendor</option><option value="corporate">Corporate Employee</option></select></div><small class="field-error"><span>!</span>Employee type is required.</small></div>
                     </div>
                     <button class="button solid" type="submit" data-required-submit>Next</button>
                 </form>
@@ -806,9 +1047,25 @@ function render_admin_shift(): void
 
 function render_admin_attendance(): void
 {
-    require_roles(['admin', 'freelancer']);
+    require_roles(['admin', 'freelancer', 'external_vendor']);
     $allEmployees = employees();
-    $fallbackEmployee = $allEmployees[0] ?? null;
+    $employeeType = $_GET['type'] ?? 'regular';
+    
+    $user = current_user();
+    $isFreelancer = ($user['role'] ?? '') === 'freelancer';
+    $isVendor = ($user['role'] ?? '') === 'external_vendor';
+    
+    // Filter employees by type
+    $filteredEmployees = array_filter($allEmployees, function($emp) use ($employeeType) {
+        $type = (string) ($emp['employee_type'] ?? 'regular');
+        if ($employeeType === 'regular') {
+            return $type === 'regular' || $type === '';
+        }
+        return $type === $employeeType;
+    });
+    $filteredEmployees = array_values($filteredEmployees); // Re-index array
+    
+    $fallbackEmployee = $filteredEmployees[0] ?? null;
     $selectedId = (int) ($_GET['employee_id'] ?? ($fallbackEmployee['id'] ?? 0));
     $employee = $selectedId ? (employee_by_id($selectedId) ?: $fallbackEmployee) : $fallbackEmployee;
     $month = preg_match('/^\d{4}-\d{2}$/', $_GET['month'] ?? '') ? $_GET['month'] : date('Y-m');
@@ -822,7 +1079,7 @@ function render_admin_attendance(): void
     ?>
     <section class="page-title">
         <div>
-            <span class="eyebrow">Admin - Attendance</span>
+            <span class="eyebrow"><?= ($isFreelancer || $isVendor) ? 'Attendance' : 'Admin - Attendance' ?></span>
             <h1>Attendance Calendar</h1>
             <p>All Sundays are marked as Week Off automatically. Click any date to inspect sessions and edit the daily status.</p>
         </div>
@@ -830,12 +1087,24 @@ function render_admin_attendance(): void
             <button class="button outline" type="button" data-modal-target="attendance-import-modal">Bulk Import</button>
         </div>
     </section>
+
+    <?php if (!$isFreelancer && !$isVendor): ?>
+    <section class="employee-tabs-section">
+        <nav class="employee-tabs">
+            <a href="<?= h(BASE_URL) ?>?page=admin_attendance&type=regular" class="tab-link <?= $employeeType === 'regular' ? 'active' : '' ?>">Employee</a>
+            <a href="<?= h(BASE_URL) ?>?page=admin_attendance&type=vendor" class="tab-link <?= $employeeType === 'vendor' ? 'active' : '' ?>">Vendor</a>
+            <a href="<?= h(BASE_URL) ?>?page=admin_attendance&type=corporate" class="tab-link <?= $employeeType === 'corporate' ? 'active' : '' ?>">Corporate Employee</a>
+        </nav>
+    </section>
+    <?php endif; ?>
+
     <section class="section-block scroll-panel">
         <form method="get" class="form-grid">
             <input type="hidden" name="page" value="admin_attendance">
+            <input type="hidden" name="type" value="<?= h($employeeType) ?>">
             <label>Employee
                 <select name="employee_id">
-                    <?php foreach ($allEmployees as $emp): ?>
+                    <?php foreach ($filteredEmployees as $emp): ?>
                         <option value="<?= (int) $emp['id'] ?>" <?= $employee && (int) $employee['id'] === (int) $emp['id'] ? 'selected' : '' ?>><?= h($emp['name']) ?> (<?= h($emp['emp_id']) ?>)</option>
                     <?php endforeach; ?>
                 </select>

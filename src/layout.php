@@ -14,6 +14,12 @@ function render_page(string $page): void
         case 'admin_dashboard':
             render_admin_dashboard();
             break;
+        case 'corporate_dashboard':
+            render_corporate_dashboard();
+            break;
+        case 'vendor_dashboard':
+            render_vendor_dashboard();
+            break;
         case 'admin_employees':
             render_admin_employees();
             break;
@@ -60,7 +66,7 @@ function render_header(string $title, string $pageClass = ''): void
 {
     $user = current_user();
     $page = $_GET['page'] ?? 'landing';
-    $isAdminShell = $user && in_array($user['role'], ['admin', 'freelancer'], true);
+    $isAdminShell = $user && in_array($user['role'], ['admin', 'freelancer', 'external_vendor'], true);
     $isEmployeeShell = $user && $user['role'] === 'employee';
     $isSidebarShell = $isAdminShell || $isEmployeeShell;
     $isLandingPage = !$user && $page === 'landing';
@@ -81,7 +87,10 @@ function render_header(string $title, string $pageClass = ''): void
     <div class="app-shell <?= $isAdminShell ? 'admin-shell' : ($isEmployeeShell ? 'employee-shell' : '') ?>">
         <?php if ($isSidebarShell): ?>
             <aside class="<?= $isAdminShell ? 'admin-sidebar' : 'employee-sidebar' ?>">
-                <a class="brand" href="<?= h(BASE_URL) ?>?page=<?= $isAdminShell ? 'admin_dashboard' : 'employee_attendance' ?>">
+                <a class="brand" href="<?= h(BASE_URL) ?>?page=<?= $isAdminShell ? (
+                    (($user['role'] ?? '') === 'freelancer') ? 'corporate_dashboard'
+                    : ((($user['role'] ?? '') === 'external_vendor') ? 'vendor_dashboard' : 'admin_dashboard')
+                ) : 'employee_attendance' ?>">
                     <span class="brand-mark">VT</span>
                     <span class="brand-copy"><strong>V Traco</strong><small><?= h($isAdminShell ? 'Attendance & Payroll' : 'Employee Workspace') ?></small></span>
                 </a>
@@ -97,12 +106,27 @@ function render_header(string $title, string $pageClass = ''): void
                     </div>
                     <div>
                         <strong><?= h($user['name']) ?></strong><br>
-                        <span class="hint"><?= h($isAdminShell ? 'Administrator' : (string) ($user['emp_id'] ?: 'Employee')) ?></span>
+                        <span class="hint"><?php
+                            if ($isAdminShell && (($user['role'] ?? '') === 'freelancer')) {
+                                echo h('Corporate Employee');
+                            } elseif ($isAdminShell && (($user['role'] ?? '') === 'external_vendor')) {
+                                echo h('External Vendor');
+                            } else {
+                                echo h($isAdminShell ? 'Administrator' : (string) ($user['emp_id'] ?: 'Employee'));
+                            }
+                        ?></span>
                     </div>
                 </div>
                 <nav class="sidebar-nav">
                     <?php if ($isAdminShell): ?>
                         <?php if ($user['role'] === 'freelancer'): ?>
+                        <a class="sidebar-link <?= $page === 'corporate_dashboard' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=corporate_dashboard"><span class="nav-icon">D</span><span>Dashboard</span></a>
+                        <span class="sidebar-section-title">Employee</span>
+                        <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">E</span><span>Employees</span></a>
+                        <span class="sidebar-section-title">Attendance</span>
+                        <a class="sidebar-link <?= $page === 'admin_attendance' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_attendance"><span class="nav-icon">A</span><span>Attendance</span></a>
+                        <?php elseif ($user['role'] === 'external_vendor'): ?>
+                        <a class="sidebar-link <?= $page === 'vendor_dashboard' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=vendor_dashboard"><span class="nav-icon">D</span><span>Dashboard</span></a>
                         <span class="sidebar-section-title">Employee</span>
                         <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">E</span><span>Employees</span></a>
                         <span class="sidebar-section-title">Attendance</span>

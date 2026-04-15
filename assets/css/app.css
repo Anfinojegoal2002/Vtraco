@@ -387,6 +387,7 @@
             .step-pill.active { background: linear-gradient(135deg, var(--accent), #3730a3); color: #fff; }
             .action-bar { display: flex; justify-content: flex-end; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
             .data-toolbar { display: flex; justify-content: space-between; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 18px; }
+            .data-toolbar-right { display: flex; gap: 12px; align-items: center; flex: 1 1 auto; justify-content: flex-end; flex-wrap: wrap; }
             .data-toolbar-search { flex: 1 1 320px; max-width: 420px; }
             .data-toolbar-search input { width: 100%; }
             .table-empty-state { margin-top: 16px; }
@@ -642,6 +643,25 @@
                 .auth-register-form-sheet input { min-height: 42px; }
                 .auth-register-submit { min-height: 44px; }
             }
+            
+            .employee-tabs-section { padding: 0 24px; margin-bottom: 12px; }
+            .employee-tabs { display: flex; gap: 8px; border-bottom: 2px solid rgba(67,56,202,0.12); }
+            .tab-link { display: inline-flex; align-items: center; padding: 12px 18px; font-weight: 600; color: var(--muted); border: none; background: transparent; cursor: pointer; border-bottom: 3px solid transparent; transition: color .2s ease, border-color .2s ease; font-size: 0.95rem; margin-bottom: -2px; }
+            .tab-link:hover { color: var(--ink); }
+            .tab-link.active { color: var(--accent); border-bottom-color: var(--accent); }
+            .employee-tabs.inline { border-bottom: none; background: rgba(15, 23, 42, 0.06); padding: 4px; border-radius: 999px; }
+            .employee-tabs.inline .tab-link { margin-bottom: 0; border-bottom: none; padding: 9px 14px; border-radius: 999px; transition: background .2s ease, color .2s ease, box-shadow .2s ease; }
+            .employee-tabs.inline .tab-link.active { background: #ffffff; color: var(--ink); box-shadow: 0 10px 24px rgba(15, 23, 42, 0.10); }
+              
+            .attendance-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+            .attendance-header h2 { margin: 0; }
+            .attendance-panel { display: flex; flex-direction: column; min-height: 0; }
+            .attendance-panel .calendar-shell { flex: 1; }
+
+            @media (max-width: 1024px) {
+                .employee-tabs-section { padding: 0 18px; margin-bottom: 10px; }
+                .tab-link { padding: 10px 14px; font-size: 0.9rem; }
+            }
 
             @media (max-width: 760px) {
                 .dashboard-grid { grid-template-columns: 1fr; gap: 14px; }
@@ -682,3 +702,14 @@
             .admin-attendance-page .calendar-summary { margin-top: 14px; }
             .admin-rules-page { overflow-y: auto; overflow-x: hidden; padding-right: 6px; padding-bottom: 120px; }
             .admin-rules-page .scroll-panel { max-height: none; overflow: visible; }
+
+            /* Vendor Portal - Reduced Text Sizes */
+            .admin-shell .section-block > .split > div > span.eyebrow,
+            .admin-shell .section-block > span.eyebrow { font-size: 0.7rem; }
+            .admin-shell .section-block > .split > div > h2,
+            .admin-shell .section-block > h2 { font-size: 1.4rem; font-weight: 700; }
+            .admin-shell .metric-card { padding: 18px; }
+            .admin-shell .metric-card > span.eyebrow { font-size: 0.65rem; }
+            .admin-shell .metric-card > strong { font-size: 1.3rem; }
+            .admin-shell .metric-card > span { font-size: 0.85rem; }
+            .admin-shell .section-block > p { font-size: 0.9rem; min-height: auto; }

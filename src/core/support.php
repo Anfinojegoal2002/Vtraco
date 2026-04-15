@@ -122,14 +122,13 @@ function audit_log(string $action, array $details = [], ?int $targetUserId = nul
 
 function password_meets_policy(string $password): bool
 {
-    return strlen($password) >= 8
-        && preg_match('/[A-Za-z]/', $password) === 1
-        && preg_match('/\d/', $password) === 1;
+    return strlen($password) === 6
+        && preg_match('/^\d{6}$/', $password) === 1;
 }
 
 function password_policy_message(): string
 {
-    return 'Password must be at least 8 characters and include at least one letter and one number.';
+    return 'Password must be exactly 6 numbers.';
 }
 
 function forgot_password_cooldown_seconds(): int
@@ -279,7 +278,7 @@ function require_role(string $role): array
 function current_admin_id(): ?int
 {
     $user = current_user();
-    if (!$user || !in_array($user['role'] ?? '', ['admin', 'freelancer'], true)) {
+    if (!$user || !in_array($user['role'] ?? '', ['admin', 'freelancer', 'external_vendor'], true)) {
         return null;
     }
 
@@ -291,7 +290,7 @@ function user_role_label(string $role): string
     return match ($role) {
         'admin' => 'Admin',
         'employee' => 'Employee',
-        'corporate_employee' => 'Corporate Staff',
+        'corporate_employee' => 'Corporate Employee',
         'external_vendor' => 'External Vendor',
         'freelancer' => 'Corporate Employee',
         default => ucwords(str_replace('_', ' ', $role)),
@@ -358,7 +357,8 @@ function home_page_for_user(array $user): string
 
     return match (true) {
         $role === 'admin' => 'admin_dashboard',
-        $role === 'freelancer' => 'admin_dashboard',
+        $role === 'freelancer' => 'corporate_dashboard',
+        $role === 'external_vendor' => 'vendor_dashboard',
         $role === 'employee' => 'employee_attendance',
         $role === 'corporate_employee' => 'employee_attendance',
         is_member_portal_role($role) => 'member_dashboard',

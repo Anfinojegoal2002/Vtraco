@@ -140,7 +140,7 @@ function handle_post_action(string $action): void
             break;
 
         case 'employee_manual_next':
-            require_roles(['admin', 'freelancer']);
+            require_roles(['admin', 'freelancer', 'external_vendor']);
             if (!filter_var((string) ($_POST['email'] ?? ''), FILTER_VALIDATE_EMAIL)) {
                 flash('error', 'Enter a valid employee email address.');
                 redirect_to('admin_employees');
@@ -169,7 +169,7 @@ function handle_post_action(string $action): void
             break;
 
         case 'employee_manual_submit':
-            require_roles(['admin', 'freelancer']);
+            require_roles(['admin', 'freelancer', 'external_vendor']);
 
             $pending = $_SESSION['pending_employee'] ?? null;
             if (!$pending) {
@@ -193,7 +193,7 @@ function handle_post_action(string $action): void
             break;
 
         case 'employee_csv_upload':
-            require_roles(['admin', 'freelancer']);
+            require_roles(['admin', 'freelancer', 'external_vendor']);
             try {
                 validate_employee_csv_upload($_FILES['csv_file'] ?? []);
                 $_SESSION['pending_csv_import'] = parse_employee_csv((string) $_FILES['csv_file']['tmp_name']);
@@ -209,7 +209,7 @@ function handle_post_action(string $action): void
             break;
 
         case 'employee_csv_submit':
-            require_roles(['admin', 'freelancer']);
+            require_roles(['admin', 'freelancer', 'external_vendor']);
 
             $rows = $_SESSION['pending_csv_import'] ?? [];
             if (!$rows) {
@@ -260,7 +260,7 @@ function handle_post_action(string $action): void
             break;
 
         case 'employee_update':
-            $admin = require_roles(['admin', 'freelancer']);
+            $admin = require_roles(['admin', 'freelancer', 'external_vendor']);
 
             $employeeId = (int) ($_POST['user_id'] ?? 0);
             if (!employee_by_id($employeeId)) {
@@ -288,7 +288,13 @@ function handle_post_action(string $action): void
                 if (role_requires_unique_email($role) && role_email_exists($role, $email, $employeeId)) {
                     throw new RuntimeException('This employee email is already assigned.');
                 }
-                db()->prepare('UPDATE users SET emp_id = :emp_id, name = :name, email = :email, phone = :phone, shift = :shift, salary = :salary WHERE id = :id AND role = :role AND admin_id = :admin_id')
+                
+                $employeeType = trim((string) ($_POST['employee_type'] ?? 'regular'));
+                if (!in_array($employeeType, ['regular', 'vendor', 'corporate'], true)) {
+                    $employeeType = 'regular';
+                }
+                
+                db()->prepare('UPDATE users SET emp_id = :emp_id, name = :name, email = :email, phone = :phone, shift = :shift, salary = :salary, employee_type = :employee_type WHERE id = :id AND role = :role AND admin_id = :admin_id')
                     ->execute([
                         'id' => $employeeId,
                         'role' => $role,
@@ -299,6 +305,7 @@ function handle_post_action(string $action): void
                         'phone' => $phone,
                         'shift' => trim((string) ($_POST['shift'] ?? '')),
                         'salary' => $salary,
+                        'employee_type' => $employeeType,
                     ]);
                 audit_log('employee_updated', [
                     'email' => $email,
@@ -312,7 +319,7 @@ function handle_post_action(string $action): void
             break;
 
         case 'employee_reset_password':
-            require_roles(['admin', 'freelancer']);
+            require_roles(['admin', 'freelancer', 'external_vendor']);
 
             $employeeId = (int) ($_POST['user_id'] ?? 0);
             if (!employee_by_id($employeeId)) {
@@ -332,7 +339,7 @@ function handle_post_action(string $action): void
             redirect_to('admin_employees');
             break;
         case 'employee_delete':
-            $admin = require_roles(['admin', 'freelancer']);
+            $admin = require_roles(['admin', 'freelancer', 'external_vendor']);
 
             $employeeId = (int) ($_POST['user_id'] ?? 0);
             if (!employee_by_id($employeeId)) {
@@ -545,7 +552,7 @@ function handle_post_action(string $action): void
             break;
 
         case 'admin_profile_update':
-            $admin = require_roles(['admin', 'freelancer']);
+            $admin = require_roles(['admin', 'freelancer', 'external_vendor']);
 
             $returnPage = (string) ($_POST['return_page'] ?? 'admin_dashboard');
             if (!str_starts_with($returnPage, 'admin_') || $returnPage === 'admin_profile_settings') {
@@ -585,7 +592,7 @@ function handle_post_action(string $action): void
             break;
 
         case 'admin_change_password':
-            $admin = require_roles(['admin', 'freelancer']);
+            $admin = require_roles(['admin', 'freelancer', 'external_vendor']);
 
             $returnPage = (string) ($_POST['return_page'] ?? 'admin_dashboard');
             if (!str_starts_with($returnPage, 'admin_') || $returnPage === 'admin_profile_settings') {
@@ -1041,6 +1048,5 @@ function handle_post_action(string $action): void
             break;
     }
 }
-
 
 
