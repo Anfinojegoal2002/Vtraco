@@ -35,8 +35,17 @@ function render_page(string $page): void
         case 'admin_reports':
             render_admin_reports();
             break;
+        case 'admin_accounts':
+            render_admin_accounts();
+            break;
+        case 'admin_reimbursements':
+            render_admin_reimbursements();
+            break;
         case 'employee_attendance':
             render_employee_attendance();
+            break;
+        case 'employee_reimbursements':
+            render_employee_reimbursements();
             break;
         case 'member_dashboard':
             render_member_dashboard();
@@ -71,12 +80,17 @@ function render_header(string $title, string $pageClass = ''): void
     <body class="<?= $isLandingPage ? 'landing-shell' : 'app-fixed' ?>">
     <div class="app-shell <?= $isAdminShell ? 'admin-shell' : ($isEmployeeShell ? 'employee-shell' : '') ?>">
         <?php if ($isSidebarShell): ?>
-            <aside class="<?= $isAdminShell ? 'admin-sidebar' : 'employee-sidebar' ?>"<?= ($isAdminShell || $isEmployeeShell) ? ' data-profile-card data-profile-role="' . h((string) $user['role']) . '" data-profile-id="' . (int) $user['id'] . '"' : '' ?>>
+            <aside class="<?= $isAdminShell ? 'admin-sidebar' : 'employee-sidebar' ?>">
                 <a class="brand" href="<?= h(BASE_URL) ?>?page=<?= $isAdminShell ? 'admin_dashboard' : 'employee_attendance' ?>">
                     <span class="brand-mark">VT</span>
                     <span class="brand-copy"><strong>V Traco</strong><small><?= h($isAdminShell ? 'Attendance & Payroll' : 'Employee Workspace') ?></small></span>
                 </a>
-                <div class="sidebar-profile">
+                <div
+                    class="sidebar-profile"
+                    <?= ($isAdminShell || $isEmployeeShell)
+                        ? ' data-profile-card data-profile-role="' . h((string) $user['role']) . '" data-profile-id="' . (int) $user['id'] . '" data-modal-target="' . h($isAdminShell ? 'admin-profile-settings-modal' : 'employee-profile-settings-modal') . '" role="button" tabindex="0"'
+                        : '' ?>
+                >
                     <div class="sidebar-avatar-wrap">
                         <img src="" alt="<?= h($user['name']) ?> profile photo" class="avatar sidebar-avatar-image hidden" data-profile-photo>
                         <div class="avatar" data-profile-fallback><?= h(user_initials((string) $user['name'])) ?></div>
@@ -99,26 +113,17 @@ function render_header(string $title, string $pageClass = ''): void
                         <a class="sidebar-link <?= $page === 'admin_projects' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_projects"><span class="nav-icon">P</span><span>Projects</span></a>
                         <a class="sidebar-link <?= $page === 'admin_attendance' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_attendance"><span class="nav-icon">A</span><span>Attendance</span></a>
                         <a class="sidebar-link <?= $page === 'admin_reports' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_reports"><span class="nav-icon">R</span><span>Reports</span></a>
-                        <a class="sidebar-link <?= $page === 'admin_rules' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_rules"><span class="nav-icon">S</span><span>Settings</span></a>
+                        <a class="sidebar-link <?= $page === 'admin_accounts' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_accounts"><span class="nav-icon">C</span><span>Accounts</span></a>
+                        <a class="sidebar-link <?= $page === 'admin_reimbursements' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_reimbursements"><span class="nav-icon">M</span><span>Reimbursement</span></a>
+                        <a class="sidebar-link <?= $page === 'admin_rules' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_rules"><span class="nav-icon">S</span><span>Rules</span></a>
                         <?php endif; ?>
                     <?php else: ?>
-                        <span class="sidebar-section-title">Employee</span>
-                        <button class="sidebar-link sidebar-link-button" type="button" data-modal-target="employee-profile-settings-modal">
-                            <span class="nav-icon">E</span>
-                            <span>Profile Settings</span>
-                        </button>
                         <span class="sidebar-section-title">Attendance</span>
                         <a class="sidebar-link <?= $page === 'employee_attendance' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_attendance"><span class="nav-icon">M</span><span>My Attendance</span></a>
+                        <span class="sidebar-section-title">Accounts</span>
+                        <a class="sidebar-link <?= $page === 'employee_reimbursements' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_reimbursements"><span class="nav-icon">R</span><span>Reimbursement</span></a>
                     <?php endif; ?>
                 </nav>
-                <?php if ($isAdminShell && $user['role'] === 'admin'): ?>
-                <div class="sidebar-settings-wrap">
-                        <button class="sidebar-link sidebar-link-button" type="button" data-modal-target="admin-profile-settings-modal">
-                            <span class="nav-icon">P</span>
-                            <span>Profile Settings</span>
-                        </button>
-                </div>
-                <?php endif; ?>
                 <div class="sidebar-actions">
                     <form method="post">
                         <?= csrf_field() ?>

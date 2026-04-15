@@ -174,3 +174,47 @@ function employee_credentials_delivery_message(array $employee, array $mailResul
     return $baseMessage . ' Email delivery is not configured yet, so a copy containing the temporary password was saved in storage/emails/' . ($mailResult['log_file'] ?? '') . (($mailResult['error'] ?? '') !== '' ? ' | Error: ' . $mailResult['error'] : '') . '.';
 }
 
+function send_reimbursement_created_email(array $admin, array $employee, array $reimbursement): array
+{
+    $html = '<p>Hello ' . h((string) $admin['name']) . ',</p>'
+        . '<p>' . h((string) $employee['name']) . ' (' . h((string) ($employee['emp_id'] ?? 'Employee')) . ') submitted a new reimbursement request.</p>'
+        . '<p><strong>Date:</strong> ' . h(date('d M Y', strtotime((string) $reimbursement['expense_date']))) . '<br>'
+        . '<strong>Category:</strong> ' . h((string) $reimbursement['category']) . '<br>'
+        . '<strong>Requested Amount:</strong> Rs ' . h(number_format((float) ($reimbursement['amount_requested'] ?? 0), 2)) . '<br>'
+        . '<strong>Description:</strong> ' . nl2br(h((string) $reimbursement['expense_description'])) . '</p>';
+
+    return send_html_mail((string) $admin['email'], 'New Reimbursement Request', $html);
+}
+
+function send_reimbursement_status_email(array $employee, array $reimbursement, ?float $paymentAmount = null): array
+{
+    $paymentCopy = '';
+    if ($paymentAmount !== null) {
+        $paymentCopy = '<p><strong>Paid Amount:</strong> Rs ' . h(number_format($paymentAmount, 2)) . '</p>';
+    }
+
+    $html = '<p>Hello ' . h((string) $employee['name']) . ',</p>'
+        . '<p>Your reimbursement request status has been updated.</p>'
+        . '<p><strong>Date:</strong> ' . h(date('d M Y', strtotime((string) $reimbursement['expense_date']))) . '<br>'
+        . '<strong>Category:</strong> ' . h((string) $reimbursement['category']) . '<br>'
+        . '<strong>Status:</strong> ' . h((string) $reimbursement['status']) . '<br>'
+        . '<strong>Requested Amount:</strong> Rs ' . h(number_format((float) ($reimbursement['amount_requested'] ?? 0), 2)) . '<br>'
+        . '<strong>Total Paid:</strong> Rs ' . h(number_format((float) ($reimbursement['amount_paid'] ?? 0), 2)) . '<br>'
+        . '<strong>Remaining Balance:</strong> Rs ' . h(number_format((float) ($reimbursement['remaining_balance'] ?? 0), 2)) . '</p>'
+        . $paymentCopy;
+
+    return send_html_mail((string) $employee['email'], 'Reimbursement Status Updated', $html);
+}
+
+function send_payment_processed_email(array $employee, array $payment): array
+{
+    $html = '<p>Hello ' . h((string) $employee['name']) . ',</p>'
+        . '<p>Your ' . h(strtolower((string) $payment['payment_type'])) . ' payment of Rs ' . h(number_format((float) ($payment['amount'] ?? 0), 2)) . ' has been processed.</p>'
+        . '<p><strong>Payment Date:</strong> ' . h(date('d M Y', strtotime((string) $payment['payment_date']))) . '<br>'
+        . '<strong>Bank:</strong> ' . h((string) ($payment['bank_name'] ?? '')) . '<br>'
+        . '<strong>Transfer Mode:</strong> ' . h((string) (($payment['transfer_mode'] ?? '') ?: 'N/A')) . '<br>'
+        . '<strong>Transaction ID:</strong> ' . h((string) (($payment['transaction_id'] ?? '') ?: 'N/A')) . '</p>';
+
+    return send_html_mail((string) $employee['email'], 'Payment Processed', $html);
+}
+

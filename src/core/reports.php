@@ -11,17 +11,22 @@ declare(strict_types=1);
 function get_attendance_report_data(array $filters): array
 {
     $db = db();
-    $sql = "SELECT 
+    $sql = "SELECT
                 ar.attend_date AS date,
                 u.name AS employee_name,
                 p.project_name AS project_name,
-                s.day_portion AS session_type,
-                ar.status AS attendance_status,
-                r.incentive_earned AS incentive_earned,
-                r.reimbursement_amount AS reimbursement_amount
+                COALESCE(NULLIF(s.day_portion, ''), p.session_type, 'FULL_DAY') AS session_type,
+                CASE
+                    WHEN ar.status IN ('Present', 'Half Day', 'Leave') THEN ar.status
+                    WHEN ar.status = 'Pending' AND COALESCE(NULLIF(s.day_portion, ''), p.session_type, 'FULL_DAY') = 'FULL_DAY' THEN 'Present'
+                    WHEN ar.status = 'Pending' THEN 'Half Day'
+                    ELSE ar.status
+                END AS attendance_status,
+                COALESCE(r.incentive_earned, 0) AS incentive_earned,
+                COALESCE(r.reimbursement_amount, 0) AS reimbursement_amount
             FROM attendance_records ar
             JOIN users u ON ar.user_id = u.id
-            JOIN attendance_sessions s ON s.attendance_id = ar.id
+            LEFT JOIN attendance_sessions s ON s.attendance_id = ar.id
             LEFT JOIN projects p ON s.project_id = p.id
             LEFT JOIN reimbursements r ON r.attendance_session_id = s.id
             WHERE 1=1";
@@ -54,7 +59,7 @@ function get_attendance_report_data(array $filters): array
         $params[] = $filters['to_date'];
     }
 
-    $sql .= " ORDER BY ar.attend_date DESC, u.name ASC";
+    $sql .= " ORDER BY ar.attend_date DESC, u.name ASC, p.project_name ASC";
 
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
@@ -117,9 +122,9 @@ function export_report_pdf(array $data): void
                     <th>Employee Name</th>
                     <th>Project Name</th>
                     <th>Session Type</th>
-                    <th>Status</th>
-                    <th>Incentive</th>
-                    <th>Reimbursement</th>
+                    <th>Attendance Status</th>
+                    <th>Incentive Earned</th>
+                    <th>Reimbursement Amount</th>
                 </tr>
             </thead>
             <tbody>

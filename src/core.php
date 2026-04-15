@@ -10,4 +10,6 @@ require_once __DIR__ . '/core/mail.php';
 require_once __DIR__ . '/core/employee_management.php';
 require_once __DIR__ . '/core/attendance.php';
 require_once __DIR__ . '/core/reports.php';
+require_once __DIR__ . '/core/reimbursements.php';
+require_once __DIR__ . '/core/payments.php';
 require_once __DIR__ . '/core/actions.php';

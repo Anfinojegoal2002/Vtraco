@@ -835,6 +835,172 @@ function handle_post_action(string $action): void
             redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
             break;
 
+        case 'employee_submit_reimbursement':
+            $employee = require_role('employee');
+            $date = (string) ($_POST['expense_date'] ?? date('Y-m-d'));
+
+            try {
+                $created = create_employee_reimbursement(
+                    $employee,
+                    $date,
+                    $_POST,
+                    $_FILES['attachment'] ?? []
+                );
+                audit_log('employee_reimbursement_submitted', [
+                    'reimbursement_id' => (int) $created['id'],
+                    'expense_date' => (string) $created['expense_date'],
+                    'category' => (string) $created['category'],
+                    'amount_requested' => (float) $created['amount_requested'],
+                ], (int) $employee['id']);
+                flash('success', 'Reimbursement request submitted successfully.');
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Employee reimbursement submission failed.', [
+                    'employee_id' => (int) $employee['id'],
+                    'expense_date' => $date,
+                ]);
+                flash('error', $exception->getMessage() ?: 'Unable to submit the reimbursement request right now.');
+            }
+
+            redirect_to('employee_reimbursements');
+            break;
+
+        case 'admin_update_reimbursement_status':
+            $admin = require_role('admin');
+            $reimbursementId = (int) ($_POST['reimbursement_id'] ?? 0);
+            $status = (string) ($_POST['status'] ?? 'PENDING');
+            $redirectParams = reimbursement_admin_filter_params($_POST);
+
+            try {
+                $updated = update_admin_reimbursement_status($reimbursementId, $status);
+                audit_log('admin_reimbursement_status_updated', [
+                    'reimbursement_id' => (int) $updated['id'],
+                    'status' => (string) $updated['status'],
+                ], (int) $updated['user_id'], $admin);
+                flash('success', 'Reimbursement status updated to ' . (string) $updated['status'] . '.');
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Admin reimbursement status update failed.', [
+                    'admin_id' => (int) $admin['id'],
+                    'reimbursement_id' => $reimbursementId,
+                    'status' => $status,
+                ]);
+                flash('error', $exception->getMessage() ?: 'Unable to update the reimbursement status.');
+            }
+
+            redirect_to('admin_reimbursements', $redirectParams);
+            break;
+
+        case 'admin_mark_reimbursement_partial':
+            $admin = require_role('admin');
+            $reimbursementId = (int) ($_POST['reimbursement_id'] ?? 0);
+            $partialAmount = (float) ($_POST['partial_amount'] ?? 0);
+            $redirectParams = reimbursement_admin_filter_params($_POST);
+
+            try {
+                $updated = mark_reimbursement_partially_paid($reimbursementId, $partialAmount);
+                audit_log('admin_reimbursement_partially_paid', [
+                    'reimbursement_id' => (int) $updated['id'],
+                    'amount_paid' => (float) $updated['amount_paid'],
+                    'remaining_balance' => (float) $updated['remaining_balance'],
+                ], (int) $updated['user_id'], $admin);
+                flash('success', 'Partial reimbursement payment recorded successfully.');
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Admin partial reimbursement payment failed.', [
+                    'admin_id' => (int) $admin['id'],
+                    'reimbursement_id' => $reimbursementId,
+                    'partial_amount' => $partialAmount,
+                ]);
+                flash('error', $exception->getMessage() ?: 'Unable to record the partial payment.');
+            }
+
+            redirect_to('admin_reimbursements', $redirectParams);
+            break;
+
+        case 'admin_mark_reimbursement_paid':
+            $admin = require_role('admin');
+            $reimbursementId = (int) ($_POST['reimbursement_id'] ?? 0);
+            $redirectParams = reimbursement_admin_filter_params($_POST);
+
+            try {
+                $updated = mark_reimbursement_paid(
+                    $reimbursementId,
+                    $_POST,
+                    $_FILES['payment_proof'] ?? []
+                );
+                audit_log('admin_reimbursement_paid', [
+                    'reimbursement_id' => (int) $updated['id'],
+                    'payment_id' => (int) ($updated['payment_id'] ?? 0),
+                    'amount_paid' => (float) $updated['amount_paid'],
+                ], (int) $updated['user_id'], $admin);
+                flash('success', 'Reimbursement marked as paid and payment entry created.');
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Admin reimbursement paid flow failed.', [
+                    'admin_id' => (int) $admin['id'],
+                    'reimbursement_id' => $reimbursementId,
+                ]);
+                flash('error', $exception->getMessage() ?: 'Unable to complete the payment flow.');
+            }
+
+            redirect_to('admin_reimbursements', $redirectParams);
+            break;
+
+        case 'admin_save_payment':
+            $admin = require_role('admin');
+            $paymentId = max(0, (int) ($_POST['payment_id'] ?? 0));
+            $filters = payment_filter_params($_POST);
+
+            try {
+                if ($paymentId > 0) {
+                    $payment = update_payment($paymentId, $_POST, $_FILES['proof_upload'] ?? []);
+                    audit_log('admin_payment_updated', [
+                        'payment_id' => (int) $payment['id'],
+                        'payment_type' => (string) $payment['payment_type'],
+                        'amount' => (float) $payment['amount'],
+                    ], (int) $payment['user_id'], $admin);
+                    flash('success', 'Payment updated successfully.');
+                } else {
+                    $payment = create_payment($_POST, $_FILES['proof_upload'] ?? []);
+                    audit_log('admin_payment_created', [
+                        'payment_id' => (int) $payment['id'],
+                        'payment_type' => (string) $payment['payment_type'],
+                        'amount' => (float) $payment['amount'],
+                    ], (int) $payment['user_id'], $admin);
+                    flash('success', 'Payment added successfully.');
+                }
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Admin payment save failed.', [
+                    'admin_id' => (int) $admin['id'],
+                    'payment_id' => $paymentId,
+                    'payment_type' => (string) ($_POST['payment_type'] ?? ''),
+                ]);
+                flash('error', $exception->getMessage() ?: 'Unable to save the payment right now.');
+            }
+
+            redirect_to('admin_accounts', payment_redirect_query($filters));
+            break;
+
+        case 'admin_delete_payment':
+            $admin = require_role('admin');
+            $paymentId = max(0, (int) ($_POST['payment_id'] ?? 0));
+            $filters = payment_filter_params($_POST);
+
+            try {
+                $payment = admin_payment_by_id($paymentId);
+                delete_payment($paymentId);
+                audit_log('admin_payment_deleted', [
+                    'payment_id' => $paymentId,
+                ], (int) ($payment['user_id'] ?? 0), $admin);
+                flash('success', 'Payment deleted successfully.');
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Admin payment delete failed.', [
+                    'admin_id' => (int) $admin['id'],
+                    'payment_id' => $paymentId,
+                ]);
+                flash('error', $exception->getMessage() ?: 'Unable to delete the payment right now.');
+            }
+
+            redirect_to('admin_accounts', payment_redirect_query($filters));
+            break;
+
         case 'filter_reports':
             require_role('admin');
             // This case doesn't redirect, it just lets the page render with POST data

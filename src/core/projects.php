@@ -36,6 +36,12 @@ function projects(): array
     return $stmt->fetchAll();
 }
 
+function active_projects(): array
+{
+    $stmt = db()->query('SELECT * FROM projects WHERE is_active = 1 ORDER BY project_name ASC, id DESC');
+    return $stmt->fetchAll();
+}
+
 function project_by_id(int $projectId): ?array
 {
     $stmt = db()->prepare('SELECT * FROM projects WHERE id = :id LIMIT 1');
