@@ -208,10 +208,13 @@ function send_reimbursement_status_email(array $employee, array $reimbursement, 
 
 function send_payment_processed_email(array $employee, array $payment): array
 {
+    $paymentMethods = function_exists('payment_methods_for_record') ? payment_methods_for_record($payment) : [];
+    $paymentMethodLabel = function_exists('payment_methods_label') ? payment_methods_label($paymentMethods) : (string) ($payment['bank_name'] ?? '');
+
     $html = '<p>Hello ' . h((string) $employee['name']) . ',</p>'
         . '<p>Your ' . h(strtolower((string) $payment['payment_type'])) . ' payment of Rs ' . h(number_format((float) ($payment['amount'] ?? 0), 2)) . ' has been processed.</p>'
         . '<p><strong>Payment Date:</strong> ' . h(date('d M Y', strtotime((string) $payment['payment_date']))) . '<br>'
-        . '<strong>Bank:</strong> ' . h((string) ($payment['bank_name'] ?? '')) . '<br>'
+        . '<strong>Payment Method(s):</strong> ' . h($paymentMethodLabel) . '<br>'
         . '<strong>Transfer Mode:</strong> ' . h((string) (($payment['transfer_mode'] ?? '') ?: 'N/A')) . '<br>'
         . '<strong>Transaction ID:</strong> ' . h((string) (($payment['transaction_id'] ?? '') ?: 'N/A')) . '</p>';
 

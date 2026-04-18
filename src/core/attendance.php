@@ -281,10 +281,124 @@ function working_days_total(array $monthAttendance): float
     return $total;
 }
 
+function sandwich_week_off_deduction_days(array $monthAttendance): int
+{
+    $statuses = array_values(array_map(static function (array $entry): string {
+        return strtoupper(trim((string) ($entry['record']['status'] ?? '')));
+    }, $monthAttendance));
+
+    $deductionDays = 0;
+    $index = 0;
+    $totalStatuses = count($statuses);
+
+    while ($index < $totalStatuses) {
+        if ($statuses[$index] !== 'WEEK OFF') {
+            $index++;
+            continue;
+        }
+
+        $start = $index;
+        while (($index + 1) < $totalStatuses && $statuses[$index + 1] === 'WEEK OFF') {
+            $index++;
+        }
+        $end = $index;
+
+        $previousStatus = $start > 0 ? $statuses[$start - 1] : '';
+        $nextStatus = ($end + 1) < $totalStatuses ? $statuses[$end + 1] : '';
+
+        if ($previousStatus === 'ABSENT' && $nextStatus === 'ABSENT') {
+            $deductionDays += ($end - $start + 1);
+        }
+
+        $index++;
+    }
+
+    return $deductionDays;
+}
+
+function attendance_counts(array $monthAttendance): array
+{
+    $counts = [
+        'present' => 0,
+        'absent' => 0,
+        'half_day' => 0,
+        'pending' => 0,
+        'week_off' => 0,
+        'leave' => 0,
+        'unmarked' => 0,
+        'sandwich_week_off_days' => 0,
+        'payable_days' => 0.0,
+        'working_days' => 0,
+    ];
+
+    foreach ($monthAttendance as $entry) {
+        $status = (string) ($entry['record']['status'] ?? '');
+        $normStatus = strtoupper(trim($status));
+        
+        if ($normStatus !== 'WEEK OFF') {
+            $counts['working_days']++;
+        }
+
+        switch ($normStatus) {
+            case 'PRESENT':
+                $counts['present']++;
+                $counts['payable_days'] += 1.0;
+                break;
+            case 'HALF DAY':
+                $counts['half_day']++;
+                $counts['payable_days'] += 0.5;
+                break;
+            case 'LEAVE':
+                $counts['leave']++;
+                $counts['payable_days'] += 1.0; // Leave acts as paid leave in salary calculations
+                break;
+            case 'PENDING':
+                $counts['pending']++;
+                break;
+            case 'WEEK OFF':
+                $counts['week_off']++;
+                break;
+            case '':
+                $counts['unmarked']++;
+                break;
+            case 'ABSENT':
+                $counts['absent']++;
+                break;
+            default:
+                $counts['absent']++;
+                break;
+        }
+    }
+
+    $counts['sandwich_week_off_days'] = sandwich_week_off_deduction_days($monthAttendance);
+    if ($counts['sandwich_week_off_days'] > 0) {
+        $counts['payable_days'] = max(0.0, $counts['payable_days'] - $counts['sandwich_week_off_days']);
+    }
+
+    $counts['working_days'] = max(1, $counts['working_days']);
+
+    return $counts;
+}
+
+function salary_breakdown_for_month(float $salary, array $monthAttendance): array
+{
+    $counts = attendance_counts($monthAttendance);
+    $dailyRate = $counts['working_days'] > 0 ? round($salary / $counts['working_days'], 2) : 0.0;
+    $calculatedSalary = round($counts['payable_days'] * $dailyRate, 2);
+
+    return [
+        'monthly_salary' => round($salary, 2),
+        'daily_rate' => $dailyRate,
+        'payable_days' => round($counts['payable_days'], 2),
+        'working_days' => (int) $counts['working_days'],
+        'calculated_salary' => $calculatedSalary,
+        'counts' => $counts,
+    ];
+}
+
 function salary_for_month(float $salary, array $monthAttendance): float
 {
-    $daysInMonth = max(1, count($monthAttendance));
-    return (working_days_total($monthAttendance) * $salary) / $daysInMonth;
+    return (float) salary_breakdown_for_month($salary, $monthAttendance)['calculated_salary'];
 }
 function recent_leave_requests(int $limit = 10): array
 {
@@ -1087,7 +1201,13 @@ function handle_upload(array $file): string
     if (!move_uploaded_file((string) $file['tmp_name'], $target)) {
         throw new RuntimeException('Unable to save punch photo.');
     }
-    return str_replace(__DIR__ . '/../', '', $target);
+    $appRoot = str_replace('\\', '/', dirname(__DIR__, 2));
+    $normalizedTarget = str_replace('\\', '/', $target);
+    if (strpos($normalizedTarget, $appRoot) === 0) {
+        $normalizedTarget = substr($normalizedTarget, strlen($appRoot));
+    }
+
+    return normalize_relative_path($normalizedTarget);
 }
 
 

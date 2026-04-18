@@ -96,7 +96,7 @@ function guessed_employee_name(array $row, array $columns, array $headerMap, str
     return generated_employee_name($email, $empId);
 }
 
-function insert_employee(array $data, array $rules): array
+function insert_employee(array $data, array $rules, array $projectIds = []): array
 {
     $password = random_password();
     $adminId = current_admin_id();
@@ -104,19 +104,32 @@ function insert_employee(array $data, array $rules): array
         throw new RuntimeException('An administrator must be signed in to add employees.');
     }
 
+    $employeeType = trim((string) ($data['employee_type'] ?? 'regular'));
+    if (!in_array($employeeType, ['regular', 'vendor', 'corporate'], true)) {
+        $employeeType = 'regular';
+    }
+
+    // Allow Admin to assign employees to a specific Vendor or Freelancer
+    if (($data['vendor_id'] ?? 0) > 0) {
+        $adminId = (int) $data['vendor_id'];
+    } elseif (($data['freelancer_id'] ?? 0) > 0) {
+        $adminId = (int) $data['freelancer_id'];
+    }
+
     $empId = trim((string) ($data['emp_id'] ?? ''));
     if ($empId === '') {
         $empId = generate_employee_emp_id();
     }
 
+    $email = trim((string) ($data['email'] ?? ''));
     $name = trim((string) ($data['name'] ?? ''));
     if ($name === '') {
-        $name = generated_employee_name(trim((string) ($data['email'] ?? '')), $empId);
+        $name = generated_employee_name($email, $empId);
     }
-    $email = trim((string) ($data['email'] ?? ''));
     $phone = trim((string) ($data['phone'] ?? ''));
     $salary = (float) ($data['salary'] ?? 0);
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+
+    if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         throw new RuntimeException('Employee email must be valid.');
     }
     if ($phone === '') {
@@ -127,36 +140,53 @@ function insert_employee(array $data, array $rules): array
     }
 
     $role = current_manager_target_role();
+    // If Admin is assigning to a Freelancer, force corporate_employee role
+    if (($data['freelancer_id'] ?? 0) > 0) {
+        $role = 'corporate_employee';
+    }
+    
     if (role_requires_unique_email($role) && role_email_exists($role, $email)) {
         throw new RuntimeException('This employee email is already assigned.');
     }
     
-    $employeeType = trim((string) ($data['employee_type'] ?? 'regular'));
-    if (!in_array($employeeType, ['regular', 'vendor', 'corporate'], true)) {
-        $employeeType = 'regular';
+    $normalizedProjectIds = normalize_project_assignment_ids($projectIds);
+    $pdo = db();
+    $pdo->beginTransaction();
+
+    try {
+        $pdo->prepare('INSERT INTO users (role, admin_id, emp_id, name, email, phone, shift, salary, employee_type, password_hash, force_password_change, password_changed_at, created_at) VALUES (:role, :admin_id, :emp_id, :name, :email, :phone, :shift, :salary, :employee_type, :password_hash, :force_password_change, :password_changed_at, :created_at)')
+            ->execute([
+                'role' => $role,
+                'admin_id' => $adminId,
+                'emp_id' => $empId,
+                'name' => $name,
+                'email' => $email,
+                'phone' => $phone,
+                'shift' => normalize_shift_selection((string) ($data['shift'] ?? '')),
+                'salary' => $salary,
+                'employee_type' => $employeeType,
+                'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+                'force_password_change' => 1,
+                'password_changed_at' => null,
+                'created_at' => now(),
+            ]);
+
+        $employeeId = (int) $pdo->lastInsertId();
+        save_employee_rules($employeeId, $rules);
+        save_employee_project_assignments($employeeId, $normalizedProjectIds);
+        $pdo->commit();
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        throw $exception;
     }
-    
-    db()->prepare('INSERT INTO users (role, admin_id, emp_id, name, email, phone, shift, salary, employee_type, password_hash, force_password_change, password_changed_at, created_at) VALUES (:role, :admin_id, :emp_id, :name, :email, :phone, :shift, :salary, :employee_type, :password_hash, :force_password_change, :password_changed_at, :created_at)')
-        ->execute([
-            'role' => $role,
-            'admin_id' => $adminId,
-            'emp_id' => $empId,
-            'name' => $name,
-            'email' => $email,
-            'phone' => $phone,
-            'shift' => trim((string) ($data['shift'] ?? '')),
-            'salary' => $salary,
-            'employee_type' => $employeeType,
-            'password_hash' => password_hash($password, PASSWORD_DEFAULT),
-            'force_password_change' => 1,
-            'password_changed_at' => null,
-            'created_at' => now(),
-        ]);
-    $employee = employee_by_id((int) db()->lastInsertId());
+
+    $employee = employee_by_id($employeeId);
     if (!$employee) {
         throw new RuntimeException('Failed to create employee.');
     }
-    save_employee_rules((int) $employee['id'], $rules);
     $mailResult = send_employee_credentials_email($employee, $password, $rules);
 
     return [
@@ -220,7 +250,7 @@ function create_employee_from_attendance_entry(array $entry): ?array
             'name' => $name,
             'email' => $email,
             'phone' => '',
-            'shift' => trim((string) ($entry['shift'] ?? '')),
+            'shift' => normalize_shift_selection((string) ($entry['shift'] ?? '')),
             'salary' => 0,
             'password_hash' => password_hash($password, PASSWORD_DEFAULT),
             'force_password_change' => 1,
@@ -439,4 +469,3 @@ function parse_employee_csv(string $path): array
 
     return $rows;
 }
-

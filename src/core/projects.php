@@ -51,6 +51,113 @@ function project_by_id(int $projectId): ?array
     return $row ?: null;
 }
 
+function normalize_project_assignment_ids(array $projectIds): array
+{
+    $projectIds = array_values(array_unique(array_filter(
+        array_map('intval', $projectIds),
+        static fn (int $projectId): bool => $projectId > 0
+    )));
+
+    if ($projectIds === []) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($projectIds), '?'));
+    $stmt = db()->prepare('SELECT id FROM projects WHERE id IN (' . $placeholders . ')');
+    $stmt->execute($projectIds);
+
+    $validLookup = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $projectId) {
+        $validLookup[(int) $projectId] = true;
+    }
+
+    $normalized = [];
+    foreach ($projectIds as $projectId) {
+        if (isset($validLookup[$projectId])) {
+            $normalized[] = $projectId;
+        }
+    }
+
+    if (count($normalized) !== count($projectIds)) {
+        throw new RuntimeException('Select only valid assigned projects.');
+    }
+
+    return $normalized;
+}
+
+function assigned_projects_for_employee(int $userId): array
+{
+    $stmt = db()->prepare('SELECT p.*
+        FROM employee_project_assignments a
+        INNER JOIN projects p ON p.id = a.project_id
+        WHERE a.user_id = :user_id
+        ORDER BY p.is_active DESC, p.project_name ASC, p.id DESC');
+    $stmt->execute(['user_id' => $userId]);
+
+    return $stmt->fetchAll();
+}
+
+function employee_available_projects(array $employee): array
+{
+    if (!empty($employee['use_assigned_projects'])) {
+        return assigned_projects_for_employee((int) ($employee['id'] ?? 0));
+    }
+
+    return active_projects();
+}
+
+function employee_available_project_ids(array $employee): array
+{
+    return array_values(array_filter(array_map(
+        static fn (array $project): int => (int) ($project['id'] ?? 0),
+        employee_available_projects($employee)
+    )));
+}
+
+function save_employee_project_assignments(int $userId, array $projectIds): array
+{
+    $normalizedProjectIds = normalize_project_assignment_ids($projectIds);
+    $pdo = db();
+    $manageTransaction = !$pdo->inTransaction();
+
+    if ($manageTransaction) {
+        $pdo->beginTransaction();
+    }
+
+    try {
+        $pdo->prepare('DELETE FROM employee_project_assignments WHERE user_id = :user_id')
+            ->execute(['user_id' => $userId]);
+
+        if ($normalizedProjectIds !== []) {
+            $insert = $pdo->prepare('INSERT INTO employee_project_assignments (user_id, project_id, created_at)
+                VALUES (:user_id, :project_id, :created_at)');
+
+            foreach ($normalizedProjectIds as $projectId) {
+                $insert->execute([
+                    'user_id' => $userId,
+                    'project_id' => $projectId,
+                    'created_at' => now(),
+                ]);
+            }
+        }
+
+        $pdo->prepare('UPDATE users SET use_assigned_projects = 1 WHERE id = :id')
+            ->execute(['id' => $userId]);
+
+        if ($manageTransaction) {
+            $pdo->commit();
+        }
+    } catch (Throwable $exception) {
+        if ($manageTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        throw $exception;
+    }
+
+    return $normalizedProjectIds;
+}
+
 function normalize_project_payload(array $source): array
 {
     $payload = [

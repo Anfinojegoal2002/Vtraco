@@ -73,6 +73,11 @@ function index_exists(PDO $pdo, string $table, string $indexName): bool
     return (int) $stmt->fetchColumn() > 0;
 }
 
+function column_exists(string $table, string $column): bool
+{
+    return table_has_column(db_server(), $table, $column);
+}
+
 function unique_index_columns(PDO $pdo, string $table): array
 {
     $stmt = $pdo->prepare('SELECT INDEX_NAME, COLUMN_NAME, SEQ_IN_INDEX FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :table_name AND NON_UNIQUE = 0 ORDER BY INDEX_NAME, SEQ_IN_INDEX');
@@ -146,6 +151,9 @@ function initialize_database(): void
     if (!table_has_column($pdo, 'users', 'employee_type')) {
         $pdo->exec('ALTER TABLE users ADD COLUMN employee_type VARCHAR(50) DEFAULT NULL AFTER salary');
     }
+    if (!table_has_column($pdo, 'users', 'use_assigned_projects')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN use_assigned_projects TINYINT(1) NOT NULL DEFAULT 0 AFTER employee_type');
+    }
     $pdo->exec("CREATE TABLE IF NOT EXISTS employee_rules (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         user_id INT UNSIGNED NOT NULL,
@@ -185,6 +193,17 @@ function initialize_database(): void
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     $pdo->exec('ALTER TABLE projects MODIFY COLUMN start_date DATE NULL');
     $pdo->exec('ALTER TABLE projects MODIFY COLUMN end_date DATE NULL');
+    $pdo->exec("CREATE TABLE IF NOT EXISTS employee_project_assignments (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        user_id INT UNSIGNED NOT NULL,
+        project_id INT UNSIGNED NOT NULL,
+        created_at DATETIME NOT NULL,
+        UNIQUE KEY uniq_employee_project_assignments_user_project (user_id, project_id),
+        INDEX idx_employee_project_assignments_user_id (user_id),
+        INDEX idx_employee_project_assignments_project_id (project_id),
+        CONSTRAINT fk_employee_project_assignments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_employee_project_assignments_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS attendance_records (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -286,6 +305,7 @@ function initialize_database(): void
         payment_type VARCHAR(50) NOT NULL,
         amount DECIMAL(12,2) NOT NULL DEFAULT 0,
         bank_name VARCHAR(50) NOT NULL,
+        payment_methods_json LONGTEXT NULL,
         transfer_mode VARCHAR(50) NULL,
         transaction_id VARCHAR(191) NULL,
         payment_date DATE NOT NULL,
@@ -305,6 +325,17 @@ function initialize_database(): void
         CONSTRAINT fk_payments_admin FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE,
         CONSTRAINT fk_payments_reimbursement FOREIGN KEY (reimbursement_id) REFERENCES employee_reimbursements(id) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS payment_request_actions (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        request_key VARCHAR(191) NOT NULL,
+        status ENUM('PENDING', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+        admin_id INT UNSIGNED NOT NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        UNIQUE KEY uniq_payment_request_key (request_key),
+        INDEX idx_payment_request_admin_status (admin_id, status),
+        CONSTRAINT fk_payment_request_actions_admin FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     $pdo->exec("CREATE TABLE IF NOT EXISTS notifications (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         user_id INT UNSIGNED NOT NULL,
@@ -315,12 +346,18 @@ function initialize_database(): void
         related_type VARCHAR(100) NULL,
         related_id INT UNSIGNED NULL,
         is_read TINYINT(1) NOT NULL DEFAULT 0,
+        is_hidden TINYINT(1) NOT NULL DEFAULT 0,
         created_at DATETIME NOT NULL,
         INDEX idx_notifications_user_read (user_id, is_read),
+        INDEX idx_notifications_hidden (user_id, is_hidden),
         INDEX idx_notifications_created_at (created_at),
         CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         CONSTRAINT fk_notifications_actor FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    if (!column_exists('notifications', 'is_hidden')) {
+        $pdo->exec("ALTER TABLE notifications ADD COLUMN is_hidden TINYINT(1) NOT NULL DEFAULT 0 AFTER is_read");
+        $pdo->exec("ALTER TABLE notifications ADD INDEX idx_notifications_hidden (user_id, is_hidden)");
+    }
     $pdo->exec("CREATE TABLE IF NOT EXISTS activity_logs (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         actor_user_id INT UNSIGNED NULL,
@@ -377,6 +414,18 @@ function initialize_database(): void
         $pdo->prepare('UPDATE users SET admin_id = :admin_id WHERE role = "employee" AND admin_id IS NULL')
             ->execute(['admin_id' => $earliestAdminId]);
     }
+    if (!table_has_column($pdo, 'payments', 'payment_methods_json')) {
+        $pdo->exec('ALTER TABLE payments ADD COLUMN payment_methods_json LONGTEXT NULL AFTER bank_name');
+    }
+    $pdo->exec("UPDATE payments
+        SET payment_methods_json = JSON_ARRAY(bank_name)
+        WHERE (payment_methods_json IS NULL OR payment_methods_json = '')
+          AND bank_name <> ''");
+    $pdo->exec("UPDATE users
+        SET shift = '11:30 AM - 08:30 PM'
+        WHERE shift IN ('10:30 AM - 08:30 PM', '10:30 AM – 08:30 PM')");
+    $pdo->exec("UPDATE shift_timings
+        SET start_time = '11:30:00', shift_name = '11:30 AM - 08:30 PM'
+        WHERE start_time = '10:30:00' AND end_time = '20:30:00'");
     $pdo->exec("UPDATE users SET password_changed_at = created_at WHERE password_changed_at IS NULL AND role = 'admin'");
 }
-

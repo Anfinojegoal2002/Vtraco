@@ -12,6 +12,7 @@ require __DIR__ . '/src/views/landing.php';
 require __DIR__ . '/src/views/auth.php';
 require __DIR__ . '/src/views/admin.php';
 require __DIR__ . '/src/views/employee.php';
+require __DIR__ . '/src/views/notifications.php';
 
 initialize_database();
 

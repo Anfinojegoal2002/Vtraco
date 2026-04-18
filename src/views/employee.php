@@ -7,6 +7,15 @@ function render_employee_attendance(): void
     $employee = require_role('employee');
     $month = preg_match('/^\d{4}-\d{2}$/', $_GET['month'] ?? '') ? $_GET['month'] : date('Y-m');
     $attendance = month_attendance_for_user((int) $employee['id'], $month);
+    $projectsPayload = array_map(static function (array $project): array {
+        return [
+            'id' => (int) ($project['id'] ?? 0),
+            'project_name' => (string) ($project['project_name'] ?? ''),
+            'college_name' => (string) ($project['college_name'] ?? ''),
+            'location' => (string) ($project['location'] ?? ''),
+            'session_type' => (string) ($project['session_type'] ?? ''),
+        ];
+    }, employee_available_projects($employee));
 
     render_header('My Attendance');
     ?>
@@ -32,11 +41,15 @@ function render_employee_attendance(): void
             <input type="hidden" name="page" value="employee_attendance">
             <input type="month" name="month" value="<?= h($month) ?>">
             <button class="button solid" type="submit">Change Month</button>
+            <a href="<?= h(BASE_URL) ?>?page=employee_reimbursements" class="button outline">Request Reimbursement</a>
         </form>
     </section>
     <div class="attendance-panel employee-attendance-panel">
         <?php render_calendar('employee', $employee, $month, $attendance); ?>
     </div>
+    <script>
+        window.VTRACO_AVAILABLE_PROJECTS = <?= json_encode($projectsPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
+    </script>
     <?php
     render_footer();
 }
@@ -90,7 +103,7 @@ function render_employee_reimbursements(): void
         <div class="spacer"></div>
         <div
             class="reimbursement-calendar-scroll"
-            style="height:260px; max-height:260px; overflow:auto; border-radius:18px; border:1px solid rgba(36,52,109,0.1); background:rgba(255,255,255,0.55); overscroll-behavior:contain; scrollbar-gutter:stable;"
+            style="border-radius:18px; border:1px solid rgba(36,52,109,0.1); background:rgba(255,255,255,0.55);"
         >
             <div class="calendar-grid reimbursement-calendar-grid" style="height:auto; min-height:0; overflow:visible; padding:6px 6px 6px 0; align-content:start;">
                 <?php foreach ($dayLabels as $label): ?>
@@ -182,11 +195,11 @@ function render_employee_reimbursements(): void
                 </div>
 
                 <div class="field">
-                    <label>Upload File (JPG/PDF, max 1MB)</label>
+                    <label>Upload File (JPG/PDF, max 5MB)</label>
                     <div class="field-row">
                         <input type="file" name="attachment" accept=".jpg,.jpeg,.pdf,image/jpeg,application/pdf" required>
                     </div>
-                    <small class="field-error"><span>!</span>Upload a JPG or PDF file up to 1MB.</small>
+                    <small class="field-error"><span>!</span>Upload a JPG or PDF file up to 5MB.</small>
                 </div>
 
                 <button class="button solid" type="submit">Submit Reimbursement</button>

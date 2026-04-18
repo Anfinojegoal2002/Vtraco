@@ -20,6 +20,9 @@ function render_page(string $page): void
         case 'vendor_dashboard':
             render_vendor_dashboard();
             break;
+        case 'admin_vendors':
+            render_admin_vendors();
+            break;
         case 'admin_employees':
             render_admin_employees();
             break;
@@ -33,6 +36,7 @@ function render_page(string $page): void
             render_admin_shift();
             break;
         case 'admin_attendance':
+        case 'admin_employee_log':
             render_admin_attendance();
             break;
         case 'admin_profile_settings':
@@ -44,10 +48,14 @@ function render_page(string $page): void
         case 'admin_accounts':
             render_admin_accounts();
             break;
+        case 'notifications':
+            render_notifications();
+            break;
         case 'admin_reimbursements':
-            render_admin_reimbursements();
+            redirect_to('admin_accounts', ['section' => 'request', 'request_month' => date('Y-m')]);
             break;
         case 'employee_attendance':
+        case 'employee_log':
             render_employee_attendance();
             break;
         case 'employee_reimbursements':
@@ -67,10 +75,12 @@ function render_header(string $title, string $pageClass = ''): void
     $user = current_user();
     $page = $_GET['page'] ?? 'landing';
     $isAdminShell = $user && in_array($user['role'], ['admin', 'freelancer', 'external_vendor'], true);
-    $isEmployeeShell = $user && $user['role'] === 'employee';
+    $isEmployeeShell = $user && in_array($user['role'], ['employee', 'corporate_employee'], true);
     $isSidebarShell = $isAdminShell || $isEmployeeShell;
     $isLandingPage = !$user && $page === 'landing';
     $showLoginChooser = !$user && in_array($page, ['landing', 'register'], true);
+    $notifications = $user ? notifications_for_user((int) $user['id'], 3) : [];
+    $unreadNotifications = $user ? unread_notification_count((int) $user['id']) : 0;
     ?>
     <!doctype html>
     <html lang="en">
@@ -108,7 +118,7 @@ function render_header(string $title, string $pageClass = ''): void
                         <strong><?= h($user['name']) ?></strong><br>
                         <span class="hint"><?php
                             if ($isAdminShell && (($user['role'] ?? '') === 'freelancer')) {
-                                echo h('Corporate Employee');
+                                echo h('Contractual Employee (Freelancer)');
                             } elseif ($isAdminShell && (($user['role'] ?? '') === 'external_vendor')) {
                                 echo h('External Vendor');
                             } else {
@@ -123,31 +133,35 @@ function render_header(string $title, string $pageClass = ''): void
                         <a class="sidebar-link <?= $page === 'corporate_dashboard' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=corporate_dashboard"><span class="nav-icon">D</span><span>Dashboard</span></a>
                         <span class="sidebar-section-title">Employee</span>
                         <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">E</span><span>Employees</span></a>
-                        <span class="sidebar-section-title">Attendance</span>
-                        <a class="sidebar-link <?= $page === 'admin_attendance' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_attendance"><span class="nav-icon">A</span><span>Attendance</span></a>
+                        <span class="sidebar-section-title">Employee Log</span>
+                        <a class="sidebar-link <?= in_array($page, ['admin_attendance', 'admin_employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employee_log"><span class="nav-icon">L</span><span>Employee Log</span></a>
+                        <a class="sidebar-link <?= $page === 'notifications' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=notifications"><span class="nav-icon">N</span><span>Notifications</span><?php if ($unreadNotifications > 0): ?><span class="sidebar-link-badge"><?= (int) $unreadNotifications ?></span><?php endif; ?></a>
                         <?php elseif ($user['role'] === 'external_vendor'): ?>
                         <a class="sidebar-link <?= $page === 'vendor_dashboard' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=vendor_dashboard"><span class="nav-icon">D</span><span>Dashboard</span></a>
                         <span class="sidebar-section-title">Employee</span>
                         <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">E</span><span>Employees</span></a>
-                        <span class="sidebar-section-title">Attendance</span>
-                        <a class="sidebar-link <?= $page === 'admin_attendance' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_attendance"><span class="nav-icon">A</span><span>Attendance</span></a>
+                        <span class="sidebar-section-title">Employee Log</span>
+                        <a class="sidebar-link <?= in_array($page, ['admin_attendance', 'admin_employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employee_log"><span class="nav-icon">L</span><span>Employee Log</span></a>
+                        <a class="sidebar-link <?= $page === 'notifications' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=notifications"><span class="nav-icon">N</span><span>Notifications</span><?php if ($unreadNotifications > 0): ?><span class="sidebar-link-badge"><?= (int) $unreadNotifications ?></span><?php endif; ?></a>
                         <?php else: ?>
                         <a class="sidebar-link <?= $page === 'admin_dashboard' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_dashboard"><span class="nav-icon">D</span><span>Dashboard</span></a>
                         <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">E</span><span>Employees</span></a>
                         <a class="sidebar-link <?= $page === 'admin_projects' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_projects"><span class="nav-icon">P</span><span>Projects</span></a>
-                        <a class="sidebar-link <?= $page === 'admin_attendance' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_attendance"><span class="nav-icon">A</span><span>Attendance</span></a>
+                        <a class="sidebar-link <?= in_array($page, ['admin_attendance', 'admin_employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employee_log"><span class="nav-icon">L</span><span>Employee Log</span></a>
                         <a class="sidebar-link <?= $page === 'admin_reports' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_reports"><span class="nav-icon">R</span><span>Reports</span></a>
                         <a class="sidebar-link <?= $page === 'admin_accounts' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_accounts"><span class="nav-icon">C</span><span>Accounts</span></a>
-                        <a class="sidebar-link <?= $page === 'admin_reimbursements' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_reimbursements"><span class="nav-icon">M</span><span>Reimbursement</span></a>
                         <a class="sidebar-link <?= $page === 'admin_rules' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_rules"><span class="nav-icon">S</span><span>Rules</span></a>
+                        <a class="sidebar-link <?= $page === 'notifications' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=notifications"><span class="nav-icon">N</span><span>Notifications</span><?php if ($unreadNotifications > 0): ?><span class="sidebar-link-badge"><?= (int) $unreadNotifications ?></span><?php endif; ?></a>
                         <?php endif; ?>
                     <?php else: ?>
-                        <span class="sidebar-section-title">Attendance</span>
-                        <a class="sidebar-link <?= $page === 'employee_attendance' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_attendance"><span class="nav-icon">M</span><span>My Attendance</span></a>
-                        <span class="sidebar-section-title">Accounts</span>
-                        <a class="sidebar-link <?= $page === 'employee_reimbursements' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_reimbursements"><span class="nav-icon">R</span><span>Reimbursement</span></a>
+                        <span class="sidebar-section-title">Employee Log</span>
+                        <a class="sidebar-link <?= in_array($page, ['employee_attendance', 'employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_log"><span class="nav-icon">L</span><span>Employee Log</span></a>
+                        <a class="sidebar-link <?= $page === 'employee_reimbursements' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_reimbursements"><span class="nav-icon">R</span><span>Reimbursements</span></a>
+                        <a class="sidebar-link <?= $page === 'notifications' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=notifications"><span class="nav-icon">N</span><span>Notifications</span><?php if ($unreadNotifications > 0): ?><span class="sidebar-link-badge"><?= (int) $unreadNotifications ?></span><?php endif; ?></a>
                     <?php endif; ?>
                 </nav>
+                <?php if ($user): ?>
+                <?php endif; ?>
                 <div class="sidebar-actions">
                     <form method="post">
                         <?= csrf_field() ?>
@@ -232,7 +246,7 @@ function render_landing_auth_modal(string $role, bool $isOpen): void
             $desc = 'Sign in with your self-registered vendor account.';
             break;
         case 'freelancer':
-            $title = 'Corporate Employee Login'; $eyebrow = 'Corporate Employee Access'; $iconLabel = 'F';
+            $title = 'Contractual Employee Login'; $eyebrow = 'Contractual Employee Access'; $iconLabel = 'F';
             $desc = 'Freelancers can sign in with their self-registered account.';
             break;
         case 'employee':
@@ -492,8 +506,8 @@ function render_admin_password_modal(): void
 function render_footer(): void
 {
     $user = current_user();
-    $isAdminShell = $user && $user['role'] === 'admin';
-    $isEmployeeShell = $user && $user['role'] === 'employee';
+    $isAdminShell = $user && in_array($user['role'], ['admin', 'freelancer', 'external_vendor'], true);
+    $isEmployeeShell = $user && in_array($user['role'], ['employee', 'corporate_employee'], true);
     $isSidebarShell = $isAdminShell || $isEmployeeShell;
     $page = $_GET['page'] ?? 'landing';
     $showLandingLoginModal = !$user && in_array($page, ['landing', 'register'], true);
@@ -545,7 +559,7 @@ function render_footer(): void
                     </button>
                     <button class="landing-login-option" type="button" data-switch-modal-target="freelancer-login-modal">
                         <span class="landing-login-icon employee">F</span>
-                        <strong>Corporate Employee</strong>
+                        <strong>Contractual Employee</strong>
                         <span>Freelancers can sign in with their self-registered account.</span>
                     </button>
                 </div>

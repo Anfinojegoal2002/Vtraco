@@ -28,6 +28,51 @@ function asset_url(string $path): string
     return base_path_url() . '/' . ltrim($path, '/');
 }
 
+function normalize_relative_path(string $path): string
+{
+    $segments = [];
+    foreach (explode('/', str_replace('\\', '/', $path)) as $segment) {
+        $segment = trim($segment);
+        if ($segment === '' || $segment === '.') {
+            continue;
+        }
+        if ($segment === '..') {
+            array_pop($segments);
+            continue;
+        }
+        $segments[] = $segment;
+    }
+
+    return implode('/', $segments);
+}
+
+function public_file_path(?string $path): string
+{
+    $path = trim((string) $path);
+    if ($path === '') {
+        return '';
+    }
+
+    $normalized = str_replace('\\', '/', $path);
+    if (preg_match('#^(?:https?:)?//#i', $normalized) === 1 || strpos($normalized, 'data:') === 0) {
+        return $normalized;
+    }
+
+    $appRoot = str_replace('\\', '/', dirname(__DIR__, 2));
+    if (strpos($normalized, $appRoot) === 0) {
+        $normalized = substr($normalized, strlen($appRoot));
+    }
+
+    $normalized = ltrim($normalized, '/');
+    $uploadsPos = strpos($normalized, 'storage/uploads/');
+    if ($uploadsPos !== false) {
+        $normalized = substr($normalized, $uploadsPos);
+    }
+
+    $relativePath = normalize_relative_path($normalized);
+    return $relativePath !== '' ? asset_url($relativePath) : '';
+}
+
 function ensure_directory(string $path): void
 {
     if (!is_dir($path)) {
@@ -290,9 +335,9 @@ function user_role_label(string $role): string
     return match ($role) {
         'admin' => 'Admin',
         'employee' => 'Employee',
-        'corporate_employee' => 'Corporate Employee',
+        'corporate_employee' => 'Contractual Employee (Freelancer)',
         'external_vendor' => 'External Vendor',
-        'freelancer' => 'Corporate Employee',
+        'freelancer' => 'Contractual Employee (Freelancer)',
         default => ucwords(str_replace('_', ' ', $role)),
     };
 }
@@ -319,7 +364,7 @@ function can_self_register_role(string $role): bool
 
 function role_requires_unique_email(string $role): bool
 {
-    return in_array($role, ['employee', 'corporate_employee'], true);
+    return false;
 }
 
 function role_email_exists(string $role, string $email, ?int $ignoreUserId = null): bool
@@ -359,11 +404,41 @@ function home_page_for_user(array $user): string
         $role === 'admin' => 'admin_dashboard',
         $role === 'freelancer' => 'corporate_dashboard',
         $role === 'external_vendor' => 'vendor_dashboard',
-        $role === 'employee' => 'employee_attendance',
-        $role === 'corporate_employee' => 'employee_attendance',
+        $role === 'employee' => 'employee_log',
+        $role === 'corporate_employee' => 'employee_log',
         is_member_portal_role($role) => 'member_dashboard',
         default => 'landing',
     };
+}
+
+function notifications_for_user(int $userId, int $limit = 6): array
+{
+    $limit = max(1, min(100, $limit));
+    $stmt = db()->prepare('SELECT * FROM notifications WHERE user_id = :user_id AND is_hidden = 0 ORDER BY created_at DESC, id DESC LIMIT ' . $limit);
+    $stmt->execute(['user_id' => $userId]);
+
+    return $stmt->fetchAll();
+}
+
+function unread_notification_count(int $userId): int
+{
+    $stmt = db()->prepare('SELECT COUNT(*) FROM notifications WHERE user_id = :user_id AND is_read = 0');
+    $stmt->execute(['user_id' => $userId]);
+
+    return (int) $stmt->fetchColumn();
+}
+
+function mark_all_notifications_read_for_user(int $userId): void
+{
+    db()->prepare('UPDATE notifications SET is_read = 1 WHERE user_id = :user_id AND is_read = 0')
+        ->execute(['user_id' => $userId]);
+}
+
+function hide_notification(int $notificationId, int $userId): bool
+{
+    $stmt = db()->prepare('UPDATE notifications SET is_hidden = 1 WHERE id = :id AND user_id = :user_id');
+    $stmt->execute(['id' => $notificationId, 'user_id' => $userId]);
+    return $stmt->rowCount() > 0;
 }
 
 function require_roles(array $roles): array

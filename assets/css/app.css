@@ -38,14 +38,14 @@
             .topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 18px; background: rgba(255,255,255,0.72); backdrop-filter: blur(18px); border: 1px solid rgba(255,255,255,0.6); border-radius: 20px; box-shadow: var(--shadow); }
             .brand { display: flex; align-items: center; gap: 12px; }
             .brand-mark { width: 46px; height: 46px; border-radius: 15px; display: grid; place-items: center; background: linear-gradient(135deg, var(--accent), #164e63); color: #fff; font-family: "Inter", "Segoe UI", sans-serif; font-weight: 700; letter-spacing: 0.08em; }
-            .brand-copy strong { display: block; font-family: "Inter", "Segoe UI", sans-serif; font-size: 1.04rem; }
+            .brand-copy strong { display: block; font-family: "Inter", "Segoe UI", sans-serif; font-size: 0.9rem; }
             .brand-copy small { color: var(--muted); }
             .topbar-nav { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
             .topbar .button { padding: 10px 18px; }
             .admin-sidebar, .employee-sidebar { position: sticky; top: 0; padding: 22px; background: rgba(16, 33, 58, 0.96); color: #f8fafc; box-shadow: var(--shadow); min-height: 100vh; max-height: 100vh; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 22px; }
             .employee-sidebar { background: linear-gradient(180deg, rgba(15,23,42,0.98), rgba(30,64,175,0.94)); }
             .admin-sidebar .brand-copy small, .employee-sidebar .brand-copy small { color: rgba(248,250,252,0.68); }
-            .sidebar-profile { display: flex; align-items: center; gap: 14px; padding: 16px; border-radius: 22px; background: rgba(255,255,255,0.08); }
+            .sidebar-profile { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 16px; background: rgba(255,255,255,0.08); }
             .sidebar-profile[data-modal-target] { cursor: pointer; transition: transform .2s ease, background .2s ease, box-shadow .2s ease; }
             .sidebar-profile[data-modal-target]:hover { background: rgba(255,255,255,0.12); transform: translateY(-1px); box-shadow: 0 12px 24px rgba(2,6,23,0.2); }
             .sidebar-profile[data-modal-target]:focus-visible { outline: 2px solid rgba(255,255,255,0.72); outline-offset: 3px; }
@@ -61,7 +61,8 @@
             .admin-sidebar .button.ghost:hover, .employee-sidebar .button.ghost:hover { background: linear-gradient(135deg, rgba(67,56,202,1), rgba(29,78,216,1)); box-shadow: 0 12px 24px rgba(2,6,23,0.22); }
             .admin-sidebar .button.ghost.admin-logout-button, .employee-sidebar .button.ghost.employee-logout-button { background: transparent; border: 1px solid rgba(255,255,255,0.18); box-shadow: none; }
             .admin-sidebar .button.ghost.admin-logout-button:hover, .employee-sidebar .button.ghost.employee-logout-button:hover { background: rgba(255,255,255,0.08); box-shadow: none; }
-            .sidebar-link { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-radius: 18px; color: rgba(248,250,252,0.84); transition: background .2s ease, transform .2s ease, color .2s ease; }
+            .sidebar-link { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 14px; color: rgba(248,250,252,0.84); transition: background .2s ease, transform .2s ease, color .2s ease; }
+            .sidebar-link-badge { margin-left: auto; min-width: 24px; padding: 3px 8px; border-radius: 999px; background: rgba(255,255,255,0.16); color: #fff; font-size: 0.76rem; font-weight: 800; text-align: center; }
             .sidebar-link-button { width: 100%; border: 0; background: transparent; font: inherit; text-align: left; cursor: pointer; }
             .sidebar-link:hover { background: rgba(255,255,255,0.08); color: #fff; transform: translateX(2px); }
             .sidebar-link.active { background: linear-gradient(135deg, rgba(79,70,229,0.95), rgba(37,99,235,0.95)); color: #fff; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12); }
@@ -101,7 +102,7 @@
             .hero { min-height: 76vh; display: grid; place-items: center; text-align: center; padding: 48px 24px; position: relative; overflow: hidden; background: linear-gradient(145deg, rgba(67,56,202,0.18), rgba(255,255,255,0.9)); }
             .hero::before { content: ""; position: absolute; inset: 14px; border: 1px dashed rgba(67,56,202,0.2); border-radius: 24px; }
             .hero-copy { max-width: 760px; position: relative; z-index: 1; }
-            .eyebrow { display: inline-block; padding: 8px 14px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.82rem; }
+            .eyebrow { display: inline-block; padding: 4px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; font-size: 0.7rem; }
             h1, h2, h3 { margin: 0 0 10px; font-family: "Merriweather", Georgia, serif; letter-spacing: -0.02em; }
             h1 { font-size: clamp(1.45rem, 2.1vw, 2.15rem); line-height: 1.12; }
             .page-title .eyebrow { margin-bottom: 10px; }
@@ -144,9 +145,9 @@
             .legend-present { background: var(--present); }
             .legend-absent { background: var(--absent); }
             .legend-pending { background: var(--pending); }
-            .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; height: 280px; min-height: 280px; overflow-y: auto; overflow-x: hidden; padding-right: 6px; overscroll-behavior: contain; align-content: start; }
-            .weekday { text-align: center; color: var(--muted); font-weight: 700; padding-bottom: 4px; }
-            .day-card { min-height: 92px; border-radius: 16px; border: 1px solid var(--line); padding: 8px; background: rgba(255,255,255,0.84); display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 10px; cursor: pointer; text-align: left; transition: transform .18s ease, box-shadow .18s ease; }
+            .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; padding-right: 0; align-content: start; }
+            .weekday { text-align: center; color: var(--muted); font-weight: 700; font-size: 0.75rem; padding-bottom: 2px; }
+            .day-card { min-height: 58px; border-radius: 12px; padding: 6px; background: rgba(255,255,255,0.84); display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 4px; cursor: pointer; text-align: left; transition: transform .18s ease, box-shadow .18s ease; }
             .day-card:hover { transform: translateY(-2px); box-shadow: 0 14px 32px rgba(15,23,42,0.1); }
             .day-card.static { cursor: default; }
             .day-card.static:hover { transform: none; box-shadow: none; }
@@ -157,9 +158,9 @@
             .day-card-Week-Off { background: rgba(146, 96, 55, 0.2); border-color: rgba(120, 72, 38, 0.34); }
             .day-card-Week-Off .day-number { color: #6f3f1d; }
             .day-card-Week-Off .day-copy { color: #7c4a26; }
-            .day-card .day-number { font-size: 2rem; font-weight: 800; line-height: 1; color: var(--ink); }
-            .day-card .day-copy { min-height: 0.95rem; font-size: 0.78rem; font-weight: 700; color: var(--muted); line-height: 1.2; }
-            .day-dot { width: 16px; height: 16px; border-radius: 999px; }
+            .day-card .day-number { font-size: 1.15rem; font-weight: 800; line-height: 1; color: var(--ink); }
+            .day-card .day-copy { min-height: 0; font-size: 0.65rem; font-weight: 700; color: var(--muted); line-height: 1; }
+            .day-dot { width: 10px; height: 10px; border-radius: 999px; }
             .dot-Present { background: var(--present); }
             .dot-Absent { background: var(--absent); }
             .dot-Half-Day { background: var(--half); }
@@ -176,9 +177,19 @@
             .status-Inactive { background: #64748b; }
             .status-Pending { background: var(--pending); }
             .status-Unmarked { background: #64748b; }
-            .calendar-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 18px; align-items: stretch; }
-            .summary-card { padding: 16px; min-height: 96px; border-radius: 18px; background: rgba(19,34,56,0.04); display: flex; flex-direction: column; justify-content: center; }
-            .summary-card strong { display: block; font-size: 1.5rem; }
+            .calendar-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 10px; align-items: stretch; }
+            .summary-card { padding: 10px 14px; min-height: 60px; border-radius: 14px; background: rgba(19,34,56,0.04); display: flex; flex-direction: column; justify-content: center; }
+            .summary-card strong { display: block; font-size: 1.1rem; }
+            .calendar-shell-compact { padding: 12px 16px; }
+            .calendar-shell-compact .calendar-legend { gap: 8px; margin-bottom: 10px; }
+            .calendar-shell-compact .legend-chip { padding: 6px 10px; font-size: 0.88rem; }
+            .calendar-grid-compact { flex: 1 1 auto; min-height: 0; gap: 3px; grid-template-rows: auto repeat(var(--calendar-week-rows, 6), minmax(0, 1fr)); }
+            .day-card.compact { min-height: 0; height: 100%; padding: 4px; gap: 3px; }
+            .day-card.compact .day-number { font-size: 1rem; }
+            .day-card.compact .day-copy { font-size: 0.6rem; }
+            .calendar-shell-compact .calendar-summary { margin-top: 8px; gap: 8px; }
+            .calendar-shell-compact .summary-card { padding: 8px 12px; min-height: 48px; }
+            .calendar-shell-compact .summary-card strong { font-size: 1rem; }
             .rules-box { display: grid; gap: 14px; }
             .rules-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
 .admin-rules-footer {
@@ -201,6 +212,27 @@
             .rule-card.active { border-color: rgba(67,56,202,0.45); box-shadow: 0 0 0 3px rgba(67,56,202,0.08); }
             .rule-icon { width: 38px; height: 38px; border-radius: 14px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-weight: 800; }
             .hint { font-size: 0.92rem; color: var(--muted); }
+            .sidebar-notifications { display: grid; gap: 12px; padding: 18px; border-radius: 24px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.08); }
+            .sidebar-notifications .split { align-items: center; }
+            .sidebar-notification-list { display: grid; gap: 10px; }
+            .sidebar-notification-item { display: grid; gap: 4px; padding: 12px 14px; border-radius: 18px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.08); }
+            .sidebar-notification-item strong { color: #f8fafc; font-size: 0.9rem; }
+            .sidebar-notification-item p { margin: 0; color: rgba(226,232,240,0.78); font-size: 0.84rem; line-height: 1.5; }
+            .sidebar-notification-item span { color: rgba(191,219,254,0.8); font-size: 0.76rem; font-weight: 700; }
+            .sidebar-notification-item.read { opacity: 0.72; }
+            .notifications-shell { display: grid; gap: 16px; }
+            .notification-list { display: grid; gap: 14px; }
+            .notification-card { padding: 18px 20px; border-radius: 22px; border: 1px solid rgba(30,41,59,0.08); background: rgba(255,255,255,0.78); box-shadow: 0 18px 40px rgba(15,23,42,0.06); display: grid; gap: 10px; }
+            .notification-card.unread { border-color: rgba(67,56,202,0.26); background: linear-gradient(180deg, rgba(238,242,255,0.96), rgba(255,255,255,0.92)); }
+            .notification-card-payment { border-left: 4px solid rgba(22,163,74,0.78); }
+            .notification-card-reimbursement { border-left: 4px solid rgba(217,119,6,0.82); }
+            .notification-card-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+            .notification-card-head strong { display: block; font-size: 1rem; color: var(--ink); }
+            .notification-meta { display: inline-flex; margin-top: 6px; padding: 5px 10px; border-radius: 999px; background: rgba(67,56,202,0.08); color: var(--accent); font-size: 0.76rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
+            .notification-time { color: var(--muted); font-size: 0.86rem; font-weight: 700; white-space: nowrap; }
+            .notification-card p { margin: 0; color: #334155; }
+            .notification-empty { padding: 22px; border-radius: 22px; background: rgba(19,34,56,0.04); }
+            .notification-empty strong { display: block; margin-bottom: 6px; }
             .cards-2, .cards-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
             .action-card { padding: 18px; border-radius: 20px; border: 1px solid var(--line); background: rgba(255,255,255,0.86); display: grid; gap: 10px; }
             .manual-punch-card { align-content: start; gap: 14px; position: relative; }
@@ -294,6 +326,14 @@
             }
             .list { display: grid; gap: 10px; }
             .list-item { padding: 14px; border-radius: 16px; background: rgba(19,34,56,0.04); }
+            .session-detail-card { display: grid; gap: 12px; }
+            .session-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+            .session-detail-row { display: grid; gap: 4px; padding: 10px 12px; border-radius: 14px; background: #f8fafc; border: 1px solid rgba(30,41,59,0.08); }
+            .session-detail-row strong { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+            .session-detail-row span { color: var(--ink); font-weight: 700; overflow-wrap: anywhere; }
+            .session-proof { display: grid; gap: 8px; }
+            .session-proof strong { font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+            .session-proof-image { width: 100%; max-width: 280px; border-radius: 16px; border: 1px solid rgba(30,41,59,0.08); background: #eef2ff; }
             #attendance-modal .list-item,
             #attendance-modal .action-card,
             #attendance-modal .section-block,
@@ -441,15 +481,13 @@
             .employee-reimbursements-page .reimbursement-calendar-block { margin-bottom: 18px; }
             .employee-reimbursements-page .reimbursement-calendar-scroll {
               display: block !important;
-              height: 260px;
-              min-height: 260px;
-              max-height: 260px;
-              overflow: auto;
+              height: auto;
+              min-height: 0;
+              max-height: none;
+              overflow: visible;
               border-radius: 18px;
               border: 1px solid rgba(36,52,109,0.18);
               background: rgba(255,255,255,0.92);
-              scrollbar-gutter: stable;
-              overscroll-behavior: contain;
             }
             .employee-reimbursements-page .reimbursement-calendar-grid {
               display: grid !important;
@@ -631,7 +669,7 @@
                 .calendar-grid { grid-template-columns: repeat(7, minmax(44px, 1fr)); gap: 6px; height: auto; min-height: 0; max-height: none; padding-right: 0; }
                 .day-card { min-height: 78px; padding: 8px; border-radius: 14px; gap: 8px; }
                 .day-card .day-number { font-size: 1.55rem; }
-                .day-dot { width: 12px; height: 12px; }
+                .day-dot { width: 10px; height: 10px; border-radius: 999px; }
                 .attendance-panel,
                 .employee-attendance-panel { min-height: 0; display: block; }
                 .modal { padding: 14px; }
@@ -670,9 +708,9 @@
                 .auth-register-submit { min-height: 44px; }
             }
             
-            .employee-tabs-section { padding: 0 24px; margin-bottom: 12px; }
+            .employee-tabs-section { padding: 0 12px; margin-top: -12px; margin-bottom: 8px; }
             .employee-tabs { display: flex; gap: 8px; border-bottom: 2px solid rgba(67,56,202,0.12); }
-            .tab-link { display: inline-flex; align-items: center; padding: 12px 18px; font-weight: 600; color: var(--muted); border: none; background: transparent; cursor: pointer; border-bottom: 3px solid transparent; transition: color .2s ease, border-color .2s ease; font-size: 0.95rem; margin-bottom: -2px; }
+            .tab-link { display: inline-flex; align-items: center; padding: 6px 14px; font-weight: 600; color: var(--muted); border: none; background: transparent; cursor: pointer; border-bottom: 3px solid transparent; transition: color .2s ease, border-color .2s ease; font-size: 0.88rem; margin-bottom: -2px; }
             .tab-link:hover { color: var(--ink); }
             .tab-link.active { color: var(--accent); border-bottom-color: var(--accent); }
             .employee-tabs.inline { border-bottom: none; background: rgba(15, 23, 42, 0.06); padding: 4px; border-radius: 999px; }
@@ -724,10 +762,10 @@
             .admin-attendance-page { overflow-y: auto; overflow-x: hidden; padding-right: 6px; padding-bottom: 120px; }
             .admin-attendance-page .attendance-panel { overflow: visible; }
             .admin-attendance-page .calendar-shell { overflow: visible; }
-            .admin-attendance-page .calendar-grid { height: 230px; min-height: 230px; }
+            .admin-attendance-page .calendar-grid { height: auto; min-height: 0; }
             .admin-attendance-page .calendar-summary { margin-top: 14px; }
             .admin-rules-page { overflow-y: auto; overflow-x: hidden; padding-right: 6px; padding-bottom: 120px; }
-            .admin-rules-page .scroll-panel { max-height: none; overflow: visible; }
+            .admin-rules-page .scroll-panel { max-height: 620px; overflow: auto; }
 
             /* Vendor Portal - Reduced Text Sizes */
             .admin-shell .section-block > .split > div > span.eyebrow,
@@ -739,3 +777,37 @@
             .admin-shell .metric-card > strong { font-size: 1.3rem; }
             .admin-shell .metric-card > span { font-size: 0.85rem; }
             .admin-shell .section-block > p { font-size: 0.9rem; min-height: auto; }
+
+            /* Attendance Page Specific Shrinkage to prevent scrolling */
+            .admin-attendance-page .panel, 
+            .admin-attendance-page .section-block, 
+            .admin-attendance-page .calendar-shell { padding: 12px 16px; }
+            .admin-attendance-page h1 { font-size: 1.2rem; }
+            .admin-attendance-page .button { padding: 6px 12px; min-height: 36px; font-size: 0.85rem; }
+            .admin-attendance-page .summary-card { padding: 8px 12px; min-height: 50px; }
+            .admin-attendance-page .summary-card strong { font-size: 1rem; }
+            .admin-employee-log-page .page-title { align-items: flex-start; }
+            .admin-attendance-page .calendar-grid { gap: 3px; }
+            .admin-attendance-page .day-card { min-height: 52px; padding: 4px; }
+            .admin-attendance-page .day-number { font-size: 1rem; }
+            .admin-attendance-page .day-copy { font-size: 0.6rem; }
+
+            @media (min-width: 1100px) and (min-height: 760px) {
+                .admin-employee-log-page { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: hidden; }
+                .admin-main .content.admin-employee-log-page { overflow: hidden; }
+                .admin-employee-log-page .page-title { margin-bottom: 0; }
+                .admin-employee-log-page h1 { font-size: 1.2rem; margin-bottom: 0; }
+                .admin-employee-log-page .action-bar { gap: 8px; margin-bottom: 0; }
+                .admin-employee-log-page .button { padding: 6px 12px; min-height: 36px; font-size: 0.85rem; }
+                .admin-employee-log-page .employee-tabs-section { padding: 0 10px; margin-top: -8px; margin-bottom: 0; }
+                .admin-employee-log-page .tab-link { padding: 6px 12px; font-size: 0.84rem; }
+                .admin-employee-log-page .section-block { padding: 12px 16px; }
+                .admin-employee-log-page .scroll-panel { max-height: none; overflow: visible; }
+                .admin-employee-log-page .form-grid { gap: 10px; }
+                .admin-employee-log-page label { gap: 6px; font-size: 0.9rem; }
+                .admin-employee-log-page input,
+                .admin-employee-log-page select { padding: 10px 12px; }
+                .admin-employee-log-page .spacer { height: 6px; }
+                .admin-employee-log-page .attendance-panel { flex: 1 1 auto; min-height: 0; display: flex; }
+                .admin-employee-log-page .attendance-panel .calendar-shell { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+            }

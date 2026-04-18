@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 function employee_count(): int
 {
+    $user = current_user();
+    if (($user['role'] ?? '') === 'admin') {
+        return (int) db()->query("SELECT COUNT(*) FROM users WHERE role IN ('employee', 'corporate_employee')")->fetchColumn();
+    }
+
     $adminId = current_admin_id();
     $role = current_manager_target_role();
     if ($adminId === null) {
@@ -26,31 +31,37 @@ function employees(): array
 {
     $adminId = current_admin_id();
     $role = current_manager_target_role();
-    if ($adminId === null) {
-        $stmt = db()->prepare("SELECT * FROM users WHERE role = :role ORDER BY name");
-        $stmt->execute(['role' => $role]);
-        return $stmt->fetchAll();
+    $user = current_user();
+    if (($user['role'] ?? '') === 'external_vendor') {
+        $stmt = db()->prepare("SELECT * FROM users WHERE role IN ('employee', 'corporate_employee') AND admin_id = :admin_id ORDER BY name");
+        $stmt->execute(['admin_id' => $adminId]);
+    } else {
+        $stmt = db()->prepare("SELECT * FROM users WHERE role = :role AND admin_id = :admin_id ORDER BY name");
+        $stmt->execute(['role' => $role, 'admin_id' => $adminId]);
     }
-
-    $stmt = db()->prepare("SELECT * FROM users WHERE role = :role AND admin_id = :admin_id ORDER BY name");
-    $stmt->execute(['role' => $role, 'admin_id' => $adminId]);
     return $stmt->fetchAll();
 }
 
 function employee_by_id(int $id): ?array
 {
-    $adminId = current_admin_id();
-    $role = current_manager_target_role();
-    if ($adminId === null) {
-        $stmt = db()->prepare("SELECT * FROM users WHERE id = :id AND role = :role");
-        $stmt->execute(['id' => $id, 'role' => $role]);
+    $user = current_user();
+    if (($user['role'] ?? '') === 'admin') {
+        $stmt = db()->prepare("SELECT * FROM users WHERE id = :id AND role IN ('employee', 'corporate_employee')");
+        $stmt->execute(['id' => $id]);
     } else {
-        $stmt = db()->prepare("SELECT * FROM users WHERE id = :id AND role = :role AND admin_id = :admin_id");
-        $stmt->execute([
-            'id' => $id,
-            'role' => $role,
-            'admin_id' => $adminId,
-        ]);
+        $adminId = current_admin_id();
+        $role = current_manager_target_role();
+        if ($adminId === null) {
+            $stmt = db()->prepare("SELECT * FROM users WHERE id = :id AND role = :role");
+            $stmt->execute(['id' => $id, 'role' => $role]);
+        } else {
+            $stmt = db()->prepare("SELECT * FROM users WHERE id = :id AND role = :role AND admin_id = :admin_id");
+            $stmt->execute([
+                'id' => $id,
+                'role' => $role,
+                'admin_id' => $adminId,
+            ]);
+        }
     }
 
     $row = $stmt->fetch();
@@ -134,37 +145,52 @@ function normalize_rules_from_input(array $source): array
 function save_employee_rules(int $userId, array $rules): void
 {
     $pdo = db();
-    $pdo->beginTransaction();
-    $pdo->prepare('DELETE FROM employee_rules WHERE user_id = :user_id')->execute(['user_id' => $userId]);
+    $manageTransaction = !$pdo->inTransaction();
 
-    $insert = $pdo->prepare('INSERT INTO employee_rules (user_id, rule_type, slot_name, sort_order, created_at) VALUES (:user_id, :rule_type, :slot_name, :sort_order, :created_at)');
-    $order = 0;
-
-    foreach (['manual_punch_in', 'biometric_punch_in', 'biometric_punch_out'] as $type) {
-        if (!empty($rules[$type])) {
-            $insert->execute([
-                'user_id' => $userId,
-                'rule_type' => $type,
-                'slot_name' => null,
-                'sort_order' => $order++,
-                'created_at' => now(),
-            ]);
-        }
+    if ($manageTransaction) {
+        $pdo->beginTransaction();
     }
 
-    if (!empty($rules['manual_punch_out'])) {
-        for ($i = 1; $i <= (int) $rules['manual_out_count']; $i++) {
-            $insert->execute([
-                'user_id' => $userId,
-                'rule_type' => 'manual_punch_out',
-                'slot_name' => 'Manual Punch Slot ' . $i,
-                'sort_order' => $order++,
-                'created_at' => now(),
-            ]);
-        }
-    }
+    try {
+        $pdo->prepare('DELETE FROM employee_rules WHERE user_id = :user_id')->execute(['user_id' => $userId]);
 
-    $pdo->commit();
+        $insert = $pdo->prepare('INSERT INTO employee_rules (user_id, rule_type, slot_name, sort_order, created_at) VALUES (:user_id, :rule_type, :slot_name, :sort_order, :created_at)');
+        $order = 0;
+
+        foreach (['manual_punch_in', 'biometric_punch_in', 'biometric_punch_out'] as $type) {
+            if (!empty($rules[$type])) {
+                $insert->execute([
+                    'user_id' => $userId,
+                    'rule_type' => $type,
+                    'slot_name' => null,
+                    'sort_order' => $order++,
+                    'created_at' => now(),
+                ]);
+            }
+        }
+
+        if (!empty($rules['manual_punch_out'])) {
+            for ($i = 1; $i <= (int) $rules['manual_out_count']; $i++) {
+                $insert->execute([
+                    'user_id' => $userId,
+                    'rule_type' => 'manual_punch_out',
+                    'slot_name' => 'Manual Punch Slot ' . $i,
+                    'sort_order' => $order++,
+                    'created_at' => now(),
+                ]);
+            }
+        }
+
+        if ($manageTransaction) {
+            $pdo->commit();
+        }
+    } catch (Throwable $exception) {
+        if ($manageTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        throw $exception;
+    }
 }
 
 function employee_rules(int $userId): array
@@ -227,6 +253,38 @@ function rules_explanation_html(array $rules): string
         $parts[] = 'Biometric Punch Out: record a biometric punch-out time.';
     }
     return implode('<br>', array_map('h', $parts));
+}
+
+function standard_shift_options(): array
+{
+    return [
+        '09:00 AM - 06:00 PM',
+        '11:30 AM - 08:30 PM',
+    ];
+}
+
+function normalize_shift_selection(?string $shift): string
+{
+    $shift = trim((string) $shift);
+    if ($shift === '') {
+        return '';
+    }
+
+    $normalized = str_replace('–', '-', $shift);
+    $normalized = preg_replace('/\s+/', ' ', $normalized) ?? $normalized;
+    $normalized = trim($normalized);
+
+    if (in_array($normalized, ['10:30 AM - 08:30 PM', '10:30 AM - 8:30 PM'], true)) {
+        $normalized = '11:30 AM - 08:30 PM';
+    }
+
+    foreach (standard_shift_options() as $option) {
+        if (strcasecmp($normalized, $option) === 0) {
+            return $option;
+        }
+    }
+
+    return $normalized;
 }
 
 function shift_timings(): array

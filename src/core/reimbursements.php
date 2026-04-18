@@ -126,7 +126,7 @@ function validate_reimbursement_amount(string $amountText): float
 
 function validate_reimbursement_attachment_upload(array $file, string $label = 'reimbursement proof'): void
 {
-    validate_uploaded_file($file, ['jpg', 'jpeg', 'pdf'], 1024 * 1024, $label);
+    validate_uploaded_file($file, ['jpg', 'jpeg', 'pdf'], 5 * 1024 * 1024, $label);
 
     $mime = uploaded_file_mime_type($file);
     if (!in_array($mime, ['image/jpeg', 'application/pdf'], true)) {
@@ -263,6 +263,42 @@ function employee_reimbursements_by_date_map(int $userId, string $month): array
     }
 
     return $map;
+}
+
+function employee_reimbursement_month_summary(int $userId, string $month): array
+{
+    $items = employee_reimbursements_for_month($userId, $month);
+    $summary = [
+        'count' => count($items),
+        'dates_with_claims' => 0,
+        'requested_total' => 0.0,
+        'paid_total' => 0.0,
+        'outstanding_total' => 0.0,
+        'pending_count' => 0,
+        'approved_count' => 0,
+        'paid_count' => 0,
+    ];
+    $dates = [];
+
+    foreach ($items as $item) {
+        $status = reimbursement_status_label((string) ($item['status'] ?? ''));
+        $summary['requested_total'] += (float) ($item['amount_requested'] ?? 0);
+        $summary['paid_total'] += (float) ($item['amount_paid'] ?? 0);
+        $summary['outstanding_total'] += (float) ($item['remaining_balance'] ?? 0);
+        $dates[(string) ($item['expense_date'] ?? '')] = true;
+
+        if ($status === 'PENDING') {
+            $summary['pending_count']++;
+        } elseif (in_array($status, ['APPROVED', 'PARTIALLY PAID'], true)) {
+            $summary['approved_count']++;
+        } elseif ($status === 'PAID') {
+            $summary['paid_count']++;
+        }
+    }
+
+    $summary['dates_with_claims'] = count($dates);
+
+    return $summary;
 }
 
 function employee_reimbursement_by_id(int $reimbursementId, int $userId): ?array

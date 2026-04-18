@@ -1,6 +1,7 @@
-const modal = document.getElementById('attendance-modal');
+        const modal = document.getElementById('attendance-modal');
         const modalContent = document.getElementById('modal-content');
         const csrfToken = window.VTRACO_CSRF_TOKEN || '';
+        const availableProjects = Array.isArray(window.VTRACO_AVAILABLE_PROJECTS) ? window.VTRACO_AVAILABLE_PROJECTS : [];
 
         function escapeHtml(value) {
             return String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
@@ -8,6 +9,34 @@ const modal = document.getElementById('attendance-modal');
 
         function csrfInputMarkup() {
             return csrfToken ? `<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">` : '';
+        }
+
+        function findProjectById(projectId) {
+            const numericId = Number(projectId || 0);
+            if (!numericId) {
+                return null;
+            }
+
+            return availableProjects.find(project => Number(project.id || 0) === numericId) || null;
+        }
+
+        function projectDayPortion(sessionType) {
+            return sessionType === 'FULL_DAY' ? 'Full Day' : 'Half Day';
+        }
+
+        function projectOptionsMarkup(selectedProjectId) {
+            const numericSelectedId = Number(selectedProjectId || 0);
+            const placeholder = `<option value="">${availableProjects.length ? 'Select project' : 'No projects assigned'}</option>`;
+            const options = availableProjects.map(project => `
+                <option value="${escapeHtml(project.id)}" ${Number(project.id || 0) === numericSelectedId ? 'selected' : ''}>${escapeHtml(project.project_name || '')}</option>
+            `).join('');
+
+            return placeholder + options;
+        }
+
+        function detailValue(value, fallback = '-') {
+            const text = String(value ?? '').trim();
+            return text !== '' ? text : fallback;
         }
 
         function openModalById(id) {
@@ -33,14 +62,71 @@ const modal = document.getElementById('attendance-modal');
 
             let sessionMarkup = '<div class="list-item muted">No sessions recorded for this date.</div>';
             if (payload.sessions && payload.sessions.length) {
-                sessionMarkup = payload.sessions.map(session => `
-                    <div class="list-item">
-                        <strong>${escapeHtml(session.slot_name || 'Session')}</strong><br>
-                        ${escapeHtml(session.college_name || '-')} | ${escapeHtml(session.session_name || '-')}<br>
-                        ${escapeHtml(session.day_portion || '-')} | ${escapeHtml(session.session_duration || '-')} hrs<br>
-                        ${escapeHtml(session.location || '-')}
-                    </div>
-                `).join('');
+                sessionMarkup = payload.sessions.map(session => {
+                    const project = findProjectById(session.project_id);
+                    const projectName = project && project.project_name ? project.project_name : '';
+                    const sessionDuration = Number(session.session_duration || 0) > 0
+                        ? `${session.session_duration} hrs`
+                        : '-';
+                    const geoText = session.punch_in_lat || session.punch_in_lng
+                        ? `${detailValue(session.punch_in_lat)}, ${detailValue(session.punch_in_lng)}`
+                        : '-';
+                    const imageMarkup = session.punch_in_path
+                        ? `
+                            <div class="session-proof">
+                                <strong>Punch Image</strong>
+                                <img class="session-proof-image" src="${escapeHtml(session.punch_in_path)}" alt="Punch image for ${escapeHtml(session.slot_name || 'Session')}">
+                            </div>
+                        `
+                        : '';
+
+                    return `
+                        <div class="list-item session-detail-card">
+                            <div class="split">
+                                <strong>${escapeHtml(session.slot_name || 'Session')}</strong>
+                                ${projectName ? `<span class="badge">${escapeHtml(projectName)}</span>` : ''}
+                            </div>
+                            <div class="session-detail-grid">
+                                <div class="session-detail-row"><strong>Project</strong><span>${escapeHtml(detailValue(projectName))}</span></div>
+                                <div class="session-detail-row"><strong>College Name</strong><span>${escapeHtml(detailValue(session.college_name))}</span></div>
+                                <div class="session-detail-row"><strong>Session Name</strong><span>${escapeHtml(detailValue(session.session_name))}</span></div>
+                                <div class="session-detail-row"><strong>Day Portion</strong><span>${escapeHtml(detailValue(session.day_portion))}</span></div>
+                                <div class="session-detail-row"><strong>Session Duration</strong><span>${escapeHtml(sessionDuration)}</span></div>
+                                <div class="session-detail-row"><strong>Location</strong><span>${escapeHtml(detailValue(session.location))}</span></div>
+                                <div class="session-detail-row"><strong>Punch In Time</strong><span>${escapeHtml(detailValue(session.punch_in_time))}</span></div>
+                                <div class="session-detail-row"><strong>Geo Coordinates</strong><span>${escapeHtml(geoText)}</span></div>
+                            </div>
+                            ${imageMarkup}
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            let reimbursementMarkup = '';
+            if (payload.reimbursement && payload.reimbursement.count > 0) {
+                reimbursementMarkup = `
+                    <section class="attendance-modal-section">
+                        <div class="split">
+                            <h3>Reimbursement Claims</h3>
+                            <span class="badge">${payload.reimbursement.count} total</span>
+                        </div>
+                        <div class="list">
+                            ${payload.reimbursement.items.map(item => `
+                                <div class="list-item">
+                                    <div class="split">
+                                        <strong>${escapeHtml(item.category)}</strong>
+                                        <span class="status-pill status-${escapeHtml(item.status.toLowerCase())}">${escapeHtml(item.status)}</span>
+                                    </div>
+                                    <p class="hint">${escapeHtml(item.expense_description)}</p>
+                                    <div class="split" style="margin-top: 8px;">
+                                        <span>Requested: Rs ${escapeHtml(item.amount_requested)}</span>
+                                        ${Number(item.amount_paid) > 0 ? `<span>Paid: Rs ${escapeHtml(item.amount_paid)}</span>` : ''}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </section>
+                `;
             }
 
             let adminForm = '';
@@ -79,6 +165,8 @@ const modal = document.getElementById('attendance-modal');
                 const manualPunchPairs = manualPairSlots.map((slot, index) => {
                     const pairNumber = index + 1;
                     const pairSession = sessionForSlot(slot, index);
+                    const selectedProjectId = pairSession && pairSession.project_id ? Number(pairSession.project_id) : 0;
+                    const selectedProject = findProjectById(selectedProjectId);
                     const pairPunchInPath = pairSession && pairSession.punch_in_path
                         ? pairSession.punch_in_path
                         : (pairNumber === 1 ? (payload.punch_in_path || '') : '');
@@ -93,7 +181,7 @@ const modal = document.getElementById('attendance-modal');
                         : (pairNumber === 1 ? (payload.punch_in_lng || '') : '');
                     const pairPunchInDone = !!pairPunchInPath;
                     const pairPunchOutDone = !!(pairSession && (pairSession.college_name || pairSession.session_name || pairSession.location || Number(pairSession.session_duration || 0) > 0));
-                    const pairHiddenClass = ''; // Show every configured manual punch pair for every date
+                    const pairHiddenClass = '';
                     const manualInSectionDisabled = !payload.rule_manual_in ? 'disabled' : '';
                     const manualInFormDisabled = (!payload.rule_manual_in || pairPunchInDone) ? 'disabled' : '';
                     const manualInRequired = manualInFormDisabled ? '' : 'required';
@@ -110,8 +198,19 @@ const modal = document.getElementById('attendance-modal');
                                 ? `Manual Punch Out ${pairNumber} is already submitted.`
                                 : `Fill the required fields for Manual Punch Out ${pairNumber}.`));
                     const pairStatus = pairPunchOutDone ? 'Completed' : (pairPunchInDone ? 'Punch In Submitted' : 'Pending');
-                    const selectedDayPortion = pairSession && pairSession.day_portion ? pairSession.day_portion : 'Full Day';
+                    const selectedDayPortion = pairSession && pairSession.day_portion
+                        ? pairSession.day_portion
+                        : (selectedProject ? projectDayPortion(selectedProject.session_type) : 'Full Day');
                     const sessionDurationValue = pairSession && pairSession.session_duration ? pairSession.session_duration : '';
+                    const collegeNameValue = pairSession && pairSession.college_name
+                        ? pairSession.college_name
+                        : (selectedProject && selectedProject.college_name ? selectedProject.college_name : '');
+                    const sessionNameValue = pairSession && pairSession.session_name
+                        ? pairSession.session_name
+                        : (selectedProject && selectedProject.project_name ? selectedProject.project_name : '');
+                    const locationValue = pairSession && pairSession.location
+                        ? pairSession.location
+                        : (selectedProject && selectedProject.location ? selectedProject.location : '');
                     const sessionIdField = pairSession && pairSession.id ? `<input type="hidden" name="session_id" value="${escapeHtml(pairSession.id)}">` : '';
 
                     return `
@@ -152,15 +251,20 @@ const modal = document.getElementById('attendance-modal');
                                         <input type="hidden" name="slot_index" value="${pairNumber}">
                                         <input type="hidden" name="slot_name" value="${escapeHtml(slot)}">
                                         ${sessionIdField}
-                                        <label>College Name *<input type="text" name="college_name" value="${escapeHtml(pairSession && pairSession.college_name ? pairSession.college_name : '')}" ${manualOutFormDisabled} required></label>
-                                        <label>Session Name *<input type="text" name="session_name" value="${escapeHtml(pairSession && pairSession.session_name ? pairSession.session_name : '')}" ${manualOutFormDisabled} required></label>
+                                        <label>Project
+                                            <select name="project_id" data-project-select ${manualOutFormDisabled}>
+                                                ${projectOptionsMarkup(selectedProjectId)}
+                                            </select>
+                                        </label>
+                                        <label>College Name *<input type="text" name="college_name" data-project-college value="${escapeHtml(collegeNameValue)}" ${manualOutFormDisabled} required></label>
+                                        <label>Session Name *<input type="text" name="session_name" data-project-session value="${escapeHtml(sessionNameValue)}" ${manualOutFormDisabled} required></label>
                                         <label>Half Day / Full Day
-                                            <select name="day_portion" ${manualOutFormDisabled}>
+                                            <select name="day_portion" data-project-day-portion ${manualOutFormDisabled}>
                                                 ${['Full Day', 'Half Day'].map(option => `<option value="${option}" ${option === selectedDayPortion ? 'selected' : ''}>${option}</option>`).join('')}
                                             </select>
                                         </label>
                                         <label>Session Duration in hours *<input type="number" step="0.5" min="0.5" name="session_duration" value="${escapeHtml(sessionDurationValue)}" ${manualOutFormDisabled} required></label>
-                                        <label>Location *<input type="text" name="location" value="${escapeHtml(pairSession && pairSession.location ? pairSession.location : '')}" ${manualOutFormDisabled} required></label>
+                                        <label>Location *<input type="text" name="location" data-project-location value="${escapeHtml(locationValue)}" ${manualOutFormDisabled} required></label>
                                         <button class="button secondary" type="submit" ${manualOutFormDisabled}>${pairPunchOutDone ? 'Submitted' : `Punch Out ${pairNumber}`}</button>
                                     </form>
                                 </div>
@@ -211,14 +315,14 @@ const modal = document.getElementById('attendance-modal');
                                     <input type="hidden" name="action" value="employee_biometric">
                                     <input type="hidden" name="attend_date" value="${payload.date}">
                                     <input type="hidden" name="stamp_type" value="in">
-                                    <button class="button ghost small" type="submit" ${!payload.rule_bio_in ? 'disabled' : ''}>Biometric In</button>
+                                    <button class="button ghost small" type="submit" disabled>Biometric In</button>
                                 </form>
                                 <form method="post">
                                     ${csrfInputMarkup()}
                                     <input type="hidden" name="action" value="employee_biometric">
                                     <input type="hidden" name="attend_date" value="${payload.date}">
                                     <input type="hidden" name="stamp_type" value="out">
-                                    <button class="button ghost small" type="submit" ${!payload.rule_bio_out ? 'disabled' : ''}>Biometric Out</button>
+                                    <button class="button ghost small" type="submit" disabled>Biometric Out</button>
                                 </form>
                             </div>
                             <div class="hint">In: ${escapeHtml(payload.biometric_in_time || 'Not stamped')}<br>Out: ${escapeHtml(payload.biometric_out_time || 'Not stamped')}</div>
@@ -240,17 +344,20 @@ const modal = document.getElementById('attendance-modal');
             modalContent.innerHTML = `
                 <section class="attendance-modal-hero">
                     <div>
-                        <span class="eyebrow">${payload.context === 'admin' ? 'Admin Attendance' : 'Employee Attendance'}</span>
+                        <span class="eyebrow">${payload.view_mode === 'reimbursement' ? 'Reimbursement Details' : (payload.context === 'admin' ? 'Admin Attendance' : 'Employee Attendance')}</span>
                         <h2>${escapeHtml(payload.display_date)}</h2>
-                        <p>Status: <span class="status-pill status-${escapeHtml(displayStatusClass)}">${escapeHtml(displayStatus)}</span></p>
+                        ${payload.view_mode !== 'reimbursement' ? `<p>Status: <span class="status-pill status-${escapeHtml(displayStatusClass)}">${escapeHtml(displayStatus)}</span></p>` : ''}
                     </div>
+                    ${payload.view_mode !== 'reimbursement' ? `
                     <div class="attendance-modal-meta">
                         <strong>Punch Details</strong><br>
                         Punch In: ${escapeHtml(payload.punch_in_time || payload.biometric_in_time || 'Not submitted')}<br>
                         Punch Out: ${escapeHtml(payload.biometric_out_time || 'Not submitted')}<br>
                         ${payload.punch_in_path ? `Geo: ${escapeHtml(payload.punch_in_lat || '-')}, ${escapeHtml(payload.punch_in_lng || '-')}` : ((payload.biometric_in_time || payload.biometric_out_time) ? 'Source: Imported biometric attendance' : 'Geo: Not available')}
                     </div>
+                    ` : ''}
                 </section>
+                ${(payload.view_mode !== 'reimbursement' && payload.context === 'admin') ? `
                 <section class="attendance-modal-section">
                     <div class="split">
                         <h3>Sessions Handled</h3>
@@ -258,12 +365,16 @@ const modal = document.getElementById('attendance-modal');
                     </div>
                     <div class="list">${sessionMarkup}</div>
                 </section>
+                ` : ''}
+                ${reimbursementMarkup}
+                ${payload.view_mode !== 'reimbursement' ? `
                 ${adminForm}
                 ${employeeCards}
+                ` : ''}
             `;
             modal.classList.add('open');
             wireDynamicModalUi();
-        wireProfilePhoto();
+            wireProfilePhoto();
 
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(position => {
@@ -277,6 +388,42 @@ const modal = document.getElementById('attendance-modal');
         }
 
         function wireDynamicModalUi() {
+            const syncProjectFields = (form, force = false) => {
+                if (!form) {
+                    return;
+                }
+
+                const projectSelect = form.querySelector('[data-project-select]');
+                if (!projectSelect) {
+                    return;
+                }
+
+                const project = findProjectById(projectSelect.value);
+                if (!project) {
+                    return;
+                }
+
+                const setValue = (selector, value) => {
+                    const field = form.querySelector(selector);
+                    if (!field || value === '') {
+                        return;
+                    }
+                    if (force || String(field.value || '').trim() === '') {
+                        field.value = value;
+                    }
+                };
+
+                setValue('[data-project-college]', String(project.college_name || ''));
+                setValue('[data-project-session]', String(project.project_name || ''));
+                setValue('[data-project-location]', String(project.location || ''));
+
+                const dayPortionField = form.querySelector('[data-project-day-portion]');
+                const dayPortionValue = projectDayPortion(String(project.session_type || ''));
+                if (dayPortionField && dayPortionValue !== '' && (force || String(dayPortionField.value || '').trim() === '')) {
+                    dayPortionField.value = dayPortionValue;
+                }
+            };
+
             const closeManualPunchPopup = panel => {
                 if (!panel) {
                     return;
@@ -341,6 +488,19 @@ const modal = document.getElementById('attendance-modal');
                     }
                 });
             });
+
+            document.querySelectorAll('form').forEach(form => {
+                const projectSelect = form.querySelector('[data-project-select]');
+                if (!projectSelect) {
+                    return;
+                }
+
+                syncProjectFields(form, false);
+                projectSelect.addEventListener('change', () => {
+                    syncProjectFields(form, true);
+                });
+            });
+
             document.querySelectorAll('[data-toggle-leave]').forEach(button => {
                 button.addEventListener('click', () => {
                     const form = button.closest('.section-block').querySelector('[data-leave-form]');
@@ -662,6 +822,55 @@ const modal = document.getElementById('attendance-modal');
         });
         wireDynamicModalUi();
         wireProfilePhoto();
+        
+        // Notification dismiss functionality
+        document.querySelectorAll('[data-dismiss-notification]').forEach(btn => {
+            btn.addEventListener('click', event => {
+                event.preventDefault();
+                event.stopPropagation();
+                const notificationId = btn.dataset.dismissNotification;
+                const item = btn.closest('.sidebar-notification-item');
+                const form = item ? item.querySelector('.notification-dismiss-form') : null;
+                
+                if (form && item) {
+                    // Animate out before dismissing
+                    item.style.opacity = '0';
+                    item.style.transform = 'translateX(20px)';
+                    item.style.transition = 'all 0.2s ease-out';
+                    item.style.pointerEvents = 'none';
+                    
+                    // Get form data and submit via AJAX
+                    const formData = new FormData(form);
+                    formData.append('ajax', '1');
+                    
+                    setTimeout(() => {
+                        fetch(form.action || window.location.href, {
+                            method: 'POST',
+                            body: formData
+                        }).then(() => {
+                            // Remove the item from DOM after animation
+                            item.remove();
+                            
+                            // Update unread count badge
+                            const badge = document.querySelector('.sidebar-notifications .badge');
+                            if (badge) {
+                                const count = Math.max(0, parseInt(badge.textContent) - 1);
+                                badge.textContent = count + ' unread';
+                                if (count === 0) {
+                                    badge.textContent = '0 unread';
+                                }
+                            }
+                        }).catch(error => {
+                            console.error('Failed to dismiss notification:', error);
+                            // Revert animation on error
+                            item.style.opacity = '1';
+                            item.style.transform = 'translateX(0)';
+                            item.style.pointerEvents = 'auto';
+                        });
+                    }, 150);
+                }
+            });
+        });
 
 
 

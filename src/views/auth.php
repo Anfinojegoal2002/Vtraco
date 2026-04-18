@@ -21,7 +21,7 @@ function auth_login_roles(): array
             'description' => 'Use your vendor registration details to access your account.',
         ],
         'freelancer' => [
-            'title' => 'Corporate Employee (Freelancer) Login',
+            'title' => 'Contractual Employee (Freelancer) Login',
             'eyebrow' => 'Freelancer Access',
             'description' => 'Use your freelancer registration details to access your account.',
         ],
@@ -45,7 +45,7 @@ function auth_registration_roles(): array
         ],
         'freelancer' => [
             'eyebrow' => 'Freelancer Registration',
-            'title' => 'Create Corporate Employee (Freelancer) Account',
+            'title' => 'Create Contractual Employee (Freelancer) Account',
             'description' => 'Register a freelancer account for self-managed access to the portal.',
             'button' => 'Register Freelancer',
         ],

@@ -22,13 +22,13 @@ function get_attendance_report_data(array $filters): array
                     WHEN ar.status = 'Pending' THEN 'Half Day'
                     ELSE ar.status
                 END AS attendance_status,
-                COALESCE(r.incentive_earned, 0) AS incentive_earned,
-                COALESCE(r.reimbursement_amount, 0) AS reimbursement_amount
+                s.slot_name AS slot_name,
+                COALESCE(s.punch_in_time, ar.punch_in_time) AS manual_punch_in,
+                s.punch_out_time AS manual_punch_out
             FROM attendance_records ar
             JOIN users u ON ar.user_id = u.id
             LEFT JOIN attendance_sessions s ON s.attendance_id = ar.id
             LEFT JOIN projects p ON s.project_id = p.id
-            LEFT JOIN reimbursements r ON r.attendance_session_id = s.id
             WHERE 1=1";
 
     $params = [];
@@ -76,17 +76,18 @@ function export_report_csv(array $data): void
     header('Content-Disposition: attachment; filename=attendance_report_' . date('Ymd_His') . '.csv');
 
     $output = fopen('php://output', 'w');
-    fputcsv($output, ['Date', 'Employee Name', 'Project Name', 'Session Type', 'Attendance Status', 'Incentive Earned', 'Reimbursement Amount']);
+    fputcsv($output, ['Date', 'Employee Name', 'Project Name', 'Slot', 'Session Type', 'Attendance Status', 'Manual Punch In', 'Manual Punch Out']);
 
     foreach ($data as $row) {
         fputcsv($output, [
             $row['date'],
             $row['employee_name'],
             $row['project_name'] ?: 'N/A',
+            $row['slot_name'] ?: 'N/A',
             $row['session_type'] ?: 'N/A',
             $row['attendance_status'],
-            number_format((float) ($row['incentive_earned'] ?? 0), 2),
-            number_format((float) ($row['reimbursement_amount'] ?? 0), 2)
+            $row['manual_punch_in'] ?: 'N/A',
+            $row['manual_punch_out'] ?: 'N/A',
         ]);
     }
     fclose($output);
@@ -121,10 +122,11 @@ function export_report_pdf(array $data): void
                     <th>Date</th>
                     <th>Employee Name</th>
                     <th>Project Name</th>
+                    <th>Slot</th>
                     <th>Session Type</th>
                     <th>Attendance Status</th>
-                    <th>Incentive Earned</th>
-                    <th>Reimbursement Amount</th>
+                    <th>Manual Punch In</th>
+                    <th>Manual Punch Out</th>
                 </tr>
             </thead>
             <tbody>
@@ -133,10 +135,11 @@ function export_report_pdf(array $data): void
                         <td><?= h((string)$row['date']) ?></td>
                         <td><?= h((string)$row['employee_name']) ?></td>
                         <td><?= h((string)($row['project_name'] ?: 'N/A')) ?></td>
+                        <td><?= h((string)($row['slot_name'] ?: 'N/A')) ?></td>
                         <td><?= h((string)($row['session_type'] ?: 'N/A')) ?></td>
                         <td><?= h((string)$row['attendance_status']) ?></td>
-                        <td><?= number_format((float)($row['incentive_earned'] ?? 0), 2) ?></td>
-                        <td><?= number_format((float)($row['reimbursement_amount'] ?? 0), 2) ?></td>
+                        <td><?= h((string) (($row['manual_punch_in'] ?? '') ?: 'N/A')) ?></td>
+                        <td><?= h((string) (($row['manual_punch_out'] ?? '') ?: 'N/A')) ?></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
