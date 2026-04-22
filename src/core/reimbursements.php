@@ -389,8 +389,8 @@ function create_employee_reimbursement(array $employee, string $date, array $sou
         'user_id' => (int) $employee['id'],
         'expense_date' => $date,
     ]);
-    if ((int) $stmt->fetchColumn() > 0) {
-        throw new RuntimeException('You have already submitted a reimbursement request for this date.');
+    if ((int) $stmt->fetchColumn() >= 3) {
+        throw new RuntimeException('You can submit up to 3 reimbursement requests for this date.');
     }
 
     $category = validate_reimbursement_category((string) ($source['category'] ?? ''));
@@ -426,7 +426,7 @@ function create_employee_reimbursement(array $employee, string $date, array $sou
         $sqlState = (string) ($exception->getCode() ?? '');
         $message = (string) ($exception->getMessage() ?? '');
         if ($sqlState === '23000' || stripos($message, 'Duplicate') !== false) {
-            throw new RuntimeException('You have already submitted a reimbursement request for this date.');
+            throw new RuntimeException('You can submit up to 3 reimbursement requests for this date.');
         }
         throw $exception;
     }

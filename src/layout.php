@@ -48,12 +48,11 @@ function render_page(string $page): void
         case 'admin_accounts':
             render_admin_accounts();
             break;
+
         case 'notifications':
             render_notifications();
             break;
-        case 'admin_reimbursements':
-            redirect_to('admin_accounts', ['section' => 'request', 'request_month' => date('Y-m')]);
-            break;
+
         case 'employee_attendance':
         case 'employee_log':
             render_employee_attendance();
@@ -118,7 +117,7 @@ function render_header(string $title, string $pageClass = ''): void
                         <strong><?= h($user['name']) ?></strong><br>
                         <span class="hint"><?php
                             if ($isAdminShell && (($user['role'] ?? '') === 'freelancer')) {
-                                echo h('Contractual Employee (Freelancer)');
+                                echo h('Freelancer');
                             } elseif ($isAdminShell && (($user['role'] ?? '') === 'external_vendor')) {
                                 echo h('External Vendor');
                             } else {
@@ -148,8 +147,9 @@ function render_header(string $title, string $pageClass = ''): void
                         <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">E</span><span>Employees</span></a>
                         <a class="sidebar-link <?= $page === 'admin_projects' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_projects"><span class="nav-icon">P</span><span>Projects</span></a>
                         <a class="sidebar-link <?= in_array($page, ['admin_attendance', 'admin_employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employee_log"><span class="nav-icon">L</span><span>Employee Log</span></a>
+                        <a class="sidebar-link <?= $page === 'admin_accounts' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_accounts"><span class="nav-icon">A</span><span>Accounts</span></a>
                         <a class="sidebar-link <?= $page === 'admin_reports' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_reports"><span class="nav-icon">R</span><span>Reports</span></a>
-                        <a class="sidebar-link <?= $page === 'admin_accounts' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_accounts"><span class="nav-icon">C</span><span>Accounts</span></a>
+
                         <a class="sidebar-link <?= $page === 'admin_rules' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_rules"><span class="nav-icon">S</span><span>Rules</span></a>
                         <a class="sidebar-link <?= $page === 'notifications' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=notifications"><span class="nav-icon">N</span><span>Notifications</span><?php if ($unreadNotifications > 0): ?><span class="sidebar-link-badge"><?= (int) $unreadNotifications ?></span><?php endif; ?></a>
                         <?php endif; ?>
@@ -245,9 +245,9 @@ function render_landing_auth_modal(string $role, bool $isOpen): void
             $title = 'External Vendor Login'; $eyebrow = 'Vendor Access'; $iconLabel = 'V';
             $desc = 'Sign in with your self-registered vendor account.';
             break;
-        case 'freelancer':
-            $title = 'Contractual Employee Login'; $eyebrow = 'Contractual Employee Access'; $iconLabel = 'F';
-            $desc = 'Freelancers can sign in with their self-registered account.';
+        case 'corporate_employee':
+            $title = 'Contractual Employee Login'; $eyebrow = 'Contractual Employee Access'; $iconLabel = 'C';
+            $desc = 'Use your contractual employee registration details to access the employee workspace.';
             break;
         case 'employee':
         default:
@@ -264,7 +264,7 @@ function render_landing_auth_modal(string $role, bool $isOpen): void
             <button class="modal-close" type="button" data-close-modal>&times;</button>
             <div class="landing-auth-shell">
                 <div class="landing-auth-copy">
-                    <span class="landing-login-icon <?= in_array($role, ['employee', 'freelancer']) ? 'employee' : '' ?>"><?= h($iconLabel) ?></span>
+                    <span class="landing-login-icon <?= in_array($role, ['employee', 'corporate_employee', 'freelancer']) ? 'employee' : '' ?>"><?= h($iconLabel) ?></span>
                     <span class="eyebrow"><?= h($eyebrow) ?></span>
                     <h2><?= h($title) ?></h2>
                     <p><?= h($desc) ?></p>
@@ -289,11 +289,11 @@ function render_landing_auth_modal(string $role, bool $isOpen): void
                         <small class="field-error"><span>!</span>Password is required.</small>
                     </div>
                     <button class="button solid" type="submit"><?= h($title) ?></button>
-                    <?php if ($role === 'employee'): ?>
+                    <?php if (in_array($role, ['employee', 'corporate_employee'], true)): ?>
                         <button class="button ghost" type="submit" name="forgot_password" value="1">Forgot your password?</button>
                         <p class="hint">Enter your employee email above and we will send or log a temporary password for that account.</p>
                     <?php endif; ?>
-                    <?php if (in_array($role, ['admin', 'external_vendor', 'freelancer'])): ?>
+                    <?php if (in_array($role, ['admin', 'corporate_employee', 'external_vendor', 'freelancer'], true)): ?>
                         <p class="hint">Need an account? <a href="<?= h(BASE_URL) ?>?page=register">Open registration</a></p>
                     <?php endif; ?>
                 </form>
@@ -511,7 +511,7 @@ function render_footer(): void
     $isSidebarShell = $isAdminShell || $isEmployeeShell;
     $page = $_GET['page'] ?? 'landing';
     $showLandingLoginModal = !$user && in_array($page, ['landing', 'register'], true);
-    $landingAuthRole = in_array($_GET['auth'] ?? '', ['admin', 'employee', 'external_vendor', 'freelancer'], true) ? $_GET['auth'] : '';
+    $landingAuthRole = in_array($_GET['auth'] ?? '', ['admin', 'employee', 'corporate_employee', 'external_vendor'], true) ? $_GET['auth'] : '';
     $employerName = '';
     if ($isEmployeeShell && !empty($user['admin_id'])) {
         $stmt = db()->prepare('SELECT name FROM users WHERE id = :id AND role = "admin"');
@@ -557,10 +557,10 @@ function render_footer(): void
                         <strong>External Vendor</strong>
                         <span>Sign in with your self-registered vendor account.</span>
                     </button>
-                    <button class="landing-login-option" type="button" data-switch-modal-target="freelancer-login-modal">
-                        <span class="landing-login-icon employee">F</span>
+                    <button class="landing-login-option" type="button" data-switch-modal-target="corporate_employee-login-modal">
+                        <span class="landing-login-icon employee">C</span>
                         <strong>Contractual Employee</strong>
-                        <span>Freelancers can sign in with their self-registered account.</span>
+                        <span>Use your self-registered contractual employee account.</span>
                     </button>
                 </div>
             </div>
@@ -568,7 +568,7 @@ function render_footer(): void
         <?php render_landing_auth_modal('admin', $landingAuthRole === 'admin'); ?>
         <?php render_landing_auth_modal('employee', $landingAuthRole === 'employee'); ?>
         <?php render_landing_auth_modal('external_vendor', $landingAuthRole === 'external_vendor'); ?>
-        <?php render_landing_auth_modal('freelancer', $landingAuthRole === 'freelancer'); ?>
+        <?php render_landing_auth_modal('corporate_employee', $landingAuthRole === 'corporate_employee'); ?>
     <?php endif; ?>
     <div class="modal" id="attendance-modal">
         <div class="modal-card">
@@ -582,7 +582,3 @@ function render_footer(): void
     </html>
     <?php
 }
-
-
-
-

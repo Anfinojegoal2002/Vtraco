@@ -218,12 +218,20 @@ function initialize_database(): void
         biometric_out_time DATETIME NULL,
         leave_reason TEXT NULL,
         admin_override_status VARCHAR(50) NULL,
+        shift_start_time TIME NULL,
+        shift_end_time TIME NULL,
         created_at DATETIME NOT NULL,
         updated_at DATETIME NOT NULL,
         UNIQUE KEY uniq_user_attend_date (user_id, attend_date),
         INDEX idx_attendance_records_user_id (user_id),
         CONSTRAINT fk_attendance_records_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    if (!table_has_column($pdo, 'attendance_records', 'shift_start_time')) {
+        $pdo->exec('ALTER TABLE attendance_records ADD COLUMN shift_start_time TIME NULL AFTER admin_override_status');
+    }
+    if (!table_has_column($pdo, 'attendance_records', 'shift_end_time')) {
+        $pdo->exec('ALTER TABLE attendance_records ADD COLUMN shift_end_time TIME NULL AFTER shift_start_time');
+    }
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS attendance_sessions (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -325,10 +333,34 @@ function initialize_database(): void
         CONSTRAINT fk_payments_admin FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE,
         CONSTRAINT fk_payments_reimbursement FOREIGN KEY (reimbursement_id) REFERENCES employee_reimbursements(id) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS reimbursement_approvals (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        employee_reimbursement_id INT UNSIGNED NOT NULL,
+        category VARCHAR(50) NOT NULL,
+        requested_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        approved_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        proof_path VARCHAR(255) NULL,
+        created_at DATETIME NOT NULL,
+        INDEX idx_reimbursement_approvals_emp_reimb_id (employee_reimbursement_id),
+        CONSTRAINT fk_reimb_apprv_emp_reimb FOREIGN KEY (employee_reimbursement_id) REFERENCES employee_reimbursements(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS payment_breakdowns (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        payment_id INT UNSIGNED NOT NULL,
+        payment_type VARCHAR(50) NOT NULL,
+        actual_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        remaining_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        reference_id INT UNSIGNED NULL,
+        created_at DATETIME NOT NULL,
+        INDEX idx_payment_breakdowns_payment_id (payment_id),
+        CONSTRAINT fk_pay_brk_payment FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     $pdo->exec("CREATE TABLE IF NOT EXISTS payment_request_actions (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         request_key VARCHAR(191) NOT NULL,
         status ENUM('PENDING', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+        approved_amount DECIMAL(12,2) NULL,
         admin_id INT UNSIGNED NOT NULL,
         created_at DATETIME NOT NULL,
         updated_at DATETIME NOT NULL,
@@ -336,6 +368,9 @@ function initialize_database(): void
         INDEX idx_payment_request_admin_status (admin_id, status),
         CONSTRAINT fk_payment_request_actions_admin FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    if (!table_has_column($pdo, 'payment_request_actions', 'approved_amount')) {
+        $pdo->exec('ALTER TABLE payment_request_actions ADD COLUMN approved_amount DECIMAL(12,2) NULL AFTER status');
+    }
     $pdo->exec("CREATE TABLE IF NOT EXISTS notifications (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         user_id INT UNSIGNED NOT NULL,

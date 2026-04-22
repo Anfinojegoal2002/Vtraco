@@ -73,7 +73,7 @@ function mail_transport_config(): array
     ];
 }
 
-function send_html_mail(string $to, string $subject, string $html): array
+function send_html_mail(string $to, string $subject, string $html, array $attachments = []): array
 {
     ensure_mail_log_dir();
     $sender = mail_sender_identity();
@@ -95,6 +95,7 @@ function send_html_mail(string $to, string $subject, string $html): array
         'from_name' => $fromName,
         'transport' => $transport['use_smtp'] ? 'phpmailer-smtp' : 'phpmailer-mail',
         'error' => '',
+        'attachments' => [],
     ];
 
     try {
@@ -111,6 +112,18 @@ function send_html_mail(string $to, string $subject, string $html): array
             $mailer->addReplyTo($fromEmail, $fromName);
         }
         $mailer->addAddress($to);
+        foreach ($attachments as $attachment) {
+            $attachmentName = trim((string) ($attachment['name'] ?? ''));
+            $attachmentData = $attachment['data'] ?? null;
+            if ($attachmentName === '' || !is_string($attachmentData) || $attachmentData === '') {
+                continue;
+            }
+
+            $attachmentType = trim((string) ($attachment['type'] ?? '')) ?: 'application/octet-stream';
+            $attachmentEncoding = trim((string) ($attachment['encoding'] ?? '')) ?: PHPMailer::ENCODING_BASE64;
+            $mailer->addStringAttachment($attachmentData, $attachmentName, $attachmentEncoding, $attachmentType);
+            $result['attachments'][] = $attachmentName;
+        }
 
         if ($transport['use_smtp']) {
             $mailer->isSMTP();
@@ -210,14 +223,30 @@ function send_payment_processed_email(array $employee, array $payment): array
 {
     $paymentMethods = function_exists('payment_methods_for_record') ? payment_methods_for_record($payment) : [];
     $paymentMethodLabel = function_exists('payment_methods_label') ? payment_methods_label($paymentMethods) : (string) ($payment['bank_name'] ?? '');
+    $attachments = [];
+    $attachmentCopy = '';
+
+    if (function_exists('payment_payslip_mail_attachment')) {
+        try {
+            $attachments[] = payment_payslip_mail_attachment($payment);
+            $attachmentCopy = '<p>Your payment slip is attached as a PDF for your records.</p>';
+        } catch (Throwable $exception) {
+            app_log('warning', 'Payment payslip attachment could not be generated.', [
+                'payment_id' => (int) ($payment['id'] ?? 0),
+                'employee_id' => (int) ($employee['id'] ?? 0),
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
 
     $html = '<p>Hello ' . h((string) $employee['name']) . ',</p>'
         . '<p>Your ' . h(strtolower((string) $payment['payment_type'])) . ' payment of Rs ' . h(number_format((float) ($payment['amount'] ?? 0), 2)) . ' has been processed.</p>'
         . '<p><strong>Payment Date:</strong> ' . h(date('d M Y', strtotime((string) $payment['payment_date']))) . '<br>'
         . '<strong>Payment Method(s):</strong> ' . h($paymentMethodLabel) . '<br>'
         . '<strong>Transfer Mode:</strong> ' . h((string) (($payment['transfer_mode'] ?? '') ?: 'N/A')) . '<br>'
-        . '<strong>Transaction ID:</strong> ' . h((string) (($payment['transaction_id'] ?? '') ?: 'N/A')) . '</p>';
+        . '<strong>Transaction ID:</strong> ' . h((string) (($payment['transaction_id'] ?? '') ?: 'N/A')) . '</p>'
+        . $attachmentCopy;
 
-    return send_html_mail((string) $employee['email'], 'Payment Processed', $html);
+    return send_html_mail((string) $employee['email'], 'Payment Processed', $html, $attachments);
 }
 

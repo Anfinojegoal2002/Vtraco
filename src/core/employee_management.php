@@ -105,15 +105,17 @@ function insert_employee(array $data, array $rules, array $projectIds = []): arr
     }
 
     $employeeType = trim((string) ($data['employee_type'] ?? 'regular'));
+    $manager = current_user();
+    if (($manager['role'] ?? '') === 'freelancer') {
+        $employeeType = 'corporate';
+    }
     if (!in_array($employeeType, ['regular', 'vendor', 'corporate'], true)) {
         $employeeType = 'regular';
     }
 
-    // Allow Admin to assign employees to a specific Vendor or Freelancer
-    if (($data['vendor_id'] ?? 0) > 0) {
+    // Allow Admin to assign employees to a specific Vendor.
+    if (($manager['role'] ?? '') !== 'freelancer' && ($data['vendor_id'] ?? 0) > 0) {
         $adminId = (int) $data['vendor_id'];
-    } elseif (($data['freelancer_id'] ?? 0) > 0) {
-        $adminId = (int) $data['freelancer_id'];
     }
 
     $empId = trim((string) ($data['emp_id'] ?? ''));
@@ -139,12 +141,8 @@ function insert_employee(array $data, array $rules, array $projectIds = []): arr
         throw new RuntimeException('Employee salary must be zero or greater.');
     }
 
-    $role = current_manager_target_role();
-    // If Admin is assigning to a Freelancer, force corporate_employee role
-    if (($data['freelancer_id'] ?? 0) > 0) {
-        $role = 'corporate_employee';
-    }
-    
+    $role = $employeeType === 'corporate' ? 'corporate_employee' : current_manager_target_role();
+
     if (role_requires_unique_email($role) && role_email_exists($role, $email)) {
         throw new RuntimeException('This employee email is already assigned.');
     }
@@ -263,7 +261,19 @@ function create_employee_from_attendance_entry(array $entry): ?array
 
 function validate_employee_csv_upload(array $file): void
 {
-    validate_uploaded_file($file, ['csv'], 2 * 1024 * 1024, 'employee CSV');
+    validate_uploaded_file($file, ['xlsx', 'xls', 'csv', 'txt'], 2 * 1024 * 1024, 'employee file');
+
+    $extension = uploaded_file_extension($file);
+    $path = (string) ($file['tmp_name'] ?? '');
+    $originalName = (string) ($file['name'] ?? '');
+
+    if ($extension === 'xlsx' && !attendance_is_xlsx_file($path, $originalName)) {
+        throw new RuntimeException('The uploaded employee file does not look like a valid .xlsx workbook.');
+    }
+
+    if ($extension === 'xls' && !attendance_is_html_table_file($path, $originalName) && !attendance_is_binary_xls_file($path, $originalName)) {
+        throw new RuntimeException('The uploaded employee .xls file could not be recognized as a supported Excel workbook.');
+    }
 }
 
 function employee_reset_is_rate_limited(array $employee): bool
@@ -369,17 +379,12 @@ function normalize_csv_header(string $header): string
     return preg_replace('/[^a-z0-9]+/', '', $header) ?? $header;
 }
 
-function parse_employee_csv(string $path): array
+function parse_employee_csv(string $path, string $originalName = ''): array
 {
-    $handle = fopen($path, 'rb');
-    if (!$handle) {
-        throw new RuntimeException('Unable to read the CSV file.');
-    }
-
-    $header = fgetcsv($handle);
-    if (!$header) {
-        fclose($handle);
-        throw new RuntimeException('CSV file is empty.');
+    $sourceRows = attendance_report_rows($path, $originalName);
+    $header = $sourceRows[0] ?? null;
+    if (!is_array($header) || $header === []) {
+        throw new RuntimeException('Employee import file is empty.');
     }
 
     $headerMap = [];
@@ -406,23 +411,23 @@ function parse_employee_csv(string $path): array
         }
     }
 
-    foreach (['email', 'phone', 'salary'] as $required) {
+    foreach (['phone', 'salary'] as $required) {
         if (!array_key_exists($required, $columns)) {
-            fclose($handle);
             throw new RuntimeException('Missing required CSV column for ' . $required . '.');
         }
     }
 
     $columns['emp_id'] = $columns['emp_id'] ?? null;
     $columns['name'] = $columns['name'] ?? null;
+    $columns['email'] = $columns['email'] ?? null;
     $columns['shift'] = $columns['shift'] ?? null;
 
     $rows = [];
     $reservedEmpIds = [];
     $rowNumber = 1;
-    while (($row = fgetcsv($handle)) !== false) {
+    foreach (array_slice($sourceRows, 1) as $row) {
         $rowNumber++;
-        $email = trim((string) ($row[$columns['email']] ?? ''));
+        $email = trim((string) (($columns['email'] !== null) ? ($row[$columns['email']] ?? '') : ''));
         $phone = trim((string) ($row[$columns['phone']] ?? ''));
         $salaryText = trim((string) ($row[$columns['salary']] ?? '0'));
         $empId = trim((string) (($columns['emp_id'] !== null) ? ($row[$columns['emp_id']] ?? '') : ''));
@@ -436,16 +441,15 @@ function parse_employee_csv(string $path): array
         }
         $reservedEmpIds[] = $empId;
 
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            fclose($handle);
+        if ($email === '') {
+            $email = attendance_import_employee_email($empId);
+        } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             throw new RuntimeException('Employee CSV row ' . $rowNumber . ' has an invalid email address.');
         }
         if ($phone === '') {
-            fclose($handle);
             throw new RuntimeException('Employee CSV row ' . $rowNumber . ' is missing a phone number.');
         }
         if (!is_numeric($salaryText) || (float) $salaryText < 0) {
-            fclose($handle);
             throw new RuntimeException('Employee CSV row ' . $rowNumber . ' has an invalid salary value.');
         }
 
@@ -461,10 +465,8 @@ function parse_employee_csv(string $path): array
         ];
     }
 
-    fclose($handle);
-
     if (!$rows) {
-        throw new RuntimeException('CSV file has no usable rows.');
+        throw new RuntimeException('Employee import file has no usable rows.');
     }
 
     return $rows;

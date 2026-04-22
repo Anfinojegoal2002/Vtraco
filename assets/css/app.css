@@ -144,6 +144,7 @@
             .legend-swatch { width: 12px; height: 12px; border-radius: 999px; display: inline-block; }
             .legend-present { background: var(--present); }
             .legend-absent { background: var(--absent); }
+            .legend-leave { background: var(--leave); }
             .legend-pending { background: var(--pending); }
             .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; padding-right: 0; align-content: start; }
             .weekday { text-align: center; color: var(--muted); font-weight: 700; font-size: 0.75rem; padding-bottom: 2px; }
@@ -158,6 +159,9 @@
             .day-card-Week-Off { background: rgba(146, 96, 55, 0.2); border-color: rgba(120, 72, 38, 0.34); }
             .day-card-Week-Off .day-number { color: #6f3f1d; }
             .day-card-Week-Off .day-copy { color: #7c4a26; }
+            .day-card-Leave { background: rgba(49, 130, 206, 0.16); border-color: rgba(49, 130, 206, 0.34); }
+            .day-card-Leave .day-number { color: #1d4ed8; }
+            .day-card-Leave .day-copy { color: #2563eb; }
             .day-card .day-number { font-size: 1.15rem; font-weight: 800; line-height: 1; color: var(--ink); }
             .day-card .day-copy { min-height: 0; font-size: 0.65rem; font-weight: 700; color: var(--muted); line-height: 1; }
             .day-dot { width: 10px; height: 10px; border-radius: 999px; }
@@ -721,6 +725,7 @@
             .attendance-header h2 { margin: 0; }
             .attendance-panel { display: flex; flex-direction: column; min-height: 0; }
             .attendance-panel .calendar-shell { flex: 1; }
+            .calendar-top-actions { display: flex; justify-content: flex-end; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
 
             @media (max-width: 1024px) {
                 .employee-tabs-section { padding: 0 18px; margin-bottom: 10px; }
@@ -766,6 +771,17 @@
             .admin-attendance-page .calendar-summary { margin-top: 14px; }
             .admin-rules-page { overflow-y: auto; overflow-x: hidden; padding-right: 6px; padding-bottom: 120px; }
             .admin-rules-page .scroll-panel { max-height: 620px; overflow: auto; }
+            .admin-rules-page .rules-workspace-grid { display: grid; grid-template-columns: minmax(320px, 0.92fr) minmax(0, 1.35fr); gap: 18px; align-items: start; }
+            .admin-rules-page .rules-shift-panel,
+            .admin-rules-page .rules-assignment-panel { height: 100%; }
+            .admin-rules-page .rules-quick-actions { display: flex; gap: 12px; flex-wrap: wrap; margin: 14px 0 18px; }
+            .admin-rules-page .rules-shift-form { margin-bottom: 18px; }
+            .admin-rules-page .rules-timings-list { display: grid; gap: 12px; }
+            .admin-rules-page .rules-timing-stack { display: grid; gap: 10px; }
+            .admin-rules-page .rules-timing-chip { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 18px; background: rgba(255,255,255,0.76); }
+            .admin-rules-page .rules-timing-chip strong { display: block; font-size: 1rem; color: var(--ink); }
+            .admin-rules-page .rules-timing-chip span { font-size: 0.85rem; color: var(--muted); }
+            .admin-rules-page .rules-section-head { margin-bottom: 14px; align-items: flex-start; }
 
             /* Vendor Portal - Reduced Text Sizes */
             .admin-shell .section-block > .split > div > span.eyebrow,
@@ -810,4 +826,8 @@
                 .admin-employee-log-page .spacer { height: 6px; }
                 .admin-employee-log-page .attendance-panel { flex: 1 1 auto; min-height: 0; display: flex; }
                 .admin-employee-log-page .attendance-panel .calendar-shell { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+            }
+            @media (max-width: 1100px) {
+                .admin-rules-page .rules-workspace-grid { grid-template-columns: 1fr; }
+                .calendar-top-actions { justify-content: stretch; }
             }

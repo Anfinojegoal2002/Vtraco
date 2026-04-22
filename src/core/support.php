@@ -335,9 +335,9 @@ function user_role_label(string $role): string
     return match ($role) {
         'admin' => 'Admin',
         'employee' => 'Employee',
-        'corporate_employee' => 'Contractual Employee (Freelancer)',
+        'corporate_employee' => 'Employee',
         'external_vendor' => 'External Vendor',
-        'freelancer' => 'Contractual Employee (Freelancer)',
+        'freelancer' => 'Freelancer',
         default => ucwords(str_replace('_', ' ', $role)),
     };
 }
@@ -354,17 +354,17 @@ function current_manager_target_role(): string
 
 function can_login_role(string $role): bool
 {
-    return in_array($role, ['admin', 'employee', 'corporate_employee', 'external_vendor', 'freelancer'], true);
+    return in_array($role, ['admin', 'employee', 'corporate_employee', 'external_vendor'], true);
 }
 
 function can_self_register_role(string $role): bool
 {
-    return in_array($role, ['admin', 'external_vendor', 'freelancer'], true);
+    return in_array($role, ['admin', 'external_vendor', 'corporate_employee'], true);
 }
 
 function role_requires_unique_email(string $role): bool
 {
-    return false;
+    return true;
 }
 
 function role_email_exists(string $role, string $email, ?int $ignoreUserId = null): bool
@@ -374,9 +374,8 @@ function role_email_exists(string $role, string $email, ?int $ignoreUserId = nul
         return false;
     }
 
-    $sql = 'SELECT COUNT(*) FROM users WHERE role = :role AND LOWER(email) = LOWER(:email)';
+    $sql = 'SELECT COUNT(*) FROM users WHERE LOWER(email) = LOWER(:email)';
     $params = [
-        'role' => $role,
         'email' => $email,
     ];
 

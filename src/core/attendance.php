@@ -193,6 +193,11 @@ function manual_attendance_status(array $record, array $sessions): ?string
 
 function resolved_attendance_status(array $record, array $sessions): string
 {
+    $overrideStatus = trim((string) ($record['admin_override_status'] ?? ''));
+    if ($overrideStatus !== '') {
+        return $overrideStatus;
+    }
+
     $status = trim((string) ($record['status'] ?? ''));
     if ($status === '') {
         return default_status_for_date((string) ($record['attend_date'] ?? date('Y-m-d')));
@@ -264,6 +269,14 @@ function month_attendance_for_user(int $userId, string $month): array
         $out[$key] = ['record' => $record, 'sessions' => $sessions];
     }
 
+    foreach (sandwich_week_off_absent_dates($out) as $absentDate) {
+        if (!isset($out[$absentDate]['record'])) {
+            continue;
+        }
+        $out[$absentDate]['record']['status'] = 'Absent';
+        $out[$absentDate]['record']['sandwich_week_off_absent'] = true;
+    }
+
     return $out;
 }
 
@@ -281,39 +294,43 @@ function working_days_total(array $monthAttendance): float
     return $total;
 }
 
-function sandwich_week_off_deduction_days(array $monthAttendance): int
+function week_off_counts_as_present(string $status): bool
 {
-    $statuses = array_values(array_map(static function (array $entry): string {
-        return strtoupper(trim((string) ($entry['record']['status'] ?? '')));
-    }, $monthAttendance));
+    return in_array(strtoupper(trim($status)), ['PRESENT', 'HALF DAY'], true);
+}
 
-    $deductionDays = 0;
-    $index = 0;
-    $totalStatuses = count($statuses);
+function sandwich_week_off_absent_dates(array $monthAttendance): array
+{
+    $absentDates = [];
+    $dates = array_keys($monthAttendance);
+    $totalDates = count($dates);
 
-    while ($index < $totalStatuses) {
-        if ($statuses[$index] !== 'WEEK OFF') {
-            $index++;
+    for ($index = 0; $index < $totalDates; $index++) {
+        $date = $dates[$index];
+        $status = strtoupper(trim((string) ($monthAttendance[$date]['record']['status'] ?? '')));
+        if ($status !== 'WEEK OFF' || date('w', strtotime($date)) !== '0') {
             continue;
         }
 
-        $start = $index;
-        while (($index + 1) < $totalStatuses && $statuses[$index + 1] === 'WEEK OFF') {
-            $index++;
+        $previousStatus = $index > 0
+            ? strtoupper(trim((string) ($monthAttendance[$dates[$index - 1]]['record']['status'] ?? '')))
+            : '';
+        $nextStatus = ($index + 1) < $totalDates
+            ? strtoupper(trim((string) ($monthAttendance[$dates[$index + 1]]['record']['status'] ?? '')))
+            : '';
+
+        // A week off stays valid only when both adjacent days are attended.
+        if (!week_off_counts_as_present($previousStatus) || !week_off_counts_as_present($nextStatus)) {
+            $absentDates[] = $date;
         }
-        $end = $index;
-
-        $previousStatus = $start > 0 ? $statuses[$start - 1] : '';
-        $nextStatus = ($end + 1) < $totalStatuses ? $statuses[$end + 1] : '';
-
-        if ($previousStatus === 'ABSENT' && $nextStatus === 'ABSENT') {
-            $deductionDays += ($end - $start + 1);
-        }
-
-        $index++;
     }
 
-    return $deductionDays;
+    return $absentDates;
+}
+
+function sandwich_week_off_deduction_days(array $monthAttendance): int
+{
+    return count(sandwich_week_off_absent_dates($monthAttendance));
 }
 
 function attendance_counts(array $monthAttendance): array
@@ -329,16 +346,12 @@ function attendance_counts(array $monthAttendance): array
         'sandwich_week_off_days' => 0,
         'payable_days' => 0.0,
         'working_days' => 0,
+        'total_days' => count($monthAttendance),
     ];
 
     foreach ($monthAttendance as $entry) {
         $status = (string) ($entry['record']['status'] ?? '');
         $normStatus = strtoupper(trim($status));
-        
-        if ($normStatus !== 'WEEK OFF') {
-            $counts['working_days']++;
-        }
-
         switch ($normStatus) {
             case 'PRESENT':
                 $counts['present']++;
@@ -350,7 +363,6 @@ function attendance_counts(array $monthAttendance): array
                 break;
             case 'LEAVE':
                 $counts['leave']++;
-                $counts['payable_days'] += 1.0; // Leave acts as paid leave in salary calculations
                 break;
             case 'PENDING':
                 $counts['pending']++;
@@ -370,12 +382,14 @@ function attendance_counts(array $monthAttendance): array
         }
     }
 
-    $counts['sandwich_week_off_days'] = sandwich_week_off_deduction_days($monthAttendance);
-    if ($counts['sandwich_week_off_days'] > 0) {
-        $counts['payable_days'] = max(0.0, $counts['payable_days'] - $counts['sandwich_week_off_days']);
+    $counts['sandwich_week_off_days'] = 0;
+    foreach ($monthAttendance as $entry) {
+        if (!empty($entry['record']['sandwich_week_off_absent'])) {
+            $counts['sandwich_week_off_days']++;
+        }
     }
 
-    $counts['working_days'] = max(1, $counts['working_days']);
+    $counts['working_days'] = max(1, $counts['total_days'] - ($counts['leave'] + $counts['week_off']));
 
     return $counts;
 }
@@ -383,16 +397,115 @@ function attendance_counts(array $monthAttendance): array
 function salary_breakdown_for_month(float $salary, array $monthAttendance): array
 {
     $counts = attendance_counts($monthAttendance);
-    $dailyRate = $counts['working_days'] > 0 ? round($salary / $counts['working_days'], 2) : 0.0;
-    $calculatedSalary = round($counts['payable_days'] * $dailyRate, 2);
+    $presentDays = (float) working_days_total($monthAttendance);
+    $workingDays = (int) $counts['working_days'];
+    $payableDays = $presentDays;
+
+    $dailyRate = $workingDays > 0 ? round($salary / $workingDays, 2) : 0.0;
+    $calculatedSalary = round($salary * ($payableDays / max(1, $workingDays)), 2);
 
     return [
         'monthly_salary' => round($salary, 2),
         'daily_rate' => $dailyRate,
-        'payable_days' => round($counts['payable_days'], 2),
-        'working_days' => (int) $counts['working_days'],
+        'payable_days' => round($payableDays, 2),
+        'present_days' => round($presentDays, 2),
+        'working_days' => $workingDays,
         'calculated_salary' => $calculatedSalary,
         'counts' => $counts,
+    ];
+}
+
+function vendor_session_breakdown_for_month(float $sessionRate, array $monthAttendance): array
+{
+    $fullSessions = 0;
+    $halfSessions = 0;
+
+    foreach ($monthAttendance as $entry) {
+        $sessions = is_array($entry['sessions'] ?? null) ? $entry['sessions'] : [];
+
+        foreach ($sessions as $session) {
+            if (($session['session_mode'] ?? '') !== 'manual_pair') {
+                continue;
+            }
+            if (!session_has_manual_in($session) || !session_has_manual_out($session)) {
+                continue;
+            }
+
+            if (($session['day_portion'] ?? 'Full Day') === 'Half Day') {
+                $halfSessions++;
+            } else {
+                $fullSessions++;
+            }
+        }
+    }
+
+    $sessionUnits = $fullSessions + ($halfSessions * 0.5);
+    $calculatedSalary = round(($fullSessions * $sessionRate) + ($halfSessions * ($sessionRate / 2)), 2);
+
+    return [
+        'session_rate' => round($sessionRate, 2),
+        'full_sessions' => $fullSessions,
+        'half_sessions' => $halfSessions,
+        'session_units' => round($sessionUnits, 2),
+        'calculated_salary' => $calculatedSalary,
+        'counts' => [
+            'full_sessions' => $fullSessions,
+            'half_sessions' => $halfSessions,
+        ],
+    ];
+}
+
+function employee_salary_breakdown_for_month(array $employee, array $monthAttendance): array
+{
+    $salary = (float) ($employee['salary'] ?? 0);
+    $employeeType = strtolower(trim((string) ($employee['employee_type'] ?? '')));
+    $employeeRole = strtolower(trim((string) ($employee['role'] ?? '')));
+
+    if ($employeeType === 'vendor' || $employeeType === 'corporate' || $employeeRole === 'corporate_employee') {
+        return vendor_session_breakdown_for_month($salary, $monthAttendance);
+    }
+
+    return salary_breakdown_for_month($salary, $monthAttendance);
+}
+
+function vendor_session_display_for_entry(array $entry): array
+{
+    $sessions = is_array($entry['sessions'] ?? null) ? $entry['sessions'] : [];
+    $fullSessions = 0;
+    $halfSessions = 0;
+
+    foreach ($sessions as $session) {
+        if (($session['session_mode'] ?? '') !== 'manual_pair') {
+            continue;
+        }
+        if (!session_has_manual_in($session) || !session_has_manual_out($session)) {
+            continue;
+        }
+
+        if (($session['day_portion'] ?? 'Full Day') === 'Half Day') {
+            $halfSessions++;
+        } else {
+            $fullSessions++;
+        }
+    }
+
+    if ($fullSessions > 0) {
+        return [
+            'status_class' => 'Present',
+            'copy' => $fullSessions > 1 ? $fullSessions . ' Sessions' : 'Session',
+        ];
+    }
+
+    if ($halfSessions > 0) {
+        return [
+            'status_class' => 'Half-Day',
+            'copy' => $halfSessions > 1 ? $halfSessions . ' Half Sessions' : 'Half Session',
+        ];
+    }
+
+    return [
+        'status_class' => '',
+        'copy' => '',
     ];
 }
 
@@ -400,6 +513,49 @@ function salary_for_month(float $salary, array $monthAttendance): float
 {
     return (float) salary_breakdown_for_month($salary, $monthAttendance)['calculated_salary'];
 }
+
+function incentive_breakdown_for_month(array $monthAttendance): array
+{
+    $fullDayCount = 0;
+    $halfDayCount = 0;
+
+    foreach ($monthAttendance as $entry) {
+        $sessions = is_array($entry['sessions'] ?? null) ? $entry['sessions'] : [];
+        $hasCompletedManual = false;
+        $hasFullDayManual = false;
+
+        foreach ($sessions as $session) {
+            if (($session['session_mode'] ?? '') !== 'manual_pair') {
+                continue;
+            }
+            if (!session_has_manual_in($session) || !session_has_manual_out($session)) {
+                continue;
+            }
+
+            $hasCompletedManual = true;
+            if (($session['day_portion'] ?? 'Full Day') !== 'Half Day') {
+                $hasFullDayManual = true;
+            }
+        }
+
+        if (!$hasCompletedManual) {
+            continue;
+        }
+
+        if ($hasFullDayManual) {
+            $fullDayCount++;
+        } else {
+            $halfDayCount++;
+        }
+    }
+
+    return [
+        'full_day_count' => $fullDayCount,
+        'half_day_count' => $halfDayCount,
+        'amount' => ($fullDayCount * 100) + ($halfDayCount * 50),
+    ];
+}
+
 function recent_leave_requests(int $limit = 10): array
 {
     $limit = max(1, $limit);
@@ -618,6 +774,16 @@ function attendance_is_html_table_file(string $path, string $originalName = ''):
     return str_contains($signature, '<table') || str_contains($signature, '<html');
 }
 
+function attendance_is_binary_xls_file(string $path, string $originalName = ''): bool
+{
+    $extension = strtolower(pathinfo($originalName !== '' ? $originalName : $path, PATHINFO_EXTENSION));
+    if ($extension !== 'xls') {
+        return false;
+    }
+
+    return attendance_file_signature($path, 8) === "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1";
+}
+
 function attendance_excel_column_index(string $reference): int
 {
     $letters = strtoupper((string) preg_replace('/[^A-Z]/i', '', $reference));
@@ -827,10 +993,29 @@ function attendance_extract_csv_rows(string $path): array
     return $rows;
 }
 
+function attendance_extract_binary_xls_rows(string $path): array
+{
+    if (!class_exists(\Shuchkin\SimpleXLS::class)) {
+        throw new RuntimeException('Binary .xls support is not available right now.');
+    }
+
+    $xls = \Shuchkin\SimpleXLS::parseFile($path);
+    if (!$xls) {
+        $message = \Shuchkin\SimpleXLS::parseError();
+        throw new RuntimeException($message !== '' ? $message : 'Unable to read the .xls workbook.');
+    }
+
+    return $xls->rows();
+}
+
 function attendance_report_rows(string $path, string $originalName = ''): array
 {
     if (attendance_is_xlsx_file($path, $originalName)) {
         return attendance_extract_xlsx_rows($path);
+    }
+
+    if (attendance_is_binary_xls_file($path, $originalName)) {
+        return attendance_extract_binary_xls_rows($path);
     }
 
     if (attendance_is_html_table_file($path, $originalName)) {
@@ -1171,8 +1356,8 @@ function validate_attendance_report_upload(array $file): void
         throw new RuntimeException('The uploaded attendance file does not look like a valid .xlsx workbook.');
     }
 
-    if ($extension === 'xls' && !attendance_is_html_table_file($path, $originalName)) {
-        throw new RuntimeException('Legacy .xls imports must be HTML-style table exports. Save binary .xls files as .xlsx or .csv first.');
+    if ($extension === 'xls' && !attendance_is_html_table_file($path, $originalName) && !attendance_is_binary_xls_file($path, $originalName)) {
+        throw new RuntimeException('The uploaded attendance .xls file could not be recognized as a supported Excel workbook.');
     }
 }
 

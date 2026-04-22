@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 function render_employee_attendance(): void
 {
-    $employee = require_role('employee');
+    $employee = require_roles(['employee', 'corporate_employee']);
     $month = preg_match('/^\d{4}-\d{2}$/', $_GET['month'] ?? '') ? $_GET['month'] : date('Y-m');
     $attendance = month_attendance_for_user((int) $employee['id'], $month);
     $projectsPayload = array_map(static function (array $project): array {
@@ -56,7 +56,7 @@ function render_employee_attendance(): void
 
 function render_employee_reimbursements(): void
 {
-    $employee = require_role('employee');
+    $employee = require_roles(['employee', 'corporate_employee']);
     $month = reimbursement_current_month();
     $monthStart = new DateTimeImmutable($month . '-01');
     $monthEnd = $monthStart->modify('last day of this month');
@@ -88,6 +88,7 @@ function render_employee_reimbursements(): void
             <span class="eyebrow">Employee - Reimbursement</span>
             <h1>Monthly Reimbursement Calendar</h1>
             <p>Select any available date in the current month to submit a reimbursement. Future dates stay locked.</p>
+            <p class="hint"><strong>Note:</strong> Once your employer marks a reimbursement as paid, you will receive your payslip by email from the employer.</p>
         </div>
         <span class="badge"><?= h($monthStart->format('F Y')) ?></span>
     </section>
@@ -158,7 +159,7 @@ function render_employee_reimbursements(): void
                 <div class="list-item muted">No reimbursement requests recorded for this date yet.</div>
             </div>
             <div class="spacer"></div>
-            <div class="list-item muted hidden" id="employee-reimbursement-locked-note">A reimbursement request has already been submitted for this date.</div>
+            <div class="list-item muted hidden" id="employee-reimbursement-locked-note">You can submit up to 3 reimbursement requests for this date.</div>
             <div class="spacer hidden" id="employee-reimbursement-locked-spacer"></div>
             <form method="post" enctype="multipart/form-data" class="stack-form" id="employee-reimbursement-form" data-validate>
                 <?= csrf_field() ?>
@@ -279,11 +280,11 @@ function render_employee_reimbursements(): void
                         return;
                     }
 
-                    const hasClaim = dayClaims.length > 0;
+                    const hasReachedLimit = dayClaims.length >= 3;
 
                     if (lockedNote && lockedSpacer) {
-                        lockedNote.classList.toggle('hidden', !hasClaim);
-                        lockedSpacer.classList.toggle('hidden', !hasClaim);
+                        lockedNote.classList.toggle('hidden', !hasReachedLimit);
+                        lockedSpacer.classList.toggle('hidden', !hasReachedLimit);
                     }
                     formControls.forEach(control => {
                         if (control && control.name === '_csrf') {
@@ -292,11 +293,11 @@ function render_employee_reimbursements(): void
                         if (control && control.type === 'hidden') {
                             return;
                         }
-                        control.disabled = hasClaim;
+                        control.disabled = hasReachedLimit;
                     });
                     if (submitButton) {
                         submitButton.textContent = submitButtonText;
-                        submitButton.disabled = hasClaim;
+                        submitButton.disabled = hasReachedLimit;
                     }
 
                     if (!dayClaims.length) {
@@ -326,4 +327,3 @@ function render_employee_reimbursements(): void
     <?php
     render_footer();
 }
-

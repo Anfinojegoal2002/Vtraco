@@ -12,14 +12,14 @@ function render_admin_dashboard(): void
 
     $user = current_user();
     $isFreelancer = ($user['role'] ?? '') === 'freelancer';
-    $label = $isFreelancer ? 'Staff' : 'Employees';
+    $label = 'Employees';
 
-    render_header($isFreelancer ? 'Corporate Dashboard' : 'Admin Dashboard');
+    render_header($isFreelancer ? 'Employee Dashboard' : 'Admin Dashboard');
     ?>
     <section class="page-title">
         <div>
-            <span class="eyebrow"><?= h($isFreelancer ? 'Corporate Dashboard' : 'Admin Dashboard') ?></span>
-            <h1><?= h($isFreelancer ? 'Corporate Dashboard' : 'Admin Dashboard') ?></h1>
+            <span class="eyebrow"><?= h($isFreelancer ? 'Employee Dashboard' : 'Admin Dashboard') ?></span>
+            <h1><?= h($isFreelancer ? 'Employee Dashboard' : 'Admin Dashboard') ?></h1>
             <p>Review today&apos;s employee log totals, <?= h(strtolower($label)) ?> coverage, and half day details for <?= h($displayDate) ?>.</p>
         </div>
     </section>
@@ -60,12 +60,12 @@ function render_corporate_dashboard(): void
     $details = $snapshot['details'];
     $displayDate = date('d M Y', strtotime($snapshot['date']));
 
-    render_header('Contractual Employee (Freelancer) Dashboard', 'corporate-dashboard-page');
+    render_header('Employee Dashboard', 'corporate-dashboard-page');
     ?>
     <section class="page-title">
         <div>
-            <span class="eyebrow">Contractual Employee (Freelancer) Dashboard</span>
-            <h1>Contractual Employee (Freelancer) Dashboard</h1>
+            <span class="eyebrow">Employee Dashboard</span>
+            <h1>Employee Dashboard</h1>
             <p>Track attendance for <?= h($displayDate) ?>.</p>
         </div>
     </section>
@@ -133,14 +133,25 @@ function render_vendor_dashboard(): void
 
 function render_rules_editor(array $existing = [], ?string $submitLabel = null, bool $allowBlankShift = false): void
 {
+    $postedShiftOptions = array_map(
+        static function (array $timing): string {
+            return date('h:i A', strtotime((string) $timing['start_time'])) . ' - ' . date('h:i A', strtotime((string) $timing['end_time']));
+        },
+        shift_timings()
+    );
+    $shiftOptions = $postedShiftOptions ?: standard_shift_options();
     $defaults = array_merge([
         'manual_punch_in' => false,
         'manual_punch_out' => false,
         'manual_out_count' => 1,
         'biometric_punch_in' => false,
         'biometric_punch_out' => false,
-        'shift' => standard_shift_options()[0],
+        'shift' => $shiftOptions[0] ?? '',
     ], $existing);
+    $selectedShift = normalize_shift_selection((string) ($defaults['shift'] ?? ''));
+    if ($selectedShift !== '' && !in_array($selectedShift, $shiftOptions, true)) {
+        $shiftOptions[] = $selectedShift;
+    }
     ?>
     <div class="rules-box">
         <div class="field">
@@ -150,7 +161,7 @@ function render_rules_editor(array $existing = [], ?string $submitLabel = null, 
                     <?php if ($allowBlankShift): ?>
                         <option value="" <?= (string) ($defaults['shift'] ?? '') === '' ? 'selected' : '' ?>>Keep current shift</option>
                     <?php endif; ?>
-                    <?php foreach (standard_shift_options() as $shiftOption): ?>
+                    <?php foreach ($shiftOptions as $shiftOption): ?>
                         <option value="<?= h($shiftOption) ?>" <?= normalize_shift_selection((string) ($defaults['shift'] ?? '')) === $shiftOption ? 'selected' : '' ?>><?= h(str_replace('-', '–', $shiftOption)) ?></option>
                     <?php endforeach; ?>
                 </select>
@@ -245,7 +256,7 @@ function render_admin_employees(): void
     $user = current_user();
     $isFreelancer = ($user['role'] ?? '') === 'freelancer';
     $isVendor = ($user['role'] ?? '') === 'external_vendor';
-    $label = $isFreelancer ? 'Contractual Employee (Freelancer)' : ($isVendor ? 'Vendor Employees' : 'Employees');
+    $label = $isFreelancer ? 'Employees' : ($isVendor ? 'Vendor Employees' : 'Employees');
     $singularLabel = 'Employee';
 
     render_header($label);
@@ -280,14 +291,9 @@ function render_admin_employees(): void
                             $vEmpStmt->execute([(int)$_GET['vendor_id']]);
                             $filteredEmployees = $vEmpStmt->fetchAll();
                         }
-                    } elseif ($employeeType === 'corporate') {
-                        $freelancerRegistrations = db()->query("SELECT * FROM users WHERE role = 'freelancer' ORDER BY name")->fetchAll();
-                        if (!empty($_GET['freelancer_id'])) {
-                            // Freelancer-added employees have role='corporate_employee' and admin_id=freelancer's user id
-                            $fEmpStmt = db()->prepare("SELECT * FROM users WHERE role = 'corporate_employee' AND admin_id = ? ORDER BY name");
-                            $fEmpStmt->execute([(int)$_GET['freelancer_id']]);
-                            $filteredEmployees = $fEmpStmt->fetchAll();
-                        }
+                    } elseif ($employeeType === 'corporate' && !$isVendor && !$isFreelancer) {
+                        $contractualStmt = db()->query("SELECT * FROM users WHERE role = 'corporate_employee' OR employee_type = 'corporate' ORDER BY created_at DESC, name");
+                        $filteredEmployees = $contractualStmt->fetchAll();
                     } else {
                         if ($isVendor || $isFreelancer) {
                             $filteredEmployees = $allEmployees;
@@ -295,13 +301,17 @@ function render_admin_employees(): void
                             $filteredEmployees = array_filter($allEmployees, function($emp) use ($employeeType) {
                                 $type = (string) ($emp['employee_type'] ?? 'regular');
                                 if ($employeeType === 'regular') {
-                                    return $type === 'regular' || $type === '';
+                                    return ($type === 'regular' || $type === '') && (string) ($emp['role'] ?? '') !== 'corporate_employee';
+                                }
+                                if ($employeeType === 'corporate') {
+                                    return $type === 'corporate' || (string) ($emp['role'] ?? '') === 'corporate_employee';
                                 }
                                 return $type === $employeeType;
                             });
                         }
                     }
-                    echo count($filteredEmployees);
+                    $employeeCount = count($filteredEmployees);
+                    echo $employeeCount;
                 ?> total</span>
             </div>
             <div class="data-toolbar-right">
@@ -309,7 +319,7 @@ function render_admin_employees(): void
                     <nav class="employee-tabs inline" aria-label="Employee type filters">
                         <a href="<?= h(BASE_URL) ?>?page=admin_employees&type=regular" class="tab-link <?= $employeeType === 'regular' ? 'active' : '' ?>">Employee</a>
                         <a href="<?= h(BASE_URL) ?>?page=admin_employees&type=vendor" class="tab-link <?= $employeeType === 'vendor' ? 'active' : '' ?>">Vendor</a>
-                        <a href="<?= h(BASE_URL) ?>?page=admin_employees&type=corporate" class="tab-link <?= $employeeType === 'corporate' ? 'active' : '' ?>">Contractual Employee (Freelancer)</a>
+                        <a href="<?= h(BASE_URL) ?>?page=admin_employees&type=corporate" class="tab-link <?= $employeeType === 'corporate' ? 'active' : '' ?>">Contractual Employee</a>
                     </nav>
                 <?php endif; ?>
                 <div class="data-toolbar-search">
@@ -327,21 +337,6 @@ function render_admin_employees(): void
                         <option value="">-- Select Vendor --</option>
                         <?php foreach ($vendorRegistrations as $vendor): ?>
                             <option value="<?= (int) $vendor['id'] ?>" <?= ((int)($_GET['vendor_id'] ?? 0) === (int)$vendor['id']) ? 'selected' : '' ?>><?= h($vendor['name']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </label>
-            </form>
-        </section>
-        <?php elseif ($employeeType === 'corporate'): ?>
-        <section class="section-block scroll-panel" style="margin-bottom: 20px; padding: 15px; border-radius: 12px;">
-            <form method="get" class="form-grid">
-                <input type="hidden" name="page" value="admin_employees">
-                <input type="hidden" name="type" value="corporate">
-                <label>Contractual Employee (Freelancer)
-                    <select name="freelancer_id" onchange="this.form.submit()">
-                        <option value="">-- Select Freelancer --</option>
-                        <?php foreach ($freelancerRegistrations as $freelancer): ?>
-                            <option value="<?= (int) $freelancer['id'] ?>" <?= ((int)($_GET['freelancer_id'] ?? 0) === (int)$freelancer['id']) ? 'selected' : '' ?>><?= h($freelancer['name']) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </label>
@@ -396,8 +391,6 @@ function render_admin_employees(): void
         </table>
         <?php if (($employeeType === 'vendor' && empty($_GET['vendor_id']))): ?>
             <div class="list-item muted" style="display:block; padding: 16px;">Select a vendor from the dropdown above to view their employees.</div>
-        <?php elseif (($employeeType === 'corporate' && empty($_GET['freelancer_id']))): ?>
-            <div class="list-item muted" style="display:block; padding: 16px;">Select a contractual employee (freelancer) from the dropdown above to view their employees.</div>
         <?php elseif (!$filteredEmployees): ?>
             <div class="list-item muted" style="display:block; padding: 16px;">No employees found.</div>
         <?php endif; ?>
@@ -427,7 +420,11 @@ function render_admin_employees(): void
                             </select>
                         </label>
                         <label>Salary<input type="number" step="0.01" name="salary" value="<?= h((string) $editEmployee['salary']) ?>" required></label>
-                        <label>Employee Type<select name="employee_type"><option value="regular" <?= ((string) ($editEmployee['employee_type'] ?? 'regular')) === 'regular' ? 'selected' : '' ?>>Regular Employee</option><option value="vendor" <?= ((string) ($editEmployee['employee_type'] ?? '')) === 'vendor' ? 'selected' : '' ?>>Vendor</option><option value="corporate" <?= ((string) ($editEmployee['employee_type'] ?? '')) === 'corporate' ? 'selected' : '' ?>>Contractual Employee (Freelancer)</option></select></label>
+                        <?php if ($isFreelancer): ?>
+                            <input type="hidden" name="employee_type" value="corporate">
+                        <?php else: ?>
+                            <label>Employee Type<select name="employee_type"><option value="regular" <?= in_array((string) ($editEmployee['employee_type'] ?? 'regular'), ['regular', ''], true) ? 'selected' : '' ?>>Regular Employee</option><option value="corporate" <?= ((string) ($editEmployee['employee_type'] ?? '')) === 'corporate' || ((string) ($editEmployee['role'] ?? '')) === 'corporate_employee' ? 'selected' : '' ?>>Contractual Employee</option><option value="vendor" <?= ((string) ($editEmployee['employee_type'] ?? '')) === 'vendor' ? 'selected' : '' ?>>Vendor</option></select></label>
+                        <?php endif; ?>
                     </div>
                     <div class="inline-actions">
                         <button class="button solid" type="submit">Save Changes</button>
@@ -453,7 +450,12 @@ function render_admin_employees(): void
                     <?= csrf_field() ?>
                     <input type="hidden" name="action" value="employee_manual_submit">
                     <h3>Rules Assignment</h3>
-                    <?php render_rules_editor(['shift' => (string) ($pendingEmployee['shift'] ?? standard_shift_options()[0])]); ?>
+                    <?php render_rules_editor([
+                        'shift' => (string) ($pendingEmployee['shift'] ?? standard_shift_options()[0]),
+                        'manual_punch_in' => true,
+                        'manual_punch_out' => true,
+                        'manual_out_count' => 1,
+                    ]); ?>
                     <button class="button solid" type="submit" data-rule-submit>Submit</button>
                 </form>
             <?php else: ?>
@@ -467,8 +469,6 @@ function render_admin_employees(): void
                     <input type="hidden" name="action" value="employee_manual_next">
                     <?php if ($employeeType === 'vendor' && !empty($_GET['vendor_id'])): ?>
                         <input type="hidden" name="vendor_id" value="<?= (int) $_GET['vendor_id'] ?>">
-                    <?php elseif ($employeeType === 'corporate' && !empty($_GET['freelancer_id'])): ?>
-                        <input type="hidden" name="freelancer_id" value="<?= (int) $_GET['freelancer_id'] ?>">
                     <?php endif; ?>
                     <div class="reports-filter-grid">
                         <div class="field"><label>Emp ID</label><div class="field-row"><input type="text" name="emp_id" required></div><small class="field-error"><span>!</span>Emp ID is required.</small></div>
@@ -476,7 +476,11 @@ function render_admin_employees(): void
                         <div class="field"><label>Email</label><div class="field-row"><input type="email" name="email" required></div><small class="field-error"><span>!</span>Valid email required.</small></div>
                         <div class="field"><label>Phone Number</label><div class="field-row"><input type="text" name="phone" required></div><small class="field-error"><span>!</span>Phone number required.</small></div>
                         <div class="field"><label>Salary</label><div class="field-row"><input type="number" step="0.01" min="0" name="salary" required></div><small class="field-error"><span>!</span>Salary is required.</small></div>
-                        <div class="field"><label>Employee Type</label><div class="field-row"><select name="employee_type" required><option value="regular" <?= $employeeType === 'regular' ? 'selected' : '' ?>>Regular Employee</option><option value="vendor" <?= $employeeType === 'vendor' ? 'selected' : '' ?>>Vendor</option><option value="corporate" <?= $employeeType === 'corporate' ? 'selected' : '' ?>>Contractual Employee (Freelancer)</option></select></div><small class="field-error"><span>!</span>Employee type is required.</small></div>
+                        <?php if ($isFreelancer): ?>
+                            <input type="hidden" name="employee_type" value="corporate">
+                        <?php else: ?>
+                            <div class="field"><label>Employee Type</label><div class="field-row"><select name="employee_type" required><option value="regular" <?= $employeeType === 'regular' ? 'selected' : '' ?>>Regular Employee</option><option value="corporate" <?= $employeeType === 'corporate' ? 'selected' : '' ?>>Contractual Employee</option><option value="vendor" <?= $employeeType === 'vendor' ? 'selected' : '' ?>>Vendor</option></select></div><small class="field-error"><span>!</span>Employee type is required.</small></div>
+                        <?php endif; ?>
                     </div>
                     <button class="button solid" type="submit" data-required-submit>Next</button>
                 </form>
@@ -522,7 +526,12 @@ function render_admin_employees(): void
                     <?= csrf_field() ?>
                     <input type="hidden" name="action" value="employee_csv_submit">
                     <h3>Rules Assignment</h3>
-                    <?php render_rules_editor(['shift' => standard_shift_options()[0]]); ?>
+                    <?php render_rules_editor([
+                        'shift' => standard_shift_options()[0],
+                        'manual_punch_in' => true,
+                        'manual_punch_out' => true,
+                        'manual_out_count' => 1,
+                    ]); ?>
                     <button class="button solid" type="submit" data-rule-submit>Import <?= h($label) ?></button>
                 </form>
             <?php else: ?>
@@ -537,18 +546,20 @@ function render_admin_employees(): void
                     <input type="hidden" name="action" value="employee_csv_upload">
                     <?php if ($employeeType === 'vendor' && !empty($_GET['vendor_id'])): ?>
                         <input type="hidden" name="vendor_id" value="<?= (int) $_GET['vendor_id'] ?>">
-                    <?php elseif ($employeeType === 'corporate' && !empty($_GET['freelancer_id'])): ?>
-                        <input type="hidden" name="freelancer_id" value="<?= (int) $_GET['freelancer_id'] ?>">
                     <?php endif; ?>
                     <div class="reports-filter-grid">
-                        <div class="field"><label>Employee Type</label><div class="field-row"><select name="employee_type" required><option value="regular" <?= $employeeType === 'regular' ? 'selected' : '' ?>>Regular Employee</option><option value="vendor" <?= $employeeType === 'vendor' ? 'selected' : '' ?>>Vendor</option><option value="corporate" <?= $employeeType === 'corporate' ? 'selected' : '' ?>>Contractual Employee (Freelancer)</option></select></div><small class="field-error"><span>!</span>Employee type is required.</small></div>
+                        <?php if ($isFreelancer): ?>
+                            <input type="hidden" name="employee_type" value="corporate">
+                        <?php else: ?>
+                            <div class="field"><label>Employee Type</label><div class="field-row"><select name="employee_type" required><option value="regular" <?= $employeeType === 'regular' ? 'selected' : '' ?>>Regular Employee</option><option value="corporate" <?= $employeeType === 'corporate' ? 'selected' : '' ?>>Contractual Employee</option><option value="vendor" <?= $employeeType === 'vendor' ? 'selected' : '' ?>>Vendor</option></select></div><small class="field-error"><span>!</span>Employee type is required.</small></div>
+                        <?php endif; ?>
                     </div>
                     <label class="upload-drop">
-                        <strong>Select <?= h(strtolower($singularLabel ?? 'Employee')) ?> CSV</strong>
-                        <p>Upload a CSV with <?= h(strtolower($singularLabel ?? 'Employee')) ?> details. Supported columns include ID, Name, Email, Phone, and Salary. Missing ID or Name can be generated automatically.</p>
-                        <input type="file" name="csv_file" accept=".csv" required>
+                        <strong>Select <?= h(strtolower($singularLabel ?? 'Employee')) ?> file</strong>
+                        <p>Upload a `.xlsx`, `.xls`, `.csv`, or `.txt` file with <?= h(strtolower($singularLabel ?? 'Employee')) ?> details. Supported columns include ID, Name, Email, Phone, and Salary. Email, ID, and Name can be generated automatically if missing.</p>
+                        <input type="file" name="csv_file" accept=".xlsx,.xls,.csv,.txt" required>
                     </label>
-                    <button class="button solid" type="submit">Import CSV</button>
+                    <button class="button solid" type="submit">Import File</button>
                 </form>
             <?php endif; ?>
         </div>
@@ -720,44 +731,107 @@ function render_admin_projects(): void
 function render_admin_rules(): void 
 {
     require_role('admin');
-    $defaultAssignedProjectIds = array_values(array_filter(array_map(
-        static fn (array $project): int => (int) ($project['id'] ?? 0),
-        active_projects()
-    )));
+    $allEmployees = employees();
+    $timings = shift_timings();
     render_header('Rules', 'admin-rules-page');
     ?>
     <section class="page-title">
         <div>
             <span class="eyebrow">Admin - Rules</span>
-            <h1>Assign Rules</h1>
-            <p>Select one or more of your employees, apply the allowed punch methods, assign their project list, and email the rule update instantly.</p>
+            <h1>Rules Workspace</h1>
+            <p>Handle shift timings, employee rule assignment, and project access from one page without switching screens.</p>
         </div>
     </section>
-    <section class="section-block scroll-panel">
-        <form method="post" class="stack-form" data-rule-form data-employee-form>
-            <?= csrf_field() ?>
-            <input type="hidden" name="action" value="apply_rules">
-            <div class="employee-picker">
+    <section class="rules-workspace-grid">
+        <section class="section-block rules-shift-panel">
+            <span class="eyebrow">Shift Timing</span>
+            <h2>Post Shift Timing</h2>
+            <p class="hint">Create the timings once here, then pick them directly from the rule-assignment dropdown.</p>
+            <div class="rules-quick-actions">
+                <form method="post">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="action" value="admin_add_shift_timing">
+                    <input type="hidden" name="start_time" value="09:00">
+                    <input type="hidden" name="end_time" value="18:00">
+                    <button class="button outline" type="submit">Add 9:00 AM - 6:00 PM</button>
+                </form>
+                <form method="post">
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="action" value="admin_add_shift_timing">
+                    <input type="hidden" name="start_time" value="10:30">
+                    <input type="hidden" name="end_time" value="20:30">
+                    <button class="button outline" type="submit">Add 10:30 AM - 8:30 PM</button>
+                </form>
+            </div>
+            <form method="post" class="stack-form rules-shift-form" data-validate>
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="admin_add_shift_timing">
+                <div class="reports-filter-grid">
+                    <label>Start Time<input type="time" name="start_time" required></label>
+                    <label>End Time<input type="time" name="end_time" required></label>
+                </div>
+                <button class="button solid" type="submit">Post Shift Timing</button>
+            </form>
+            <div class="rules-timings-list">
                 <div class="split">
-                    <strong>Select Employees</strong>
-                    <span class="hint">Search and pick one or more employees</span>
+                    <h3>Posted Shift Timings</h3>
+                    <span class="badge"><?= count($timings) ?> total</span>
                 </div>
-                <input type="text" placeholder="Search employees..." data-employee-filter="employee-options">
-                <div class="tag-list" id="selected-employee-tags"></div>
-                <div class="employee-options" id="employee-options" data-tag-source="selected-employee-tags">
-                    <?php foreach (employees() as $employee): ?>
-                        <label class="employee-option">
-                            <input type="checkbox" name="employee_ids[]" value="<?= (int) $employee['id'] ?>" data-label="<?= h($employee['name']) ?>">
-                            <span><?= h($employee['name']) ?> (<?= h($employee['emp_id']) ?>)</span>
-                        </label>
-                    <?php endforeach; ?>
+                <?php if ($timings): ?>
+                    <div class="rules-timing-stack">
+                        <?php foreach ($timings as $timing): ?>
+                            <article class="rules-timing-chip">
+                                <div>
+                                    <strong><?= h(date('h:i A', strtotime((string) $timing['start_time']))) ?> - <?= h(date('h:i A', strtotime((string) $timing['end_time']))) ?></strong>
+                                    <span>Posted shift timing</span>
+                                </div>
+                                <form method="post">
+                                    <?= csrf_field() ?>
+                                    <input type="hidden" name="action" value="admin_delete_shift_timing">
+                                    <input type="hidden" name="shift_id" value="<?= (int) $timing['id'] ?>">
+                                    <button class="button outline small" type="submit">Delete</button>
+                                </form>
+                            </article>
+                        <?php endforeach; ?>
+                    </div>
+                <?php else: ?>
+                    <div class="list-item muted">No shift timings posted yet.</div>
+                <?php endif; ?>
+            </div>
+        </section>
+        <section class="section-block scroll-panel rules-assignment-panel">
+            <div class="split rules-section-head">
+                <div>
+                    <span class="eyebrow">Rule Assignment</span>
+                    <h2>Assign Employee Rules</h2>
                 </div>
+                <span class="hint">Choose employees, shift timing, punch type, and projects in one save.</span>
             </div>
-            <?php render_rules_editor([], null, true); ?>
-            <div class="inline-actions">
-                <button class="button solid" type="submit" data-rule-submit>Save</button>
-            </div>
-        </form>
+            <form method="post" class="stack-form" data-rule-form data-employee-form>
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="apply_rules">
+                <div class="employee-picker">
+                    <div class="split">
+                        <strong>Select Employees</strong>
+                        <span class="hint">Search and pick one or more employees</span>
+                    </div>
+                    <input type="text" placeholder="Search employees..." data-employee-filter="employee-options">
+                    <div class="tag-list" id="selected-employee-tags"></div>
+                    <div class="employee-options" id="employee-options" data-tag-source="selected-employee-tags">
+                        <?php foreach ($allEmployees as $employee): ?>
+                            <label class="employee-option">
+                                <input type="checkbox" name="employee_ids[]" value="<?= (int) $employee['id'] ?>" data-label="<?= h($employee['name']) ?>">
+                                <span><?= h($employee['name']) ?> (<?= h($employee['emp_id']) ?>)</span>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <?php render_rules_editor([], null, true); ?>
+                <div class="inline-actions">
+                    <button class="button solid" type="submit" data-rule-submit>Save</button>
+                </div>
+            </form>
+        </section>
     </section>
     <?php
     render_footer();
@@ -823,18 +897,31 @@ function render_calendar(string $context, array $employee, string $month, array 
     $compact = !empty($calendarMeta['compact']);
     $reimbursementsByDate = $calendarMeta['reimbursements_by_date'] ?? [];
     $viewMode = $calendarMeta['view_mode'] ?? 'attendance';
+    $calendarActionsHtml = (string) ($calendarMeta['calendar_actions_html'] ?? '');
+    $employeeTypeKey = strtolower(trim((string) ($employee['employee_type'] ?? '')));
+    $employeeRoleKey = strtolower(trim((string) ($employee['role'] ?? '')));
+    $usesSessionAttendance = in_array($employeeTypeKey, ['vendor', 'corporate'], true) || $employeeRoleKey === 'corporate_employee';
     $attendanceCounts = attendance_counts($monthAttendance);
-    $salaryBreakdown = salary_breakdown_for_month((float) ($employee['salary'] ?? 0), $monthAttendance);
+    $salaryBreakdown = employee_salary_breakdown_for_month($employee, $monthAttendance);
+    $incentiveBreakdown = incentive_breakdown_for_month($monthAttendance);
     ?>
     <div class="calendar-shell<?= $compact ? ' calendar-shell-compact' : '' ?>">
+        <?php if ($calendarActionsHtml !== ''): ?>
+            <div class="calendar-top-actions">
+                <?= $calendarActionsHtml ?>
+            </div>
+        <?php endif; ?>
         <div class="calendar-legend" aria-label="Attendance legend">
             <?php if ($viewMode === 'reimbursement'): ?>
                 <span class="legend-chip"><span class="legend-swatch legend-reimbursement" style="background-color: #6366f1;"></span>Reimbursement Claim</span>
+            <?php elseif ($usesSessionAttendance): ?>
+                <span class="legend-chip"><span class="legend-swatch legend-present"></span>Completed Session</span>
+                <span class="legend-chip"><span class="legend-swatch legend-half-day"></span>Half Session</span>
             <?php else: ?>
                 <span class="legend-chip"><span class="legend-swatch legend-present"></span>Present</span>
                 <span class="legend-chip"><span class="legend-swatch legend-absent"></span>Absent</span>
+                <span class="legend-chip"><span class="legend-swatch legend-leave"></span>Leave</span>
                 <span class="legend-chip"><span class="legend-swatch legend-pending"></span>Pending</span>
-                <span class="legend-chip"><span class="legend-swatch legend-reimbursement" style="background-color: #6366f1;"></span>Reimbursement</span>
             <?php endif; ?>
         </div>
         <div class="calendar-grid<?= $compact ? ' calendar-grid-compact' : '' ?>"<?= $compact ? ' style="--calendar-week-rows: ' . $weekRows . ';"' : '' ?>>
@@ -846,14 +933,23 @@ function render_calendar(string $context, array $employee, string $month, array 
             <?php endfor; ?>
             <?php foreach ($monthAttendance as $date => $entry): ?>
                 <?php $status = (string) ($entry['record']['status'] ?? ''); ?>
+                <?php if (!empty($entry['record']['sandwich_week_off_absent'])) {
+                    $status = 'Absent';
+                } ?>
                 <?php $statusClass = str_replace(' ', '-', $status); ?>
+                <?php $dayCopy = in_array($status, ['Week Off', 'Pending', 'Absent'], true) ? $status : ''; ?>
+                <?php if ($usesSessionAttendance && $viewMode !== 'reimbursement'): ?>
+                    <?php $vendorSessionDisplay = vendor_session_display_for_entry($entry); ?>
+                    <?php $statusClass = (string) ($vendorSessionDisplay['status_class'] ?? ''); ?>
+                    <?php $dayCopy = (string) ($vendorSessionDisplay['copy'] ?? ''); ?>
+                <?php endif; ?>
                 <?php 
                     $dayCardClass = 'day-card';
                     if ($viewMode !== 'reimbursement' && $statusClass !== '') {
                         $dayCardClass .= ' day-card-' . $statusClass;
                     }
                 ?>
-                <?php $isEmployeeWeekOff = $context === 'employee' && ($status === 'Week Off'); ?>
+                <?php $isEmployeeWeekOff = $context === 'employee' && ($status === 'Week Off') && empty($entry['record']['sandwich_week_off_absent']); ?>
                 <?php $reimbursementMeta = $reimbursementsByDate[$date] ?? ['count' => 0, 'total' => 0.0, 'items' => []]; ?>
                 <?php if ($isEmployeeWeekOff): ?>
                     <div class="<?= h($dayCardClass) ?> static<?= $compact ? ' compact' : '' ?>">
@@ -869,7 +965,6 @@ function render_calendar(string $context, array $employee, string $month, array 
                                 <span class="day-dot dot-<?= h($statusClass) ?>" aria-hidden="true"></span>
                             <?php endif; ?>
                             <span class="day-number<?= ($viewMode !== 'reimbursement' && $statusClass !== '') ? ' day-number-' . h($statusClass) : '' ?>"><?= date('d', strtotime($date)) ?></span>
-                            <?php $dayCopy = in_array($status, ['Week Off', 'Pending'], true) ? $status : ''; ?>
                             <span class="day-copy"><?= h($dayCopy) ?></span>
                             <?php if (!empty($reimbursementMeta['count'])): ?>
                                 <span class="day-badge reimbursement">R <?= (int) $reimbursementMeta['count'] ?></span>
@@ -890,7 +985,6 @@ function render_calendar(string $context, array $employee, string $month, array 
                                 <span class="day-dot dot-<?= h($statusClass) ?>" aria-hidden="true"></span>
                             <?php endif; ?>
                             <span class="day-number<?= ($viewMode !== 'reimbursement' && $statusClass !== '') ? ' day-number-' . h($statusClass) : '' ?>"><?= date('d', strtotime($date)) ?></span>
-                            <?php $dayCopy = in_array($status, ['Week Off', 'Pending'], true) ? $status : ''; ?>
                             <span class="day-copy"><?= h($dayCopy) ?></span>
                             <?php if (!empty($reimbursementMeta['count'])): ?>
                                 <span class="day-badge reimbursement">R <?= (int) $reimbursementMeta['count'] ?></span>
@@ -913,9 +1007,12 @@ function render_calendar(string $context, array $employee, string $month, array 
                     ?>
                     <div class="summary-card"><strong><?= $totalClaims ?></strong><span>Total Claims</span></div>
                     <div class="summary-card summary-highlight"><strong>Rs <?= number_format($totalAmount, 2) ?></strong><span>Total Requested</span></div>
+                <?php elseif ($usesSessionAttendance): ?>
+                    <div class="summary-card summary-highlight"><strong>Rs <?= number_format((float) ($salaryBreakdown['calculated_salary'] ?? 0), 2) ?></strong><span>Calculated Salary</span></div>
                 <?php else: ?>
                     <div class="summary-card"><strong><?= (int) ($attendanceCounts['present'] ?? 0) ?></strong><span>Total Present Days</span></div>
                     <div class="summary-card"><strong><?= (int) ($attendanceCounts['half_day'] ?? 0) ?></strong><span>Half Days</span></div>
+                    <div class="summary-card"><strong>Rs <?= number_format((float) ($incentiveBreakdown['amount'] ?? 0), 2) ?></strong><span>Incentive</span></div>
                     <div class="summary-card summary-highlight"><strong>Rs <?= number_format((float) ($salaryBreakdown['calculated_salary'] ?? 0), 2) ?></strong><span>Calculated Salary</span></div>
                 <?php endif; ?>
             </div>
@@ -1017,11 +1114,17 @@ function render_admin_attendance(): void
     require_roles(['admin', 'freelancer', 'external_vendor']);
     $allEmployees = employees();
     $employeeType = $_GET['type'] ?? 'regular';
+    $employeeType = in_array($employeeType, ['regular', 'vendor', 'corporate'], true) ? $employeeType : 'regular';
     $view = $_GET['view'] ?? 'attendance';
 
     $user = current_user();
     $isFreelancer = ($user['role'] ?? '') === 'freelancer';
     $isVendor = ($user['role'] ?? '') === 'external_vendor';
+    $canViewReimbursements = !$isFreelancer && !$isVendor && $employeeType === 'regular';
+
+    if (!$canViewReimbursements) {
+        $view = 'attendance';
+    }
 
     // Build registrations lists and filtered employees based on type
     $vendorRegistrations = [];
@@ -1036,17 +1139,17 @@ function render_admin_attendance(): void
             $filteredEmployees = $vEmpStmt->fetchAll();
         }
     } elseif ($employeeType === 'corporate' && !$isFreelancer && !$isVendor) {
-        $freelancerRegistrations = db()->query("SELECT * FROM users WHERE role = 'freelancer' ORDER BY name")->fetchAll();
-        if (!empty($_GET['freelancer_id'])) {
-            $fEmpStmt = db()->prepare("SELECT * FROM users WHERE role = 'corporate_employee' AND admin_id = ? ORDER BY name");
-            $fEmpStmt->execute([(int)$_GET['freelancer_id']]);
-            $filteredEmployees = $fEmpStmt->fetchAll();
-        }
+        $contractualStmt = db()->query("SELECT * FROM users WHERE role = 'corporate_employee' OR employee_type = 'corporate' ORDER BY created_at DESC, name");
+        $filteredEmployees = $contractualStmt->fetchAll();
     } else {
-        $filteredEmployees = array_values(array_filter($allEmployees, function($emp) use ($employeeType) {
+        $filteredEmployees = array_values(array_filter($allEmployees, function($emp) use ($employeeType, $isVendor, $isFreelancer) {
+            // Member portal users should see all employees linked to their account.
+            if ($isVendor || $isFreelancer) {
+                return true;
+            }
             $type = (string) ($emp['employee_type'] ?? 'regular');
             if ($employeeType === 'regular') {
-                return $type === 'regular' || $type === '';
+                return $type === 'regular' || $type === '' || $type === 'corporate';
             }
             return $type === $employeeType;
         }));
@@ -1055,8 +1158,7 @@ function render_admin_attendance(): void
     $fallbackEmployee = $filteredEmployees[0] ?? null;
     $selectedId = (int) ($_GET['employee_id'] ?? ($fallbackEmployee['id'] ?? 0));
     // For vendor/corporate with no selection yet, don't auto-select
-    if (($employeeType === 'vendor' && empty($_GET['vendor_id'])) ||
-        ($employeeType === 'corporate' && empty($_GET['freelancer_id']))) {
+    if ($employeeType === 'vendor' && empty($_GET['vendor_id'])) {
         $employee = null;
     } else {
         $employee = $selectedId ? (employee_by_id($selectedId) ?: ($filteredEmployees[0] ?? null)) : ($filteredEmployees[0] ?? null);
@@ -1076,10 +1178,6 @@ function render_admin_attendance(): void
         <div>
             <h1><?= $view === 'reimbursement' ? 'Reimbursement Calendar' : 'Employee Log Calendar' ?></h1>
         </div>
-        <div class="action-bar">
-            <a href="<?= h(BASE_URL) ?>?page=admin_employee_log&type=<?= h($employeeType) ?>&view=attendance" class="button <?= $view === 'attendance' ? 'solid' : 'outline' ?>">Employee Log Calendar</a>
-            <a href="<?= h(BASE_URL) ?>?page=admin_employee_log&type=<?= h($employeeType) ?>&view=reimbursement" class="button <?= $view === 'reimbursement' ? 'solid' : 'outline' ?>">Reimbursement</a>
-        </div>
     </section>
 
     <?php if (!$isFreelancer && !$isVendor): ?>
@@ -1087,7 +1185,7 @@ function render_admin_attendance(): void
         <nav class="employee-tabs">
             <a href="<?= h(BASE_URL) ?>?page=admin_employee_log&type=regular&view=<?= h($view) ?>" class="tab-link <?= $employeeType === 'regular' ? 'active' : '' ?>">Employee</a>
             <a href="<?= h(BASE_URL) ?>?page=admin_employee_log&type=vendor&view=<?= h($view) ?>" class="tab-link <?= $employeeType === 'vendor' ? 'active' : '' ?>">Vendor</a>
-            <a href="<?= h(BASE_URL) ?>?page=admin_employee_log&type=corporate&view=<?= h($view) ?>" class="tab-link <?= $employeeType === 'corporate' ? 'active' : '' ?>">Contractual Employee (Freelancer)</a>
+            <a href="<?= h(BASE_URL) ?>?page=admin_employee_log&type=corporate&view=<?= h($view) ?>" class="tab-link <?= $employeeType === 'corporate' ? 'active' : '' ?>">Contractual Employee</a>
         </nav>
     </section>
     <?php endif; ?>
@@ -1107,20 +1205,6 @@ function render_admin_attendance(): void
                 </select>
             </label>
         </form>
-        <?php elseif ($employeeType === 'corporate'): ?>
-        <form method="get" class="form-grid" style="margin-bottom: 12px;">
-            <input type="hidden" name="page" value="admin_employee_log">
-            <input type="hidden" name="type" value="corporate">
-            <input type="hidden" name="view" value="<?= h($view) ?>">
-            <label>Contractual Employee (Freelancer)
-                <select name="freelancer_id" onchange="this.form.submit()">
-                    <option value="">-- Select Freelancer --</option>
-                    <?php foreach ($freelancerRegistrations as $fr): ?>
-                        <option value="<?= (int) $fr['id'] ?>" <?= ((int)($_GET['freelancer_id'] ?? 0) === (int)$fr['id']) ? 'selected' : '' ?>><?= h($fr['name']) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </label>
-        </form>
         <?php endif; ?>
         <form method="get" class="form-grid">
             <input type="hidden" name="page" value="admin_employee_log">
@@ -1128,8 +1212,6 @@ function render_admin_attendance(): void
             <input type="hidden" name="view" value="<?= h($view) ?>">
             <?php if ($employeeType === 'vendor' && !empty($_GET['vendor_id'])): ?>
                 <input type="hidden" name="vendor_id" value="<?= (int)$_GET['vendor_id'] ?>">
-            <?php elseif ($employeeType === 'corporate' && !empty($_GET['freelancer_id'])): ?>
-                <input type="hidden" name="freelancer_id" value="<?= (int)$_GET['freelancer_id'] ?>">
             <?php endif; ?>
             <label>Employee
                 <select name="employee_id">
@@ -1159,7 +1241,7 @@ function render_admin_attendance(): void
                 <input type="hidden" name="action" value="admin_attendance_csv_upload">
                 <label class="upload-drop">
                     <strong>Select attendance file</strong>
-                    <p>You can upload `.xlsx`, `.csv`, `.txt`, or legacy `.xls` HTML-style exports. If your file is an old binary `.xls` workbook, save it as `.xlsx` or `.csv` first. Employee rows are matched by Empcode first, then by Name if needed. If the report date is not detected, the attendance date below will be used.</p>
+                        <p>You can upload `.xlsx`, `.xls`, `.csv`, or `.txt` attendance exports. Employee rows are matched by Empcode first, then by Name if needed. If the report date is not detected, the attendance date below will be used.</p>
                     <input type="file" name="attendance_csv" accept=".xlsx,.xls,.csv,.txt" required>
                 </label>
                 <label>Attendance Date (optional)<input type="date" name="attendance_date"></label>
@@ -1169,16 +1251,25 @@ function render_admin_attendance(): void
     </div>
 
     <div class="spacer"></div>
-    <?php if (($employeeType === 'vendor' && empty($_GET['vendor_id'])) || ($employeeType === 'corporate' && empty($_GET['freelancer_id']))): ?>
-        <section class="section-block"><p class="hint"><?= $employeeType === 'vendor' ? 'Select a vendor above to view their employee attendance.' : 'Select a contractual employee above to view their employee attendance.' ?></p></section>
+    <?php if ($employeeType === 'vendor' && empty($_GET['vendor_id'])): ?>
+        <section class="section-block"><p class="hint">Select a vendor above to view their employee attendance.</p></section>
     <?php elseif ($employee): ?>
         <div class="attendance-panel" style="display: block; height: auto; overflow: visible;">
             <?php 
+                ob_start();
+                ?>
+                <a href="<?= h(BASE_URL) ?>?page=admin_employee_log&type=<?= h($employeeType) ?>&view=attendance" class="button <?= $view === 'attendance' ? 'solid' : 'outline' ?>">Employee Log Calendar</a>
+                <?php if ($canViewReimbursements): ?>
+                    <a href="<?= h(BASE_URL) ?>?page=admin_employee_log&type=<?= h($employeeType) ?>&view=reimbursement" class="button <?= $view === 'reimbursement' ? 'solid' : 'outline' ?>">Reimbursement</a>
+                <?php endif; ?>
+                <?php
+                $calendarActionsHtml = ob_get_clean();
                 $reimbursements = employee_reimbursements_by_date_map((int) $employee['id'], $month);
                 render_calendar('admin', $employee, $month, month_attendance_for_user((int) $employee['id'], $month), [
                     'compact' => false,
                     'reimbursements_by_date' => $reimbursements,
-                    'view_mode' => $view
+                    'view_mode' => $view,
+                    'calendar_actions_html' => $calendarActionsHtml,
                 ]); 
             ?>
         </div>
@@ -1917,7 +2008,7 @@ function render_admin_reimbursements(): void
     render_footer();
 }
 
-function render_admin_accounts(): void
+function render_admin_accounts_legacy(): void
 {
     require_role('admin');
 
@@ -1938,6 +2029,8 @@ function render_admin_accounts(): void
     $allEmployees = employees();
     $paymentTypes = payment_types();
     $paymentMethods = payment_bank_names();
+    $accountsProcessPaymentBanks = ['SBI', 'CANARA', 'IOB', 'CASH'];
+    $payrollPaymentMethods = ['UPI', 'CASH'];
     $transferModesMap = payment_transfer_modes_map();
     $items = admin_payments($filters);
     $requestRows = payment_request_rows($requestMonth);
@@ -2014,6 +2107,7 @@ function render_admin_accounts(): void
                             $requestPayload = [
                                 'payment_id' => 0,
                                 'employee_id' => (int) $row['employee_id'],
+                                'employee_salary' => number_format((float) ($row['employee_salary'] ?? 0), 2, '.', ''),
                                 'payment_type' => (string) $row['request_type'],
                                 'amount' => number_format((float) ($row['amount'] ?? 0), 2, '.', ''),
                                 'payment_methods' => [],
@@ -2030,7 +2124,8 @@ function render_admin_accounts(): void
                             <tr>
                                 <td>
                                     <?= h((string) $row['employee_name']) ?><br>
-                                    <span class="hint"><?= h((string) ($row['employee_emp_id'] ?: 'Employee')) ?></span>
+                                    <span class="hint"><?= h((string) ($row['employee_emp_id'] ?: 'Employee')) ?></span><br>
+                                    <span class="hint">Salary: Rs <?= h(number_format((float) ($row['employee_salary'] ?? 0), 2)) ?></span>
                                 </td>
                                 <td><?= h((string) $row['request_type']) ?></td>
                                 <td>Rs <?= h(number_format((float) ($row['amount'] ?? 0), 2)) ?></td>
@@ -2149,7 +2244,7 @@ function render_admin_accounts(): void
                         <th>Amount</th>
                         <th>Payment Method(s)</th>
                         <th>Transaction ID</th>
-                        <th>Date</th>
+                        <th>Date of Payment</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -2238,24 +2333,17 @@ function render_admin_accounts(): void
                     <div class="field">
                         <label>Employee</label>
                         <div class="field-row">
-                            <select name="employee_id" id="accounts-payment-employee" required>
-                                <option value="" selected disabled>Select employee</option>
-                                <?php foreach ($allEmployees as $employee): ?>
-                                    <option value="<?= (int) $employee['id'] ?>"><?= h((string) $employee['name']) ?> (<?= h((string) $employee['emp_id']) ?>)</option>
-                                <?php endforeach; ?>
-                            </select>
+                            <input type="hidden" name="employee_id" id="accounts-payment-employee">
+                            <input type="text" id="accounts-payment-employee-display" readonly>
                         </div>
+                        <small class="hint" id="accounts-employee-salary-note">Salary: Rs 0.00</small>
                     </div>
 
                     <div class="field">
                         <label>Payment Type</label>
                         <div class="field-row">
-                            <select name="payment_type" id="accounts-payment-type" required>
-                                <option value="" selected disabled>Select payment type</option>
-                                <?php foreach ($paymentTypes as $paymentType): ?>
-                                    <option value="<?= h($paymentType) ?>"><?= h($paymentType) ?></option>
-                                <?php endforeach; ?>
-                            </select>
+                            <input type="hidden" name="payment_type" id="accounts-payment-type">
+                            <input type="text" id="accounts-payment-type-display" readonly>
                         </div>
                     </div>
 
@@ -2269,6 +2357,13 @@ function render_admin_accounts(): void
                         <small class="hint" id="accounts-reimbursement-note">Choose a linked reimbursement request when settling a claim.</small>
                     </div>
 
+                    <div class="field accounts-conditional-field hidden" id="accounts-incentive-field">
+                        <label>Calculated Incentive</label>
+                        <div class="field-row">
+                            <input type="text" id="accounts-incentive-amount" readonly>
+                        </div>
+                    </div>
+
                     <div class="field">
                         <label>Amount</label>
                         <div class="field-row">
@@ -2277,14 +2372,14 @@ function render_admin_accounts(): void
                     </div>
 
                     <div class="field accounts-method-field">
-                        <label>Payment Method(s)</label>
-                        <div class="payment-method-grid" id="accounts-payment-method-grid">
-                            <?php foreach ($paymentMethods as $method): ?>
-                                <label class="payment-method-option">
-                                    <input type="checkbox" name="payment_methods[]" value="<?= h($method) ?>" data-payment-method>
-                                    <span><?= h($method) ?></span>
-                                </label>
-                            <?php endforeach; ?>
+                        <label>Bank Name</label>
+                        <div class="field-row">
+                            <select name="payment_methods" id="accounts-bank-name" required>
+                                <option value="" selected disabled>Select bank</option>
+                                <?php foreach ($accountsProcessPaymentBanks as $method): ?>
+                                    <option value="<?= h($method) ?>"><?= h($method) ?></option>
+                                <?php endforeach; ?>
+                            </select>
                         </div>
                     </div>
 
@@ -2370,17 +2465,31 @@ function render_admin_accounts(): void
             const requestRows = <?= json_encode($requestRows, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
             const transferModeMap = <?= json_encode($transferModesMap, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
             const createDefaults = <?= json_encode($modalDefaults, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
+            const employeeLabelMap = <?= json_encode(array_reduce($allEmployees, static function (array $carry, array $employee): array {
+                $carry[(string) ((int) ($employee['id'] ?? 0))] = (string) ($employee['name'] ?? '') . ' (' . (string) ($employee['emp_id'] ?? '') . ')';
+                return $carry;
+            }, []), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
+            const employeeSalaryMap = <?= json_encode(array_reduce($allEmployees, static function (array $carry, array $employee): array {
+                $carry[(string) ((int) ($employee['id'] ?? 0))] = (float) ($employee['salary'] ?? 0);
+                return $carry;
+            }, []), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
             const form = document.getElementById('accounts-payment-form');
             const modalTitle = document.getElementById('accounts-payment-modal-title');
             const modalCopy = document.getElementById('accounts-payment-modal-copy');
             const submitButton = document.getElementById('accounts-payment-submit-button');
             const paymentIdInput = document.getElementById('accounts-payment-id');
-            const employeeSelect = document.getElementById('accounts-payment-employee');
-            const paymentTypeSelect = document.getElementById('accounts-payment-type');
+            const employeeInput = document.getElementById('accounts-payment-employee');
+            const employeeDisplay = document.getElementById('accounts-payment-employee-display');
+            const employeeSalaryNote = document.getElementById('accounts-employee-salary-note');
+            const paymentTypeInput = document.getElementById('accounts-payment-type');
+            const paymentTypeDisplay = document.getElementById('accounts-payment-type-display');
             const reimbursementField = document.getElementById('accounts-reimbursement-field');
             const reimbursementSelect = document.getElementById('accounts-reimbursement-select');
             const reimbursementNote = document.getElementById('accounts-reimbursement-note');
+            const incentiveField = document.getElementById('accounts-incentive-field');
+            const incentiveAmountInput = document.getElementById('accounts-incentive-amount');
             const amountInput = document.getElementById('accounts-payment-amount');
+            const bankSelect = document.getElementById('accounts-bank-name');
             const transferModeField = document.getElementById('accounts-transfer-mode-field');
             const transferModeSelect = document.getElementById('accounts-transfer-mode');
             const transactionField = document.getElementById('accounts-transaction-id-field');
@@ -2389,7 +2498,6 @@ function render_admin_accounts(): void
             const remarksInput = document.getElementById('accounts-payment-remarks');
             const calculationNote = document.getElementById('accounts-calculation-note');
             const proofHelp = document.getElementById('accounts-proof-help');
-            const methodInputs = Array.from(document.querySelectorAll('[data-payment-method]'));
 
             const openPageModal = id => {
                 const target = document.getElementById(id);
@@ -2398,13 +2506,16 @@ function render_admin_accounts(): void
                 }
             };
 
-            const selectedMethods = () => methodInputs.filter(input => input.checked).map(input => input.value);
+            const selectedMethods = () => {
+                const value = String(bankSelect ? (bankSelect.value || '') : '');
+                return value !== '' ? [value] : [];
+            };
 
             const setMethods = methods => {
                 const values = Array.isArray(methods) ? methods.map(String) : [];
-                methodInputs.forEach(input => {
-                    input.checked = values.includes(String(input.value));
-                });
+                if (bankSelect) {
+                    bankSelect.value = values[0] || '';
+                }
             };
 
             const setSelectValue = (select, value) => {
@@ -2412,6 +2523,17 @@ function render_admin_accounts(): void
                 Array.from(select.options).forEach(option => {
                     option.selected = option.value === normalized;
                 });
+            };
+
+            const updateEmployeeSalaryNote = preferredSalary => {
+                const employeeId = String(employeeInput ? (employeeInput.value || '') : '');
+                const mappedSalary = employeeId !== '' && Object.prototype.hasOwnProperty.call(employeeSalaryMap, employeeId)
+                    ? Number(employeeSalaryMap[employeeId] || 0)
+                    : 0;
+                const salary = preferredSalary !== undefined && preferredSalary !== null && preferredSalary !== ''
+                    ? Number(preferredSalary || 0)
+                    : mappedSalary;
+                employeeSalaryNote.textContent = `Salary: Rs ${salary.toFixed(2)}`;
             };
 
             const updateTransferModes = preferredValue => {
@@ -2447,16 +2569,18 @@ function render_admin_accounts(): void
 
                 transferModeField.classList.toggle('hidden', modeSet.length === 0);
                 transferModeSelect.required = modeSet.length > 0;
+                transferModeSelect.disabled = modeSet.length === 0;
                 const requiresTransaction = methods.some(method => method !== 'CASH');
                 transactionField.classList.toggle('hidden', !requiresTransaction);
                 transactionInput.required = requiresTransaction;
+                transactionInput.disabled = !requiresTransaction;
                 if (!requiresTransaction) {
                     transactionInput.value = '';
                 }
             };
 
             const populateReimbursementOptions = selectedId => {
-                const employeeId = Number(employeeSelect.value || 0);
+                const employeeId = Number(employeeInput ? (employeeInput.value || 0) : 0);
                 const reimbursementRows = requestRows.filter(row => row.request_type === 'REIMBURSEMENT' && (!employeeId || Number(row.employee_id) === employeeId));
                 reimbursementSelect.innerHTML = '<option value="">Select approved reimbursement request</option>';
 
@@ -2475,25 +2599,30 @@ function render_admin_accounts(): void
             };
 
             const syncFormState = () => {
-                const paymentType = String(paymentTypeSelect.value || '');
+                const paymentType = String(paymentTypeInput ? (paymentTypeInput.value || '') : '');
                 const methods = selectedMethods();
                 const showReimbursement = paymentType === 'REIMBURSEMENT';
+                const showIncentive = paymentType === 'INCENTIVE';
+                updateEmployeeSalaryNote();
                 reimbursementField.classList.toggle('hidden', !showReimbursement);
+                incentiveField.classList.toggle('hidden', !showIncentive);
                 if (showReimbursement) {
                     populateReimbursementOptions(reimbursementSelect.value || '');
                 } else {
                     reimbursementSelect.innerHTML = '<option value="">Select approved reimbursement request</option>';
                 }
+                if (incentiveAmountInput) {
+                    incentiveAmountInput.value = showIncentive ? `Rs ${Number(amountInput.value || 0).toFixed(2)}` : '';
+                }
 
                 updateTransferModes(transferModeSelect.value || '');
 
-                const isValid = String(employeeSelect.value || '') !== ''
+                const isValid = String(employeeInput ? (employeeInput.value || '') : '') !== ''
                     && paymentType !== ''
                     && Number(amountInput.value || 0) > 0
                     && methods.length > 0
                     && (!transferModeSelect.required || String(transferModeSelect.value || '') !== '')
-                    && (!transactionInput.required || String(transactionInput.value || '').trim() !== '')
-                    && (!showReimbursement || String(reimbursementSelect.value || '') !== '');
+                    && (!transactionInput.required || String(transactionInput.value || '').trim() !== '');
 
                 submitButton.disabled = !isValid;
                 calculationNote.textContent = isValid
@@ -2503,8 +2632,18 @@ function render_admin_accounts(): void
 
             const fillForm = payload => {
                 paymentIdInput.value = String(payload.payment_id || 0);
-                setSelectValue(employeeSelect, payload.employee_id || '');
-                setSelectValue(paymentTypeSelect, payload.payment_type || '');
+                if (employeeInput) {
+                    employeeInput.value = String(payload.employee_id || '');
+                }
+                if (employeeDisplay) {
+                    employeeDisplay.value = payload.employee_label || employeeLabelMap[String(payload.employee_id || '')] || '';
+                }
+                if (paymentTypeInput) {
+                    paymentTypeInput.value = String(payload.payment_type || '');
+                }
+                if (paymentTypeDisplay) {
+                    paymentTypeDisplay.value = String(payload.payment_type || '');
+                }
                 amountInput.value = payload.amount || '';
                 setMethods(payload.payment_methods || []);
                 setSelectValue(transferModeSelect, payload.transfer_mode || '');
@@ -2514,6 +2653,7 @@ function render_admin_accounts(): void
                 proofHelp.textContent = payload.proof_name
                     ? `Current proof: ${payload.proof_name}. Upload a new file only if you want to replace it.`
                     : 'Accepted formats: JPG, PNG, PDF.';
+                updateEmployeeSalaryNote(payload.employee_salary);
                 populateReimbursementOptions(payload.reimbursement_id || '');
                 reimbursementSelect.value = String(payload.reimbursement_id || '');
                 syncFormState();
@@ -2530,6 +2670,9 @@ function render_admin_accounts(): void
             document.querySelectorAll('[data-payment-request]').forEach(button => {
                 button.addEventListener('click', () => {
                     const payload = JSON.parse(button.dataset.paymentRequest || '{}');
+                    if ((!Array.isArray(payload.payment_methods) || payload.payment_methods.length === 0) && payload.request_valid) {
+                        payload.payment_methods = ['CASH'];
+                    }
                     modalTitle.textContent = 'Pay Request';
                     modalCopy.textContent = 'The form has been prefilled from the selected payment request.';
                     submitButton.textContent = 'Pay';
@@ -2556,15 +2699,1012 @@ function render_admin_accounts(): void
                 });
             });
 
-            methodInputs.forEach(input => input.addEventListener('change', syncFormState));
-            employeeSelect.addEventListener('change', syncFormState);
-            paymentTypeSelect.addEventListener('change', syncFormState);
+            if (bankSelect) {
+                bankSelect.addEventListener('change', syncFormState);
+            }
             reimbursementSelect.addEventListener('change', syncFormState);
             amountInput.addEventListener('input', syncFormState);
             transferModeSelect.addEventListener('change', syncFormState);
             transactionInput.addEventListener('input', syncFormState);
 
             resetCreateForm();
+        });
+    </script>
+    <?php
+    render_footer();
+}
+
+function render_admin_accounts(): void
+{
+    require_role('admin');
+
+    $filters = payment_filter_params($_GET);
+    $section = match ((string) ($filters['section'] ?? 'approval')) {
+        'request' => 'approval',
+        'payment' => 'pay',
+        'report' => 'history',
+        default => (string) ($filters['section'] ?? 'approval'),
+    };
+    $requestMonth = (string) ($filters['request_month'] ?? date('Y-m'));
+    $approvalType = 'REIMBURSEMENT';
+    $approvalScope = (string) ($filters['approval_scope'] ?? 'employee');
+    $payGroup = (string) ($filters['pay_group'] ?? 'employee');
+
+    if (!empty($_GET['download_payslip_id'])) {
+        $payment = admin_payment_by_id((int) $_GET['download_payslip_id']);
+        if (!$payment) {
+            flash('error', 'Payment record not found for payslip download.');
+            redirect_to('admin_accounts', payment_redirect_query($filters));
+        }
+
+        stream_payment_payslip_pdf($payment);
+    }
+
+    $approvalRows = accounts_approval_rows($requestMonth, $approvalType, $approvalScope);
+    $payGroups = accounts_pay_group_rows($requestMonth, $payGroup, $filters['pay_types'] ?? []);
+    $historyRows = accounts_payment_history_rows($filters);
+    $vendorAccounts = accounts_vendor_accounts();
+    $paymentMethods = payment_bank_names();
+    $accountsPayrollBanks = ['SBI', 'CANARA', 'IOB', 'CASH'];
+    $payrollPaymentMethods = ['UPI', 'CASH'];
+    $transferModesMap = payment_transfer_modes_map();
+
+    $allEmployees = [];
+    foreach (['employee', 'vendor', 'freelancer'] as $scope) {
+        foreach (accounts_scope_members($scope) as $employee) {
+            $allEmployees[(int) ($employee['id'] ?? 0)] = $employee;
+        }
+    }
+    $allEmployees = array_values($allEmployees);
+    usort($allEmployees, static fn(array $left, array $right): int => strcmp((string) ($left['name'] ?? ''), (string) ($right['name'] ?? '')));
+
+    $historyQuery = payment_redirect_query(array_merge($filters, ['section' => 'history']));
+    $tabQueryBase = ['page' => 'admin_accounts', 'request_month' => $requestMonth];
+
+    render_header('Accounts', 'admin-accounts-page');
+    ?>
+    <section class="page-title">
+        <div>
+            <span class="eyebrow">Admin - Accounts</span>
+            <h1>Accounts</h1>
+            <p>Review approvals, process payouts, and audit pay history from one place.</p>
+        </div>
+    </section>
+
+    <section class="section-block accounts-tabs-panel">
+        <nav class="employee-tabs inline" aria-label="Accounts sections">
+            <a class="tab-link <?= $section === 'approval' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?<?= h(http_build_query(array_merge($tabQueryBase, ['section' => 'approval', 'approval_type' => $approvalType]))) ?>">Approval</a>
+            <a class="tab-link <?= $section === 'pay' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?<?= h(http_build_query(array_merge($tabQueryBase, ['section' => 'pay', 'pay_group' => $payGroup, 'pay_types' => $filters['pay_types'] ?? accounts_payable_types()]))) ?>">Pay</a>
+            <a class="tab-link <?= $section === 'history' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?<?= h(http_build_query(array_merge($tabQueryBase, ['section' => 'history']))) ?>">Pay History</a>
+        </nav>
+    </section>
+
+    <?php if ($section === 'approval'): ?>
+        <div class="spacer"></div>
+        <section class="section-block accounts-filter-shell">
+            <form method="get" class="accounts-toolbar-grid">
+                <input type="hidden" name="page" value="admin_accounts">
+                <input type="hidden" name="section" value="approval">
+                <div class="field">
+                    <label>Request Month</label>
+                    <input type="month" name="request_month" value="<?= h($requestMonth) ?>">
+                </div>
+                <div class="field">
+                    <label>Type</label>
+                    <select name="approval_type">
+                        <option value="SALARY" disabled>Salary</option>
+                        <option value="REIMBURSEMENT" selected>Reimbursement</option>
+                        <option value="INCENTIVE" disabled>Incentive</option>
+                        <option value="CONTRACTUAL" disabled>Contractual Employee Pay</option>
+                    </select>
+                </div>
+                <div class="accounts-toolbar-actions">
+                    <button class="button solid" type="submit">Apply</button>
+                </div>
+            </form>
+            <div class="spacer"></div>
+            <nav class="employee-tabs" aria-label="Approval scopes">
+                <?php foreach (['employee', 'vendor', 'freelancer'] as $scope): ?>
+                    <a class="tab-link <?= $approvalScope === $scope ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?<?= h(http_build_query(array_merge($tabQueryBase, ['section' => 'approval', 'approval_type' => $approvalType, 'approval_scope' => $scope]))) ?>"><?= h(accounts_scope_label($scope)) ?></a>
+                <?php endforeach; ?>
+            </nav>
+            <?php if ($approvalScope === 'vendor' && $vendorAccounts): ?>
+                <div class="spacer"></div>
+                <div class="field">
+                    <label>External Vendor</label>
+                    <select disabled>
+                        <?php foreach ($vendorAccounts as $vendor): ?>
+                            <option><?= h((string) ($vendor['name'] ?? '')) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            <?php endif; ?>
+        </section>
+
+        <div class="spacer"></div>
+        <section class="table-wrap">
+            <div class="data-toolbar">
+                <div class="split">
+                    <h2><?= $approvalType === 'REIMBURSEMENT' ? 'Reimbursement Approval Queue' : 'Approval Queue' ?></h2>
+                    <span class="badge"><?= count($approvalRows) ?> item(s)</span>
+                </div>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Employee ID</th>
+                        <th>Employee Name</th>
+                        <th><?= $approvalType === 'REIMBURSEMENT' ? 'Amount Requested' : 'Particular' ?></th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ($approvalRows): ?>
+                        <?php foreach ($approvalRows as $row): ?>
+                            <tr>
+                                <td><?= h((string) ($row['employee_emp_id'] ?? '-')) ?></td>
+                                <td><?= h((string) ($row['employee_name'] ?? '')) ?></td>
+                                <td>
+                                    <?php if ($approvalType === 'REIMBURSEMENT'): ?>
+                                        Rs <?= h(number_format((float) ($row['amount_requested'] ?? 0), 2)) ?>
+                                        <div class="hint"><?= h((string) ($row['category'] ?? '')) ?></div>
+                                    <?php else: ?>
+                                        <?= h((string) ($row['request_type'] ?? '')) ?><br>
+                                        <span class="hint">Rs <?= h(number_format((float) ($row['amount'] ?? 0), 2)) ?></span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if ($approvalType === 'REIMBURSEMENT'): ?>
+                                        <div class="payment-action-row">
+                                            <a
+                                                class="button solid small"
+                                                href="javascript:void(0)"
+                                                role="button"
+                                                data-reimbursement-id="<?= (int) ($row['id'] ?? 0) ?>"
+                                                data-employee-name="<?= h((string) ($row['employee_name'] ?? '')) ?>"
+                                                data-amount-requested="<?= h(number_format((float) ($row['amount_requested'] ?? 0), 2, '.', '')) ?>"
+                                                data-particular="<?= h((string) ($row['category'] ?? '')) ?>"
+                                                data-details="<?= h((string) ($row['expense_description'] ?? '')) ?>"
+                                                data-proof-url="<?= h(asset_url((string) ($row['attachment_path'] ?? ''))) ?>"
+                                                data-proof-mime="<?= h((string) ($row['attachment_mime'] ?? '')) ?>"
+                                                onclick="return window.openAccountsApproval(event, this);"
+                                            >Approve</a>
+                                            <form method="post" onsubmit="return confirm('Deny this reimbursement request?');">
+                                                <?= csrf_field() ?>
+                                                <input type="hidden" name="action" value="admin_deny_reimbursement">
+                                                <input type="hidden" name="reimbursement_id" value="<?= (int) ($row['id'] ?? 0) ?>">
+                                                <input type="hidden" name="filter_request_month" value="<?= h($requestMonth) ?>">
+                                                <button class="button outline small" type="submit">Deny</button>
+                                            </form>
+                                        </div>
+                                    <?php else: ?>
+                                        <div class="payment-action-row">
+                                            <a
+                                                class="button solid small"
+                                                href="javascript:void(0)"
+                                                role="button"
+                                                data-approval-mode="request"
+                                                data-request-key="<?= h((string) ($row['request_key'] ?? '')) ?>"
+                                                data-employee-name="<?= h((string) ($row['employee_name'] ?? '')) ?>"
+                                                data-amount-requested="<?= h(number_format((float) ($row['amount'] ?? 0), 2, '.', '')) ?>"
+                                                data-particular="<?= h((string) ($row['request_type'] ?? '')) ?>"
+                                                data-details="Approval request for <?= h($requestMonth) ?>"
+                                                data-proof-url=""
+                                                data-proof-mime=""
+                                                onclick="return window.openAccountsApproval(event, this);"
+                                            >Approve</a>
+                                            <form method="post">
+                                                <?= csrf_field() ?>
+                                                <input type="hidden" name="action" value="admin_reject_payment_request">
+                                                <input type="hidden" name="request_key" value="<?= h((string) ($row['request_key'] ?? '')) ?>">
+                                                <input type="hidden" name="filter_section" value="approval">
+                                                <input type="hidden" name="filter_request_month" value="<?= h($requestMonth) ?>">
+                                                <input type="hidden" name="filter_approval_type" value="<?= h($approvalType) ?>">
+                                                <button class="button outline small" type="submit">Deny</button>
+                                            </form>
+                                        </div>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <tr><td colspan="4" class="muted center"><?= $approvalScope === 'vendor' ? 'No pending vendor reimbursement requests are available for the selected filters.' : 'No approval items are available for the selected filters.' ?></td></tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </section>
+    <?php elseif ($section === 'pay'): ?>
+        <div class="spacer"></div>
+        <section class="section-block accounts-filter-shell">
+            <form method="get" class="stack-form">
+                <input type="hidden" name="page" value="admin_accounts">
+                <input type="hidden" name="section" value="pay">
+                <input type="hidden" name="pay_types_submitted" value="1">
+                <div class="accounts-toolbar-grid">
+                    <div class="field">
+                        <label>Pay Month</label>
+                        <input type="month" name="request_month" value="<?= h($requestMonth) ?>">
+                    </div>
+                    <div class="field">
+                        <label>Type</label>
+                        <div class="accounts-type-grid">
+                            <?php foreach (accounts_payable_types() as $type): ?>
+                                <label class="accounts-type-option">
+                                    <input type="checkbox" name="pay_types[]" value="<?= h($type) ?>" <?= in_array($type, $filters['pay_types'] ?? [], true) ? 'checked' : '' ?>>
+                                    <span><?= h(ucfirst(strtolower($type))) ?></span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                    <div class="accounts-toolbar-actions">
+                        <button class="button solid" type="submit">Apply</button>
+                    </div>
+                </div>
+                <div class="spacer"></div>
+                <nav class="employee-tabs" aria-label="Pay scopes" data-pay-scope-tabs>
+                    <?php foreach (['employee', 'vendor', 'freelancer'] as $scope): ?>
+                        <a class="tab-link <?= $payGroup === $scope ? 'active' : '' ?>" data-pay-scope-link="<?= h($scope) ?>" href="<?= h(BASE_URL) ?>?<?= h(http_build_query(array_merge($tabQueryBase, ['section' => 'pay', 'pay_group' => $scope, 'pay_types' => $filters['pay_types'] ?? accounts_payable_types()]))) ?>"><?= h(accounts_scope_label($scope)) ?></a>
+                    <?php endforeach; ?>
+                </nav>
+                <?php if ($payGroup === 'vendor' && $vendorAccounts): ?>
+                    <div class="spacer"></div>
+                    <div class="field">
+                        <label>External Vendor</label>
+                        <select disabled>
+                            <?php foreach ($vendorAccounts as $vendor): ?>
+                                <option><?= h((string) ($vendor['name'] ?? '')) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                <?php endif; ?>
+            </form>
+        </section>
+
+        <div class="spacer"></div>
+        <section class="accounts-group-grid">
+            <?php if ($payGroups): ?>
+                <?php foreach ($payGroups as $group): ?>
+                    <?php $groupPayload = [
+                        'employee_id' => (int) ($group['employee_id'] ?? 0),
+                        'employee_name' => (string) ($group['employee_name'] ?? ''),
+                        'employee_emp_id' => (string) ($group['employee_emp_id'] ?? ''),
+                        'items' => $group['items'] ?? [],
+                    ]; ?>
+                    <article class="section-block accounts-group-card" data-pay-card="<?= h((string) ($group['employee_id'] ?? 0)) ?>">
+                        <div class="data-toolbar accounts-group-head">
+                            <div class="accounts-group-copy">
+                                <h2><?= h((string) ($group['employee_name'] ?? '')) ?></h2>
+                                <p class="hint"><?= h((string) ($group['employee_emp_id'] ?? '')) ?><?= !empty($group['vendor_name']) ? ' • ' . h((string) $group['vendor_name']) : '' ?></p>
+                            </div>
+                            <button class="button solid" type="button" data-pay-open="<?= h(json_encode($groupPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT)) ?>">Pay</button>
+                        </div>
+                        <div class="accounts-pay-type-grid">
+                            <?php foreach (($group['items'] ?? []) as $index => $item): ?>
+                                <label class="accounts-pay-type-option">
+                                    <input type="checkbox" class="accounts-pay-select" data-item-index="<?= (int) $index ?>" checked>
+                                    <span><?= h((string) ($item['label'] ?? $item['payment_type'] ?? '')) ?> - Rs <?= h(number_format((float) ($item['actual_amount'] ?? 0), 2)) ?></span>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                    </article>
+                <?php endforeach; ?>
+            <?php else: ?>
+                <section class="section-block"><p class="muted center">No payable items are available for the selected scope and filters.</p></section>
+            <?php endif; ?>
+        </section>
+    <?php else: ?>
+        <div class="spacer"></div>
+        <section class="section-block accounts-filter-shell">
+            <form method="get" class="stack-form">
+                <input type="hidden" name="page" value="admin_accounts">
+                <input type="hidden" name="section" value="history">
+                <input type="hidden" name="pay_group" value="<?= h($payGroup) ?>">
+                <div class="accounts-history-filter-grid">
+                    <div class="field">
+                        <label>Account</label>
+                        <select name="history_accounts">
+                            <option value="">All accounts</option>
+                            <?php foreach (payment_bank_names() as $account): ?>
+                                <option value="<?= h($account) ?>" <?= (($filters['history_accounts'][0] ?? '') === $account) ? 'selected' : '' ?>><?= h($account) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Employee</label>
+                        <select name="history_employee_ids">
+                            <option value="">All employees</option>
+                            <?php foreach ($allEmployees as $employee): ?>
+                                <option value="<?= (int) ($employee['id'] ?? 0) ?>" <?= (((int) ($filters['history_employee_ids'][0] ?? 0)) === (int) ($employee['id'] ?? 0)) ? 'selected' : '' ?>><?= h((string) ($employee['name'] ?? '')) ?> (<?= h((string) ($employee['emp_id'] ?? '')) ?>)</option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>From Date</label>
+                        <input type="date" name="from_date" value="<?= h((string) ($filters['from_date'] ?? '')) ?>">
+                    </div>
+                    <div class="field">
+                        <label>To Date</label>
+                        <input type="date" name="to_date" value="<?= h((string) ($filters['to_date'] ?? '')) ?>">
+                    </div>
+                    <div class="accounts-toolbar-actions">
+                        <button class="button solid" type="submit">Apply Filters</button>
+                        <a class="button outline" href="<?= h(BASE_URL) ?>?<?= h(http_build_query(array_merge($tabQueryBase, ['section' => 'history']))) ?>">Reset</a>
+                    </div>
+                </div>
+                <div class="spacer"></div>
+                <nav class="employee-tabs" aria-label="History scopes" data-history-scope-tabs>
+                    <?php foreach (['employee', 'vendor', 'freelancer'] as $scope): ?>
+                        <a class="tab-link <?= $payGroup === $scope ? 'active' : '' ?>" data-history-scope-link="<?= h($scope) ?>" href="<?= h(BASE_URL) ?>?<?= h(http_build_query(array_merge($tabQueryBase, [
+                            'section' => 'history',
+                            'pay_group' => $scope,
+                            'history_accounts' => $filters['history_accounts'] ?? [],
+                            'history_employee_ids' => $filters['history_employee_ids'] ?? [],
+                            'history_vendor_ids' => $filters['history_vendor_ids'] ?? [],
+                            'from_date' => $filters['from_date'] ?? '',
+                            'to_date' => $filters['to_date'] ?? '',
+                        ]))) ?>"><?= h(accounts_scope_label($scope)) ?></a>
+                    <?php endforeach; ?>
+                </nav>
+                <?php if ($payGroup === 'vendor' && $vendorAccounts): ?>
+                    <div class="spacer"></div>
+                    <div class="field">
+                        <label>External Vendor</label>
+                        <select disabled>
+                            <?php foreach ($vendorAccounts as $vendor): ?>
+                                <option><?= h((string) ($vendor['name'] ?? '')) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                <?php endif; ?>
+            </form>
+        </section>
+
+        <div class="spacer"></div>
+        <section class="table-wrap">
+            <div class="data-toolbar">
+                <div class="split">
+                    <h2>Pay History</h2>
+                    <span class="badge"><?= count($historyRows) ?> payment(s)</span>
+                </div>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date of Payment</th>
+                        <th>Employee ID</th>
+                        <th>Employee Name</th>
+                        <th>Paid Amount</th>
+                        <th>Particular</th>
+                        <th>Account</th>
+                        <th>Method</th>
+                        <th>Proof of Payment</th>
+                        <th>Challan</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ($historyRows): ?>
+                        <?php foreach ($historyRows as $paymentRow):
+                            $proofUrl = !empty($paymentRow['proof_path']) ? asset_url((string) $paymentRow['proof_path']) : '';
+                            $methods = payment_methods_for_record($paymentRow);
+                            $transferModeLabel = strtoupper(trim((string) ($paymentRow['transfer_mode'] ?? '')));
+                            $methodLabel = $transferModeLabel !== ''
+                                ? $transferModeLabel
+                                : (in_array('CASH', $methods, true) ? 'Cash' : payment_methods_label($methods));
+                            $payslipUrl = BASE_URL . '?' . http_build_query(array_merge([
+                                'page' => 'admin_accounts',
+                                'download_payslip_id' => (int) $paymentRow['id'],
+                            ], $historyQuery));
+                            $proofMime = (string) ($paymentRow['proof_mime'] ?? '');
+                            ?>
+                            <tr>
+                                <td><?= h(date('d M Y', strtotime((string) ($paymentRow['payment_date'] ?? date('Y-m-d'))))) ?></td>
+                                <td><?= h((string) ($paymentRow['employee_emp_id'] ?? '-')) ?></td>
+                                <td><?= h((string) ($paymentRow['employee_name'] ?? '')) ?></td>
+                                <td>Rs <?= h(number_format((float) ($paymentRow['amount'] ?? 0), 2)) ?></td>
+                                <td>
+                                    <?php foreach (payment_breakdown_summary_lines($paymentRow) as $line): ?>
+                                        <div><?= h($line) ?></div>
+                                    <?php endforeach; ?>
+                                </td>
+                                <td><?= h((string) ($paymentRow['bank_name'] ?? '-')) ?></td>
+                                <td><?= h($methodLabel) ?></td>
+                                <td>
+                                    <?php if ($proofUrl !== ''): ?>
+                                        <?php if (str_starts_with($proofMime, 'image/')): ?>
+                                            <img class="accounts-proof-thumb" src="<?= h($proofUrl) ?>" alt="Payment proof preview">
+                                        <?php endif; ?>
+                                        <div class="payment-action-row">
+                                            <a class="button outline small" href="<?= h($proofUrl) ?>" target="_blank" rel="noopener">View</a>
+                                            <a class="button outline small" href="<?= h($proofUrl) ?>" download>Download</a>
+                                        </div>
+                                    <?php else: ?>
+                                        <span class="hint">No proof</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td><a class="button outline small" href="<?= h($payslipUrl) ?>">Download Payslip</a></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <tr><td colspan="9" class="muted center">No payments found for the selected filters.</td></tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </section>
+    <?php endif; ?>
+
+    <div class="modal" id="accounts-approval-modal">
+        <div class="modal-card accounts-approval-card">
+            <button class="modal-close" type="button" data-close-modal>&times;</button>
+            <span class="eyebrow">Approval</span>
+            <h2>Step 1: Review Request</h2>
+            <form method="post" class="stack-form" id="accounts-approval-form">
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="admin_approve_reimbursement" id="accounts-approval-action">
+                <input type="hidden" name="reimbursement_id" id="accounts-approval-reimbursement-id" value="0">
+                <input type="hidden" name="request_key" id="accounts-approval-request-key" value="">
+                <input type="hidden" name="filter_section" value="approval">
+                <input type="hidden" name="filter_approval_type" id="accounts-approval-type" value="<?= h($approvalType) ?>">
+                <input type="hidden" name="filter_request_month" value="<?= h($requestMonth) ?>">
+                <div class="accounts-approval-summary">
+                    <div class="list-item"><strong>Total Amount:</strong> Rs <span id="accounts-approval-total">0.00</span></div>
+                    <div class="list-item"><strong>Particular:</strong> <span id="accounts-approval-particular">-</span></div>
+                    <div class="list-item"><strong>Details:</strong> <span id="accounts-approval-details">-</span></div>
+                </div>
+                <div id="accounts-approval-breakdown" class="accounts-breakdown-grid">
+                    <div class="accounts-breakdown-card">
+                        <strong>Proof</strong>
+                        <div id="accounts-approval-proof-wrap" class="accounts-approval-proof-wrap">
+                            <p class="hint">No proof uploaded.</p>
+                        </div>
+                    </div>
+                    <div class="accounts-breakdown-card">
+                        <strong>Edit Amount</strong>
+                        <label style="margin-top:10px;">
+                            <input type="number" name="approved_amount[REIMBURSEMENT]" id="accounts-approval-edit-amount" min="0" step="0.01" value="0.00" required>
+                        </label>
+                    </div>
+                    <div class="accounts-breakdown-card">
+                        <strong>Approved Amount</strong>
+                        <div class="list-item"><strong>Final Amount:</strong> Rs <span id="accounts-approval-final-amount">0.00</span></div>
+                    </div>
+                </div>
+                <button class="button solid" type="button" id="accounts-approval-next" onclick="window.goToAccountsApprovalConfirm(); return false;">Next</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal" id="accounts-approval-confirm-modal">
+        <div class="modal-card accounts-approval-card">
+            <button class="modal-close" type="button" data-close-modal>&times;</button>
+            <span class="eyebrow">Confirmation</span>
+            <h2>Step 2: Confirm Approval</h2>
+            <div class="accounts-approval-summary">
+                <div class="list-item"><strong>Employee Name:</strong> <span id="accounts-approval-confirm-employee">-</span></div>
+                <div class="list-item"><strong>Approved Amount:</strong> Rs <span id="accounts-approval-confirm-amount">0.00</span></div>
+            </div>
+            <p id="accounts-approval-confirm-copy"></p>
+            <div class="payment-action-row">
+                <button class="button solid" type="submit" form="accounts-approval-form">Approve</button>
+                <button class="button outline" type="button" data-close-modal>Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="accounts-allocation-modal">
+        <div class="modal-card accounts-payment-card">
+            <button class="modal-close" type="button" data-close-modal>&times;</button>
+            <span class="eyebrow">Allocation</span>
+            <h2>Payment Allocation</h2>
+            <form class="stack-form" id="accounts-allocation-form">
+                <div class="accounts-payment-grid">
+                    <div class="field">
+                        <label>Employee ID</label>
+                        <input type="text" id="accounts-allocation-emp-id" readonly>
+                    </div>
+                    <div class="field">
+                        <label>Employee Name</label>
+                        <input type="text" id="accounts-allocation-emp-name" readonly>
+                    </div>
+                </div>
+                <div id="accounts-allocation-rows" class="accounts-breakdown-grid"></div>
+                <div class="accounts-total-bar">
+                    <div class="list-item"><strong>Total Actual:</strong> Rs <span id="accounts-total-actual">0.00</span></div>
+                    <div class="list-item"><strong>Total Payable:</strong> Rs <span id="accounts-total-payable">0.00</span></div>
+                </div>
+                <button class="button solid" type="button" id="accounts-allocation-next">Next</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal" id="accounts-payroll-payment-modal">
+        <div class="modal-card accounts-payment-card">
+            <button class="modal-close" type="button" data-close-modal>&times;</button>
+            <span class="eyebrow">Payment Form</span>
+            <h2>Process Payment</h2>
+            <form method="post" enctype="multipart/form-data" class="stack-form" id="accounts-payroll-payment-form">
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="admin_process_accounts_payment">
+                <input type="hidden" name="filter_section" value="pay">
+                <input type="hidden" name="filter_request_month" value="<?= h($requestMonth) ?>">
+                <input type="hidden" name="filter_pay_group" value="<?= h($payGroup) ?>">
+                <?php foreach (($filters['pay_types'] ?? []) as $type): ?>
+                    <input type="hidden" name="filter_pay_types[]" value="<?= h($type) ?>">
+                <?php endforeach; ?>
+                <input type="hidden" name="employee_id" id="accounts-payroll-payment-employee-id" value="0">
+                <div class="accounts-payment-grid">
+                    <div class="field">
+                        <label>Employee ID</label>
+                        <input type="text" id="accounts-payroll-payment-employee-code" readonly>
+                    </div>
+                    <div class="field">
+                        <label>Employee Name</label>
+                        <input type="text" id="accounts-payroll-payment-employee-name" readonly>
+                    </div>
+                </div>
+                <div id="accounts-payroll-payment-breakdown-hidden"></div>
+                <div class="accounts-payment-grid">
+                    <div class="field">
+                        <label>Payment Type</label>
+                        <input type="text" id="accounts-payroll-payment-type" readonly>
+                    </div>
+                    <div class="field accounts-conditional-field hidden" id="accounts-payroll-reimbursement-field">
+                        <label>Select approved reimbursement request</label>
+                        <select id="accounts-payroll-reimbursement-select">
+                            <option value="">Select approved reimbursement request</option>
+                        </select>
+                    </div>
+                    <div class="field accounts-conditional-field hidden" id="accounts-payroll-incentive-field">
+                        <label>Calculated Incentive</label>
+                        <input type="text" id="accounts-payroll-incentive-amount" readonly>
+                    </div>
+                    <div class="field">
+                        <label>Amount</label>
+                        <input type="number" name="amount" id="accounts-payroll-payment-amount" min="0.01" step="0.01" required readonly>
+                    </div>
+                    <div class="field">
+                        <label>Bank Name</label>
+                        <select name="payment_methods" id="accounts-payroll-bank-name" required>
+                            <option value="" selected disabled>Select bank</option>
+                            <?php foreach ($accountsPayrollBanks as $method): ?>
+                                <option value="<?= h($method) ?>"><?= h($method) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="field" id="accounts-payroll-transfer-mode-field">
+                        <label id="accounts-payroll-transfer-mode-label">Transfer Mode</label>
+                        <select name="transfer_mode" id="accounts-payroll-transfer-mode">
+                            <option value="" selected disabled>Select transfer mode</option>
+                        </select>
+                    </div>
+                    <div class="field" id="accounts-payroll-transaction-id-field">
+                        <label>Transaction ID</label>
+                        <input type="text" name="transaction_id" id="accounts-payroll-transaction-id">
+                    </div>
+                    <div class="field">
+                        <label>Payment Date</label>
+                        <input type="date" name="payment_date" id="accounts-payroll-payment-date" value="<?= h(date('Y-m-d')) ?>" required>
+                    </div>
+                    <div class="field">
+                        <label>Proof Upload</label>
+                        <input type="file" name="proof_upload" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf">
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Remarks</label>
+                    <textarea name="remarks" rows="3" placeholder="Optional notes for this payment"></textarea>
+                </div>
+                <button class="button solid" type="submit">Pay</button>
+            </form>
+        </div>
+    </div>
+
+    <style>
+        .accounts-tabs-panel { padding-bottom: 18px; }
+        .accounts-tabs-panel .employee-tabs { display: flex; gap: 10px; flex-wrap: wrap; }
+        .accounts-filter-shell { padding-bottom: 18px; }
+        .accounts-toolbar-grid,
+        .accounts-history-filter-grid { display: grid; gap: 16px; align-items: end; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .accounts-history-filter-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+        .accounts-toolbar-actions { display: flex; gap: 10px; align-items: end; }
+        .accounts-filter-shell .accounts-toolbar-grid { grid-template-columns: minmax(220px, 1fr) minmax(420px, 1.4fr) auto; }
+        .accounts-filter-shell .accounts-toolbar-grid .field { min-width: 0; }
+        .accounts-type-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+        .accounts-type-option { display: inline-flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid rgba(36, 52, 109, 0.12); border-radius: 16px; background: rgba(248, 250, 255, 0.9); white-space: nowrap; }
+        .accounts-type-option input { width: auto; min-height: auto; margin: 0; }
+        .accounts-group-grid { display: grid; gap: 18px; }
+        .accounts-group-card { padding: 22px; display: flex; flex-direction: column; }
+        .accounts-group-head { align-items: center; gap: 14px; margin-bottom: 10px; }
+        .accounts-group-copy h2 { margin-bottom: 4px; }
+        .accounts-pay-type-grid { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: flex-start; }
+        .accounts-pay-type-option { display: inline-flex; align-items: center; gap: 10px; padding: 14px 16px; border: 1px solid rgba(36, 52, 109, 0.12); border-radius: 16px; background: rgba(248, 250, 255, 0.9); }
+        .accounts-pay-type-option input { width: 18px; height: 18px; margin: 0; }
+        .accounts-pay-table th,
+        .accounts-pay-table td { vertical-align: middle; }
+        .accounts-pay-table tbody tr:hover { background: rgba(79, 70, 229, 0.04); }
+        .accounts-pay-amount { white-space: nowrap; font-weight: 700; color: #23346d; }
+        .accounts-pay-check { text-align: center; width: 100px; }
+        .accounts-pay-check input { width: 18px; height: 18px; }
+        .accounts-payment-card,
+        .accounts-approval-card { width: min(920px, 100%); }
+        .accounts-payment-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+        .accounts-method-field { grid-column: 1 / -1; }
+        .payment-method-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+        .payment-method-option { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid rgba(36, 52, 109, 0.12); border-radius: 16px; background: rgba(248, 250, 255, 0.9); }
+        .payment-method-option input { width: auto; min-height: auto; margin: 0; }
+        .payment-action-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .payment-action-row form { margin: 0; }
+        .accounts-breakdown-grid { display: grid; gap: 14px; }
+        .accounts-breakdown-card { border: 1px solid rgba(36, 52, 109, 0.1); border-radius: 16px; padding: 14px; background: rgba(248, 250, 255, 0.72); }
+        .accounts-breakdown-card embed,
+        .accounts-breakdown-card img { width: 100%; max-height: 180px; object-fit: cover; border-radius: 12px; margin-top: 10px; }
+        .accounts-approval-summary { display: grid; gap: 12px; }
+        .accounts-total-bar { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .accounts-proof-thumb { width: 54px; height: 54px; object-fit: cover; border-radius: 10px; display: block; margin-bottom: 8px; }
+        @media (max-width: 1100px) {
+            .accounts-filter-shell .accounts-toolbar-grid { grid-template-columns: 1fr 1fr; }
+            .accounts-history-filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .payment-method-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        @media (max-width: 760px) {
+            .accounts-toolbar-grid,
+            .accounts-history-filter-grid,
+            .accounts-payment-grid,
+            .accounts-total-bar,
+            .payment-method-grid { grid-template-columns: 1fr; }
+            .accounts-filter-shell .accounts-toolbar-grid { grid-template-columns: 1fr; }
+            .payment-action-row { flex-direction: column; align-items: stretch; }
+        }
+    </style>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const transferModeMap = <?= json_encode($transferModesMap, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
+            const approvalForm = document.getElementById('accounts-approval-form');
+            const approvalBreakdown = document.getElementById('accounts-approval-breakdown');
+            const approvalTotal = document.getElementById('accounts-approval-total');
+            const approvalParticular = document.getElementById('accounts-approval-particular');
+            const approvalDetails = document.getElementById('accounts-approval-details');
+            const approvalProofWrap = document.getElementById('accounts-approval-proof-wrap');
+            const approvalAmountInput = document.getElementById('accounts-approval-edit-amount');
+            const approvalFinalAmount = document.getElementById('accounts-approval-final-amount');
+            const approvalActionInput = document.getElementById('accounts-approval-action');
+            const approvalRequestKeyInput = document.getElementById('accounts-approval-request-key');
+            const approvalTypeInput = document.getElementById('accounts-approval-type');
+            const approvalId = document.getElementById('accounts-approval-reimbursement-id');
+            const approvalNext = document.getElementById('accounts-approval-next');
+            const approvalConfirmCopy = document.getElementById('accounts-approval-confirm-copy');
+            const approvalConfirmEmployee = document.getElementById('accounts-approval-confirm-employee');
+            const approvalConfirmAmount = document.getElementById('accounts-approval-confirm-amount');
+            const allocationForm = document.getElementById('accounts-allocation-form');
+            const allocationRows = document.getElementById('accounts-allocation-rows');
+            const totalActual = document.getElementById('accounts-total-actual');
+            const totalPayable = document.getElementById('accounts-total-payable');
+            const paymentForm = document.getElementById('accounts-payroll-payment-form');
+            const paymentEmployeeId = document.getElementById('accounts-payroll-payment-employee-id');
+            const paymentEmployeeCode = document.getElementById('accounts-payroll-payment-employee-code');
+            const paymentEmployeeName = document.getElementById('accounts-payroll-payment-employee-name');
+            const paymentBreakdownHidden = document.getElementById('accounts-payroll-payment-breakdown-hidden');
+            const paymentTypeDisplay = document.getElementById('accounts-payroll-payment-type');
+            const paymentAmountInput = document.getElementById('accounts-payroll-payment-amount');
+            const paymentBankSelect = document.getElementById('accounts-payroll-bank-name');
+            const payrollReimbursementField = document.getElementById('accounts-payroll-reimbursement-field');
+            const payrollReimbursementSelect = document.getElementById('accounts-payroll-reimbursement-select');
+            const payrollIncentiveField = document.getElementById('accounts-payroll-incentive-field');
+            const payrollIncentiveAmount = document.getElementById('accounts-payroll-incentive-amount');
+            const transferModeField = document.getElementById('accounts-payroll-transfer-mode-field');
+            const transferModeLabel = document.getElementById('accounts-payroll-transfer-mode-label');
+            const transferModeSelect = document.getElementById('accounts-payroll-transfer-mode');
+            const transactionField = document.getElementById('accounts-payroll-transaction-id-field');
+            const transactionInput = document.getElementById('accounts-payroll-transaction-id');
+            const payFilterForm = document.querySelector('form.stack-form input[name="section"][value="pay"]')?.closest('form');
+            const historyFilterForm = document.querySelector('form.stack-form input[name="section"][value="history"]')?.closest('form');
+
+            const openModal = id => {
+                const target = document.getElementById(id);
+                if (target) {
+                    target.classList.add('open');
+                }
+            };
+
+            const closeModal = id => {
+                const target = document.getElementById(id);
+                if (target) {
+                    target.classList.remove('open');
+                }
+            };
+
+            document.querySelectorAll('[data-close-modal]').forEach(button => {
+                button.addEventListener('click', () => {
+                    const modal = button.closest('.modal');
+                    if (modal) {
+                        modal.classList.remove('open');
+                    }
+                });
+            });
+
+            const updateTransferModes = preferredValue => {
+                if (!transferModeSelect || !transferModeField || !transactionField || !transactionInput) {
+                    return;
+                }
+                const selectedBank = String(paymentBankSelect ? (paymentBankSelect.value || '') : '');
+                const methods = selectedBank !== '' ? [selectedBank] : [];
+                const availableModes = [];
+                methods.forEach(method => {
+                    (transferModeMap[method] || []).forEach(mode => {
+                        if (!availableModes.includes(mode)) {
+                            availableModes.push(mode);
+                        }
+                    });
+                });
+                transferModeSelect.innerHTML = '';
+                const placeholder = document.createElement('option');
+                placeholder.value = '';
+                placeholder.textContent = availableModes.length ? 'Select transfer mode' : 'Not required';
+                placeholder.selected = true;
+                placeholder.disabled = availableModes.length > 0;
+                transferModeSelect.appendChild(placeholder);
+
+                availableModes.forEach(mode => {
+                    const option = document.createElement('option');
+                    option.value = mode;
+                    option.textContent = mode;
+                    option.selected = String(preferredValue || '') === mode;
+                    transferModeSelect.appendChild(option);
+                });
+
+                if (transferModeLabel) {
+                    transferModeLabel.textContent = selectedBank === 'IOB' ? 'UPI Option' : 'Transfer Mode';
+                }
+                transferModeField.classList.toggle('hidden', selectedBank === 'CASH' || availableModes.length === 0);
+                transferModeSelect.required = availableModes.length > 0;
+                transferModeSelect.disabled = selectedBank === 'CASH' || availableModes.length === 0;
+                const requiresTransaction = methods.some(method => method !== 'CASH');
+                transactionField.classList.toggle('hidden', !requiresTransaction);
+                transactionInput.required = requiresTransaction;
+                transactionInput.disabled = !requiresTransaction;
+                if (!requiresTransaction) {
+                    transactionInput.value = '';
+                }
+            };
+
+            if (paymentBankSelect) {
+                paymentBankSelect.addEventListener('change', () => updateTransferModes(''));
+            }
+            updateTransferModes('');
+
+            window.openAccountsApproval = (event, trigger) => {
+                if (event) {
+                    if (typeof event.preventDefault === 'function') {
+                        event.preventDefault();
+                    }
+                    if (typeof event.stopPropagation === 'function') {
+                        event.stopPropagation();
+                    }
+                }
+                if (!trigger || !approvalForm) {
+                    return false;
+                }
+                const requestedAmount = Number(trigger.dataset.amountRequested || 0);
+                const proofUrl = String(trigger.dataset.proofUrl || '');
+                const proofMime = String(trigger.dataset.proofMime || '');
+                const approvalMode = String(trigger.dataset.approvalMode || 'reimbursement');
+                const approvalCategory = String(trigger.dataset.particular || '').toUpperCase();
+                approvalActionInput.value = approvalMode === 'request' ? 'admin_approve_payment_request' : 'admin_approve_reimbursement';
+                approvalRequestKeyInput.value = approvalMode === 'request' ? String(trigger.dataset.requestKey || '') : '';
+                approvalId.value = approvalMode === 'request' ? '0' : String(trigger.dataset.reimbursementId || 0);
+                approvalTypeInput.value = String('<?= h($approvalType) ?>');
+                approvalAmountInput.name = approvalMode === 'request'
+                    ? 'approved_amount[REIMBURSEMENT]'
+                    : `approved_amount[${approvalCategory || 'REIMBURSEMENT'}]`;
+                approvalTotal.textContent = requestedAmount.toFixed(2);
+                approvalParticular.textContent = trigger.dataset.particular || '-';
+                approvalDetails.textContent = trigger.dataset.details || '-';
+                approvalForm.dataset.employeeName = String(trigger.dataset.employeeName || '');
+                approvalAmountInput.value = requestedAmount.toFixed(2);
+                approvalAmountInput.max = requestedAmount.toFixed(2);
+                approvalAmountInput.required = true;
+                approvalAmountInput.readOnly = false;
+                approvalFinalAmount.textContent = requestedAmount.toFixed(2);
+
+                if (proofUrl !== '') {
+                    approvalProofWrap.innerHTML = proofMime.indexOf('application/pdf') === 0
+                        ? `<embed src="${proofUrl}" type="application/pdf">`
+                        : `<img src="${proofUrl}" alt="Reimbursement proof">`;
+                } else {
+                    approvalProofWrap.innerHTML = '<p class="hint">No proof uploaded.</p>';
+                }
+                openModal('accounts-approval-modal');
+                return false;
+            };
+
+            if (approvalAmountInput && approvalFinalAmount) {
+                approvalAmountInput.addEventListener('input', () => {
+                    const value = Number(approvalAmountInput.value || 0);
+                    approvalFinalAmount.textContent = value.toFixed(2);
+                });
+            }
+
+            window.goToAccountsApprovalConfirm = () => {
+                if (!approvalForm) {
+                    return;
+                }
+                const value = Number(approvalAmountInput.value || 0);
+                const max = Number(approvalAmountInput.max || 0);
+                if (value < 0 || value > max) {
+                    approvalAmountInput.focus();
+                    return;
+                }
+                approvalConfirmEmployee.textContent = approvalForm.dataset.employeeName || '-';
+                approvalConfirmAmount.textContent = value.toFixed(2);
+                approvalConfirmCopy.textContent = approvalActionInput.value === 'admin_approve_payment_request'
+                    ? 'Click Approve to complete this approval request.'
+                    : 'Click Approve to complete this reimbursement approval.';
+                closeModal('accounts-approval-modal');
+                openModal('accounts-approval-confirm-modal');
+            };
+
+            const refreshAllocationTotals = () => {
+                const inputs = Array.from(allocationRows.querySelectorAll('[data-payable-input]'));
+                totalActual.textContent = inputs.reduce((sum, input) => sum + Number(input.dataset.actual || 0), 0).toFixed(2);
+                totalPayable.textContent = inputs.reduce((sum, input) => sum + Number(input.value || 0), 0).toFixed(2);
+            };
+
+            document.querySelectorAll('[data-pay-open]').forEach(button => {
+                button.addEventListener('click', () => {
+                    const payload = JSON.parse(button.dataset.payOpen || '{}');
+                    const card = button.closest('[data-pay-card]');
+                    const checkedIndexes = Array.from(card.querySelectorAll('.accounts-pay-select:checked')).map(input => Number(input.dataset.itemIndex || -1));
+                    const items = (payload.items || []).filter((_, index) => checkedIndexes.includes(index));
+                    if (items.length === 0) {
+                        return;
+                    }
+
+                    document.getElementById('accounts-allocation-emp-id').value = payload.employee_emp_id || '';
+                    document.getElementById('accounts-allocation-emp-name').value = payload.employee_name || '';
+                    allocationRows.innerHTML = '';
+                    allocationForm.dataset.employeeId = String(payload.employee_id || 0);
+                    allocationForm.dataset.employeeCode = String(payload.employee_emp_id || '');
+                    allocationForm.dataset.employeeName = String(payload.employee_name || '');
+
+                    items.forEach(item => {
+                        const actual = Number(item.actual_amount || 0);
+                        const wrapper = document.createElement('div');
+                        wrapper.className = 'accounts-breakdown-card';
+                        wrapper.innerHTML = `
+                            <input type="hidden" data-item-type value="${item.payment_type}">
+                            <input type="hidden" data-item-reference value="${Number(item.reference_id || 0)}">
+                            <strong>${item.label || item.payment_type}</strong>
+                            <p class="hint">Actual: Rs ${actual.toFixed(2)}</p>
+                            <label>Payable Amount
+                                <input type="number" data-payable-input data-actual="${actual.toFixed(2)}" min="0.01" max="${actual.toFixed(2)}" step="0.01" value="${actual.toFixed(2)}" required>
+                            </label>
+                        `;
+                        allocationRows.appendChild(wrapper);
+                    });
+
+                    allocationRows.querySelectorAll('[data-payable-input]').forEach(input => input.addEventListener('input', refreshAllocationTotals));
+                    refreshAllocationTotals();
+                    openModal('accounts-allocation-modal');
+                });
+            });
+
+            const allocationNext = document.getElementById('accounts-allocation-next');
+            if (allocationNext) {
+                allocationNext.addEventListener('click', () => {
+                    const rows = [];
+                    for (const card of allocationRows.querySelectorAll('.accounts-breakdown-card')) {
+                        const input = card.querySelector('[data-payable-input]');
+                        const actual = Number(input.dataset.actual || 0);
+                        const payable = Number(input.value || 0);
+                        if (payable <= 0 || payable > actual) {
+                            input.focus();
+                            return;
+                        }
+                        rows.push({
+                            type: card.querySelector('[data-item-type]').value,
+                            referenceId: Number(card.querySelector('[data-item-reference]').value || 0),
+                            actual,
+                            payable,
+                        });
+                    }
+
+                    if (!paymentEmployeeId || !paymentEmployeeCode || !paymentEmployeeName || !paymentBreakdownHidden) {
+                        return;
+                    }
+                    paymentEmployeeId.value = allocationForm.dataset.employeeId || '0';
+                    paymentEmployeeCode.value = allocationForm.dataset.employeeCode || '';
+                    paymentEmployeeName.value = allocationForm.dataset.employeeName || '';
+                    if (paymentBankSelect) {
+                        paymentBankSelect.value = '';
+                    }
+                    if (paymentAmountInput) {
+                        paymentAmountInput.value = rows.reduce((sum, row) => sum + row.payable, 0).toFixed(2);
+                    }
+                    if (transactionInput) {
+                        transactionInput.value = '';
+                    }
+                    if (transferModeSelect) {
+                        transferModeSelect.value = '';
+                    }
+                    const uniqueTypes = [...new Set(rows.map(row => String(row.type || '')))].filter(Boolean);
+                    const paymentTypeValue = uniqueTypes.length === 1 ? uniqueTypes[0] : 'OTHER';
+                    if (paymentTypeDisplay) {
+                        paymentTypeDisplay.value = paymentTypeValue;
+                    }
+                    if (payrollReimbursementField && payrollReimbursementSelect) {
+                        const reimbursementRows = rows.filter(row => row.type === 'REIMBURSEMENT' && row.referenceId > 0);
+                        payrollReimbursementField.classList.toggle('hidden', paymentTypeValue !== 'REIMBURSEMENT');
+                        payrollReimbursementSelect.innerHTML = '<option value="">Select approved reimbursement request</option>';
+                        reimbursementRows.forEach((row, index) => {
+                            const option = document.createElement('option');
+                            option.value = String(row.referenceId);
+                            option.textContent = `Reimbursement #${row.referenceId} - Rs ${row.payable.toFixed(2)}`;
+                            option.selected = index === 0;
+                            payrollReimbursementSelect.appendChild(option);
+                        });
+                    }
+                    if (payrollIncentiveField && payrollIncentiveAmount) {
+                        const incentiveTotal = rows
+                            .filter(row => row.type === 'INCENTIVE')
+                            .reduce((sum, row) => sum + row.payable, 0);
+                        payrollIncentiveField.classList.toggle('hidden', paymentTypeValue !== 'INCENTIVE');
+                        payrollIncentiveAmount.value = paymentTypeValue === 'INCENTIVE' ? incentiveTotal.toFixed(2) : '';
+                    }
+                    paymentBreakdownHidden.innerHTML = '';
+
+                    rows.forEach(row => {
+                        paymentBreakdownHidden.insertAdjacentHTML('beforeend', `
+                            <input type="hidden" name="breakdown_type[]" value="${row.type}">
+                            <input type="hidden" name="breakdown_actual_amount[]" value="${row.actual.toFixed(2)}">
+                            <input type="hidden" name="breakdown_paid_amount[]" value="${row.payable.toFixed(2)}">
+                            <input type="hidden" name="breakdown_remaining_amount[]" value="${Math.max(row.actual - row.payable, 0).toFixed(2)}">
+                            <input type="hidden" name="breakdown_reference_id[]" value="${row.referenceId}">
+                        `);
+                    });
+
+                    closeModal('accounts-allocation-modal');
+                    updateTransferModes('');
+                    openModal('accounts-payroll-payment-modal');
+                });
+            }
+
+            document.querySelectorAll('[data-pay-scope-link]').forEach(link => {
+                link.addEventListener('click', event => {
+                    if (!payFilterForm) {
+                        return;
+                    }
+                    event.preventDefault();
+                    const url = new URL(String(link.href), window.location.href);
+                    const formData = new FormData(payFilterForm);
+                    url.search = '';
+                    formData.forEach((value, key) => {
+                        if (String(value) !== '') {
+                            url.searchParams.append(key, String(value));
+                        }
+                    });
+                    url.searchParams.set('pay_group', String(link.dataset.payScopeLink || 'employee'));
+                    window.location.href = url.toString();
+                });
+            });
+
+            document.querySelectorAll('[data-history-scope-link]').forEach(link => {
+                link.addEventListener('click', event => {
+                    if (!historyFilterForm) {
+                        return;
+                    }
+                    event.preventDefault();
+                    const url = new URL(String(link.href), window.location.href);
+                    const formData = new FormData(historyFilterForm);
+                    url.search = '';
+                    formData.forEach((value, key) => {
+                        if (String(value) !== '') {
+                            url.searchParams.append(key, String(value));
+                        }
+                    });
+                    url.searchParams.set('pay_group', String(link.dataset.historyScopeLink || 'employee'));
+                    window.location.href = url.toString();
+                });
+            });
         });
     </script>
     <?php

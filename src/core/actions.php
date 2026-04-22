@@ -11,7 +11,7 @@ function handle_post_action(string $action): void
             $role = can_login_role((string) ($_POST['role'] ?? 'admin')) ? (string) $_POST['role'] : 'admin';
             $email = trim((string) ($_POST['email'] ?? ''));
             $returnPage = (string) ($_POST['return_page'] ?? '');
-            if ($role === 'employee' && !empty($_POST['forgot_password'])) {
+            if (in_array($role, ['employee', 'corporate_employee'], true) && !empty($_POST['forgot_password'])) {
                 if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
                     flash('error', 'Enter your employee email first, then click Forgot your password.');
                     if ($returnPage === 'landing') {
@@ -111,17 +111,25 @@ function handle_post_action(string $action): void
                 flash('error', 'Enter a valid email address.');
                 redirect_to('register');
             }
+            if (role_email_exists($role, $email)) {
+                flash('error', 'This email address is already registered.');
+                redirect_to('register');
+            }
             if (!password_meets_policy($password)) {
                 flash('error', password_policy_message());
                 redirect_to('register');
             }
             try {
-                db()->prepare('INSERT INTO users (role, emp_id, name, email, phone, salary, password_hash, password_changed_at, created_at) VALUES (:role, NULL, :name, :email, :phone, 0, :password_hash, :password_changed_at, :created_at)')
+                $empId = $role === 'corporate_employee' ? generate_employee_emp_id() : null;
+                $employeeType = $role === 'corporate_employee' ? 'corporate' : null;
+                db()->prepare('INSERT INTO users (role, emp_id, name, email, phone, salary, employee_type, password_hash, password_changed_at, created_at) VALUES (:role, :emp_id, :name, :email, :phone, 0, :employee_type, :password_hash, :password_changed_at, :created_at)')
                     ->execute([
                         'role' => $role,
+                        'emp_id' => $empId,
                         'name' => $name,
                         'email' => $email,
                         'phone' => $phone,
+                        'employee_type' => $employeeType,
                         'password_hash' => password_hash($password, PASSWORD_DEFAULT),
                         'password_changed_at' => now(),
                         'created_at' => now(),
@@ -130,7 +138,7 @@ function handle_post_action(string $action): void
                     'email' => $email,
                     'role' => $role,
                 ], (int) db()->lastInsertId(), ['role' => 'guest']);
-                flash('success', user_role_label($role) . ' account created.');
+                flash('success', ($role === 'corporate_employee' ? 'Contractual Employee' : user_role_label($role)) . ' account created.');
                 redirect_to('login', ['role' => $role]);
             } catch (Throwable $exception) {
                 report_exception($exception, 'User registration failed.', ['email' => $email, 'role' => $role]);
@@ -140,24 +148,32 @@ function handle_post_action(string $action): void
             break;
 
         case 'employee_manual_next':
-            require_roles(['admin', 'freelancer', 'external_vendor']);
+            $manager = require_roles(['admin', 'freelancer', 'external_vendor']);
+            $requestedType = trim((string) ($_POST['employee_type'] ?? 'regular'));
+            if (($manager['role'] ?? '') === 'freelancer') {
+                $requestedType = 'corporate';
+            }
+            $returnType = in_array($requestedType, ['regular', 'vendor', 'corporate'], true) ? $requestedType : 'regular';
             if (!filter_var((string) ($_POST['email'] ?? ''), FILTER_VALIDATE_EMAIL)) {
                 flash('error', 'Enter a valid employee email address.');
-                redirect_to('admin_employees');
+                redirect_to('admin_employees', ['type' => $returnType]);
             }
             if (trim((string) ($_POST['name'] ?? '')) === '') {
                 flash('error', 'Employee name is required.');
-                redirect_to('admin_employees');
+                redirect_to('admin_employees', ['type' => $returnType]);
             }
             if (trim((string) ($_POST['phone'] ?? '')) === '') {
                 flash('error', 'Employee phone number is required.');
-                redirect_to('admin_employees');
+                redirect_to('admin_employees', ['type' => $returnType]);
             }
             if (!is_numeric((string) ($_POST['salary'] ?? '')) || (float) ($_POST['salary'] ?? 0) < 0) {
                 flash('error', 'Employee salary must be zero or greater.');
-                redirect_to('admin_employees');
+                redirect_to('admin_employees', ['type' => $returnType]);
             }
             $employeeType = trim((string) ($_POST['employee_type'] ?? 'regular'));
+            if (($manager['role'] ?? '') === 'freelancer') {
+                $employeeType = 'corporate';
+            }
             if (!in_array($employeeType, ['regular', 'vendor', 'corporate'], true)) {
                 $employeeType = 'regular';
             }
@@ -170,9 +186,8 @@ function handle_post_action(string $action): void
                 'salary' => (float) ($_POST['salary'] ?? 0),
                 'employee_type' => $employeeType,
                 'vendor_id' => (int) ($_POST['vendor_id'] ?? 0),
-                'freelancer_id' => (int) ($_POST['freelancer_id'] ?? 0),
             ];
-            redirect_to('admin_employees', ['stage' => 'manual_rules']);
+            redirect_to('admin_employees', ['type' => $employeeType, 'stage' => 'manual_rules']);
             break;
 
         case 'employee_manual_submit':
@@ -183,8 +198,14 @@ function handle_post_action(string $action): void
                 flash('error', 'No pending employee found.');
                 redirect_to('admin_employees');
             }
+            $pendingType = trim((string) ($pending['employee_type'] ?? 'regular'));
+            $returnType = in_array($pendingType, ['regular', 'vendor', 'corporate'], true) ? $pendingType : 'regular';
             try {
                 $rules = normalize_rules_from_input($_POST);
+                if (!$rules['manual_punch_in'] && !$rules['manual_punch_out'] && !$rules['biometric_punch_in'] && !$rules['biometric_punch_out']) {
+                    flash('error', 'Select at least one attendance rule before adding the employee.');
+                    redirect_to('admin_employees', ['type' => $returnType, 'stage' => 'manual_rules']);
+                }
                 $pending['shift'] = normalize_shift_selection((string) ($_POST['shift'] ?? ($pending['shift'] ?? '')));
                 $createdEmployee = insert_employee($pending, $rules, $_POST['project_ids'] ?? []);
                 unset($_SESSION['pending_employee']);
@@ -197,23 +218,28 @@ function handle_post_action(string $action): void
                 report_exception($exception, 'Employee creation failed.', ['email' => $pending['email'] ?? '']);
                 flash('error', $exception->getMessage() ?: 'Unable to add employee. Email or Emp ID may already exist.');
             }
-            redirect_to('admin_employees');
+            redirect_to('admin_employees', ['type' => $returnType]);
             break;
 
         case 'employee_csv_upload':
-            require_roles(['admin', 'freelancer', 'external_vendor']);
+            $manager = require_roles(['admin', 'freelancer', 'external_vendor']);
             try {
                 $employeeType = trim((string) ($_POST['employee_type'] ?? 'regular'));
+                if (($manager['role'] ?? '') === 'freelancer') {
+                    $employeeType = 'corporate';
+                }
                 if (!in_array($employeeType, ['regular', 'vendor', 'corporate'], true)) {
                     $employeeType = 'regular';
                 }
                 validate_employee_csv_upload($_FILES['csv_file'] ?? []);
-                $_SESSION['pending_csv_import'] = parse_employee_csv((string) $_FILES['csv_file']['tmp_name']);
+                $_SESSION['pending_csv_import'] = parse_employee_csv(
+                    (string) ($_FILES['csv_file']['tmp_name'] ?? ''),
+                    (string) ($_FILES['csv_file']['name'] ?? '')
+                );
                 $_SESSION['pending_csv_employee_type'] = $employeeType;
                 $_SESSION['pending_csv_vendor_id'] = (int) ($_POST['vendor_id'] ?? 0);
-                $_SESSION['pending_csv_freelancer_id'] = (int) ($_POST['freelancer_id'] ?? 0);
-                flash('success', 'CSV uploaded. Assign rules to continue.');
-                redirect_to('admin_employees', ['stage' => 'csv_rules']);
+                flash('success', 'Employee file uploaded. Assign rules to continue.');
+                redirect_to('admin_employees', ['type' => $employeeType, 'stage' => 'csv_rules']);
             } catch (Throwable $exception) {
                 report_exception($exception, 'Employee CSV upload failed.', [
                     'filename' => (string) (($_FILES['csv_file']['name'] ?? '') ?: ''),
@@ -241,7 +267,7 @@ function handle_post_action(string $action): void
             $selectedShift = normalize_shift_selection((string) ($_POST['shift'] ?? ''));
             if (!$rules['manual_punch_in'] && !$rules['manual_punch_out'] && !$rules['biometric_punch_in'] && !$rules['biometric_punch_out']) {
                 flash('error', 'Select at least one rule before submitting the CSV import.');
-                redirect_to('admin_employees', ['stage' => 'csv_rules']);
+                redirect_to('admin_employees', ['type' => $defaultEmployeeType, 'stage' => 'csv_rules']);
             }
             $created = 0;
             $skipped = 0;
@@ -256,7 +282,6 @@ function handle_post_action(string $action): void
                         $row['employee_type'] = $defaultEmployeeType;
                     }
                     $row['vendor_id'] = $_SESSION['pending_csv_vendor_id'] ?? 0;
-                    $row['freelancer_id'] = $_SESSION['pending_csv_freelancer_id'] ?? 0;
                     if ($selectedShift !== '') {
                         $row['shift'] = $selectedShift;
                     } else {
@@ -275,6 +300,7 @@ function handle_post_action(string $action): void
             }
             unset($_SESSION['pending_csv_import']);
             unset($_SESSION['pending_csv_employee_type']);
+            unset($_SESSION['pending_csv_vendor_id']);
             $message = 'CSV import completed. Created: ' . $created;
             if ($emailsSent) {
                 $message .= ' | Emails sent: ' . $emailsSent;
@@ -292,7 +318,7 @@ function handle_post_action(string $action): void
                 'emails_logged' => $emailsLogged,
             ]);
             flash('success', $message);
-            redirect_to('admin_employees');
+            redirect_to('admin_employees', ['type' => $defaultEmployeeType]);
             break;
 
         case 'employee_update':
@@ -321,7 +347,7 @@ function handle_post_action(string $action): void
                 if (!is_numeric((string) ($_POST['salary'] ?? '')) || $salary < 0) {
                     throw new RuntimeException('Employee salary must be zero or greater.');
                 }
-                $role = current_manager_target_role();
+                $role = $employeeType === 'corporate' ? 'corporate_employee' : current_manager_target_role();
                 if (role_requires_unique_email($role) && role_email_exists($role, $email, $employeeId)) {
                     throw new RuntimeException('This employee email is already assigned.');
                 }
@@ -505,7 +531,7 @@ function handle_post_action(string $action): void
             } catch (Throwable $exception) {
                 flash('error', $exception->getMessage());
             }
-            redirect_to('admin_shift');
+            redirect_to('admin_rules');
             break;
 
         case 'admin_delete_shift_timing':
@@ -516,7 +542,7 @@ function handle_post_action(string $action): void
             } catch (Throwable $exception) {
                 flash('error', 'Unable to delete shift timing.');
             }
-            redirect_to('admin_shift');
+            redirect_to('admin_rules');
             break;
 
         case 'apply_rules':
@@ -591,7 +617,7 @@ function handle_post_action(string $action): void
             break;
 
         case 'admin_set_status':
-            require_role('admin');
+            require_roles(['admin', 'freelancer', 'external_vendor']);
             $employeeId = (int) ($_POST['employee_id'] ?? 0);
             $employee = employee_by_id($employeeId);
             if (!$employee) {
@@ -599,6 +625,11 @@ function handle_post_action(string $action): void
                 redirect_to('admin_employee_log');
             }
             $status = (string) ($_POST['status'] ?? 'Absent');
+            $allowedStatuses = ['Present', 'Absent', 'Half Day', 'Leave'];
+            if (!in_array($status, $allowedStatuses, true)) {
+                flash('error', 'Select a valid attendance status.');
+                redirect_to('admin_employee_log');
+            }
             update_attendance_record((int) $employee['id'], (string) ($_POST['attend_date'] ?? ''), [
                 'status' => $status,
                 'admin_override_status' => $status,
@@ -631,6 +662,10 @@ function handle_post_action(string $action): void
             }
             if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
                 flash('error', 'Enter a valid email address.');
+                redirect_to($returnPage);
+            }
+            if (role_email_exists((string) ($admin['role'] ?? 'admin'), $email, (int) $admin['id'])) {
+                flash('error', 'This email address is already registered.');
                 redirect_to($returnPage);
             }
 
@@ -727,6 +762,9 @@ function handle_post_action(string $action): void
 
             try {
                 $date = (string) ($_POST['attend_date'] ?? date('Y-m-d'));
+                if ($date > date('Y-m-d')) {
+                    throw new RuntimeException('Future dates cannot be marked for attendance.');
+                }
                 if (is_week_off_for_user_date((int) $employee['id'], $date)) {
                     throw new RuntimeException('Week Off dates do not require attendance.');
                 }
@@ -794,6 +832,10 @@ function handle_post_action(string $action): void
             $employee = require_roles(['employee', 'corporate_employee']);
 
             $date = (string) ($_POST['attend_date'] ?? date('Y-m-d'));
+            if ($date > date('Y-m-d')) {
+                flash('error', 'Future dates cannot be marked for attendance.');
+                redirect_to('employee_log', ['month' => substr($date, 0, 7)]);
+            }
             if (is_week_off_for_user_date((int) $employee['id'], $date)) {
                 flash('error', 'Week Off dates do not require attendance.');
                 redirect_to('employee_log', ['month' => substr($date, 0, 7)]);
@@ -1078,7 +1120,16 @@ function handle_post_action(string $action): void
                         'payment_type' => (string) $payment['payment_type'],
                         'amount' => (float) $payment['amount'],
                     ], (int) $payment['user_id'], $admin);
-                    flash('success', 'Payment added successfully.');
+                    $mailResult = is_array($payment['mail_result'] ?? null) ? $payment['mail_result'] : [];
+                    $message = 'Payment added successfully.';
+                    if (!empty($mailResult['sent'])) {
+                        $message .= ' Employee email sent successfully.';
+                    } elseif (!empty($mailResult['handled']) && !empty($mailResult['log_file'])) {
+                        $message .= ' Employee email was saved locally in storage/emails/' . $mailResult['log_file'] . '.';
+                    } elseif (!empty($mailResult['error'])) {
+                        $message .= ' Employee email was not sent: ' . $mailResult['error'];
+                    }
+                    flash('success', $message);
                 }
             } catch (Throwable $exception) {
                 report_exception($exception, 'Admin payment save failed.', [
@@ -1092,12 +1143,62 @@ function handle_post_action(string $action): void
             redirect_to('admin_accounts', payment_redirect_query($filters));
             break;
 
+        case 'admin_process_accounts_payment':
+            $admin = require_role('admin');
+            $filters = payment_filter_params($_POST);
+            $redirectFilters = $filters;
+
+            try {
+                $payments = create_accounts_payment_batch($_POST, $_FILES['proof_upload'] ?? []);
+                $paymentCount = count($payments);
+                $totalAmount = array_reduce($payments, static function (float $carry, array $payment): float {
+                    return $carry + (float) ($payment['amount'] ?? 0);
+                }, 0.0);
+
+                foreach ($payments as $payment) {
+                    audit_log('admin_payment_created', [
+                        'payment_id' => (int) ($payment['id'] ?? 0),
+                        'payment_type' => (string) ($payment['payment_type'] ?? ''),
+                        'amount' => (float) ($payment['amount'] ?? 0),
+                    ], (int) ($payment['user_id'] ?? 0), $admin);
+                }
+
+                flash('success', sprintf('%d payment record(s) processed successfully for Rs %s.', $paymentCount, number_format($totalAmount, 2)));
+                $redirectFilters['section'] = 'history';
+                $redirectFilters['pay_group'] = 'employee';
+                $redirectFilters['history_accounts'] = [];
+                $redirectFilters['history_vendor_ids'] = [];
+                $redirectFilters['from_date'] = '';
+                $redirectFilters['to_date'] = '';
+                $redirectFilters['history_employee_ids'] = [];
+                if (!empty($payments[0]['user_id'])) {
+                    $redirectFilters['history_employee_ids'] = [(int) $payments[0]['user_id']];
+                }
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Accounts batch payment failed.', [
+                    'admin_id' => (int) $admin['id'],
+                    'employee_id' => (int) ($_POST['employee_id'] ?? 0),
+                ]);
+                flash('error', $exception->getMessage() ?: 'Unable to process the payment.');
+            }
+
+            redirect_to('admin_accounts', payment_redirect_query($redirectFilters));
+            break;
+
         case 'admin_approve_payment_request':
             require_role('admin');
             $requestKey = (string) ($_POST['request_key'] ?? '');
             $filters = payment_filter_params($_POST);
             try {
-                update_payment_request_status($requestKey, 'APPROVED');
+                $approvedAmountSource = $_POST['approved_amount'] ?? [];
+                $approvedAmount = null;
+                if (is_array($approvedAmountSource)) {
+                    $firstValue = reset($approvedAmountSource);
+                    if ($firstValue !== false && $firstValue !== null && $firstValue !== '') {
+                        $approvedAmount = round((float) $firstValue, 2);
+                    }
+                }
+                update_payment_request_status($requestKey, 'APPROVED', $approvedAmount);
                 flash('success', 'Payment request approved.');
             } catch (Throwable $exception) {
                 flash('error', $exception->getMessage() ?: 'Unable to approve request.');
@@ -1116,6 +1217,40 @@ function handle_post_action(string $action): void
                 flash('error', $exception->getMessage() ?: 'Unable to reject request.');
             }
             redirect_to('admin_accounts', payment_redirect_query($filters));
+            break;
+
+        case 'admin_approve_reimbursement':
+            require_role('admin');
+            $reimbursementId = (int) ($_POST['reimbursement_id'] ?? 0);
+            $approvedAmounts = $_POST['approved_amount'] ?? [];
+            try {
+                $updated = approve_reimbursement_request($reimbursementId, is_array($approvedAmounts) ? $approvedAmounts : []);
+                audit_log('admin_reimbursement_status_updated', [
+                    'reimbursement_id' => (int) ($updated['id'] ?? 0),
+                    'status' => (string) ($updated['status'] ?? ''),
+                    'amount_requested' => (float) ($updated['amount_requested'] ?? 0),
+                ], (int) ($updated['user_id'] ?? 0), current_user());
+                flash('success', 'Reimbursement approved successfully.');
+            } catch (Throwable $exception) {
+                flash('error', 'Unable to approve reimbursement: ' . $exception->getMessage());
+            }
+            redirect_to('admin_accounts', payment_redirect_query(['section' => 'approval', 'approval_type' => 'REIMBURSEMENT', 'request_month' => $_POST['filter_request_month'] ?? date('Y-m')]));
+            break;
+
+        case 'admin_deny_reimbursement':
+            require_role('admin');
+            $reimbursementId = (int) ($_POST['reimbursement_id'] ?? 0);
+            try {
+                $updated = deny_reimbursement_request($reimbursementId);
+                audit_log('admin_reimbursement_status_updated', [
+                    'reimbursement_id' => (int) ($updated['id'] ?? 0),
+                    'status' => (string) ($updated['status'] ?? ''),
+                ], (int) ($updated['user_id'] ?? 0), current_user());
+                flash('success', 'Reimbursement denied successfully.');
+            } catch (Throwable $exception) {
+                flash('error', 'Unable to deny reimbursement: ' . $exception->getMessage());
+            }
+            redirect_to('admin_accounts', payment_redirect_query(['section' => 'approval', 'approval_type' => 'REIMBURSEMENT', 'request_month' => $_POST['filter_request_month'] ?? date('Y-m')]));
             break;
 
         case 'admin_delete_payment':

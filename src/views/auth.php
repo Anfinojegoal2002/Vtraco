@@ -11,19 +11,22 @@ function auth_login_roles(): array
             'description' => 'Sign in to manage attendance, employees, rules, and reporting.',
         ],
         'employee' => [
+            'label' => 'Employee',
             'title' => 'Employee Login',
             'eyebrow' => 'Employee Access',
             'description' => 'Use the credentials shared by your admin to access your attendance workspace.',
         ],
+        'corporate_employee' => [
+            'label' => 'Contractual Employee',
+            'title' => 'Contractual Employee Login',
+            'eyebrow' => 'Contractual Employee Access',
+            'description' => 'Use your contractual employee registration details to access the employee workspace.',
+        ],
         'external_vendor' => [
+            'label' => 'External Vendor',
             'title' => 'External Vendor Login',
             'eyebrow' => 'Vendor Access',
             'description' => 'Use your vendor registration details to access your account.',
-        ],
-        'freelancer' => [
-            'title' => 'Contractual Employee (Freelancer) Login',
-            'eyebrow' => 'Freelancer Access',
-            'description' => 'Use your freelancer registration details to access your account.',
         ],
     ];
 }
@@ -32,22 +35,25 @@ function auth_registration_roles(): array
 {
     return [
         'admin' => [
+            'label' => 'Admin',
             'eyebrow' => 'Admin Setup',
             'title' => 'Create Admin Account',
             'description' => 'Register a management account for payroll, rules, attendance review, and employee operations.',
             'button' => 'Register',
         ],
         'external_vendor' => [
+            'label' => 'External Vendor',
             'eyebrow' => 'Vendor Registration',
             'title' => 'Create External Vendor Account',
             'description' => 'Register an external vendor account for partner and service-provider access.',
             'button' => 'Register Vendor',
         ],
-        'freelancer' => [
-            'eyebrow' => 'Freelancer Registration',
-            'title' => 'Create Contractual Employee (Freelancer) Account',
-            'description' => 'Register a freelancer account for self-managed access to the portal.',
-            'button' => 'Register Freelancer',
+        'corporate_employee' => [
+            'label' => 'Contractual Employee',
+            'eyebrow' => 'Contractual Employee Registration',
+            'title' => 'Create Contractual Employee Account',
+            'description' => 'Register as a contractual employee. After registration, you will use the normal Employee workspace.',
+            'button' => 'Register Contractual Employee',
         ],
     ];
 }
@@ -72,7 +78,7 @@ function render_login(): void
             <div class="cards-2 auth-role-grid">
                 <?php foreach ($roles as $key => $meta): ?>
                     <a class="action-card<?= $key === $role ? ' active-auth-role' : '' ?>" href="<?= h(BASE_URL) ?>?page=login&role=<?= h($key) ?>">
-                        <strong><?= h(user_role_label($key)) ?></strong>
+                        <strong><?= h((string) ($meta['label'] ?? user_role_label($key))) ?></strong>
                         <span class="hint"><?= h($meta['eyebrow']) ?></span>
                     </a>
                 <?php endforeach; ?>
@@ -96,14 +102,14 @@ function render_login(): void
                     <small class="field-error"><span>!</span>Password is required.</small>
                 </div>
                 <button class="button solid" type="submit"><?= h($selected['title']) ?></button>
-                <?php if ($role === 'employee'): ?>
+                <?php if (in_array($role, ['employee', 'corporate_employee'], true)): ?>
                     <button class="button ghost" type="submit" name="forgot_password" value="1">Forgot your password?</button>
                     <p class="hint">Enter your employee email above and we will send or log a temporary password for that account.</p>
                 <?php endif; ?>
             </form>
             <div class="spacer"></div>
-            <?php if ($role === 'employee'): ?>
-                <p class="hint">Employees cannot self-register. Please use the credentials sent to you by your admin.</p>
+            <?php if (in_array($role, ['employee', 'corporate_employee'], true)): ?>
+                <p class="hint">Company employees use credentials sent by their admin. Contractual employees can register from the registration page.</p>
             <?php else: ?>
                 <p><a href="<?= h(BASE_URL) ?>?page=register">Need an account? Open registration.</a></p>
             <?php endif; ?>
@@ -137,7 +143,7 @@ function render_register(): void
         <div class="auth-register-segmented" role="tablist" aria-label="Registration types">
             <?php foreach ($roles as $role => $meta): ?>
                 <a class="auth-register-segment<?= $role === $selectedRole ? ' active-auth-role' : '' ?>" href="<?= h(BASE_URL) ?>?page=register&role=<?= h($role) ?>">
-                    <strong><?= h(user_role_label($role)) ?></strong>
+                    <strong><?= h((string) ($meta['label'] ?? user_role_label($role))) ?></strong>
                 </a>
             <?php endforeach; ?>
         </div>
@@ -154,7 +160,7 @@ function render_register(): void
                 <input type="hidden" name="role" value="<?= h($selectedRole) ?>">
             <div class="field">
                 <label>Name</label>
-                <div class="field-row"><input type="text" name="name" placeholder="<?= h(user_role_label($selectedRole)) ?> name" required></div>
+                <div class="field-row"><input type="text" name="name" placeholder="<?= h((string) ($selected['label'] ?? user_role_label($selectedRole))) ?> name" required></div>
                 <small class="field-error"><span>!</span>Name is required.</small>
             </div>
             <div class="field">

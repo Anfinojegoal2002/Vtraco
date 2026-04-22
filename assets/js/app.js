@@ -142,7 +142,7 @@
                             <label>Update Status
                                 <select name="status">
                                     <option value="" disabled ${payload.status ? '' : 'selected'}>Select status</option>
-                                    ${['Present','Absent','Half Day','Leave','Week Off'].map(status => `<option value="${status}" ${status === payload.status ? 'selected' : ''}>${status}</option>`).join('')}
+                                    ${['Present','Absent','Half Day','Leave'].map(status => `<option value="${status}" ${status === payload.status ? 'selected' : ''}>${status}</option>`).join('')}
                                 </select>
                             </label>
                             <button class="button solid" type="submit">Save Status</button>
@@ -162,6 +162,7 @@
                 const sessionForSlot = (slot, index) => payload.sessions.find(session => (session.slot_name || '') === slot) || payload.sessions[index] || null;
                 const showAddManualPunchButton = false;
                 const isWeekOff = payload.status === 'Week Off';
+                const isFuture = !!payload.future;
                 const manualPunchPairs = manualPairSlots.map((slot, index) => {
                     const pairNumber = index + 1;
                     const pairSession = sessionForSlot(slot, index);
@@ -188,7 +189,7 @@
                     const manualOutSectionDisabled = (!payload.rule_manual_out || !pairPunchInDone) ? 'disabled' : '';
                     const manualOutFormDisabled = (!payload.rule_manual_out || !pairPunchInDone || pairPunchOutDone) ? 'disabled' : '';
                     const manualInNote = pairPunchInDone
-                        ? `Submitted at ${escapeHtml(pairPunchInTime || 'Saved')}. Geo: ${escapeHtml(pairPunchInLat || '-')}, ${escapeHtml(pairPunchInLng || '-')}`
+                        ? `Submitted at ${escapeHtml(pairPunchInTime || 'Saved')}. Bio: ${escapeHtml(pairPunchInLat || '-')}, ${escapeHtml(pairPunchInLng || '-')}`
                         : 'Location will be captured when this popup opens.';
                     const manualOutNote = !payload.rule_manual_out
                         ? 'Manual Punch Out is not enabled for this employee.'
@@ -273,7 +274,12 @@
                     `;
                 }).join('');
 
-                employeeCards = isWeekOff ? `
+                employeeCards = isFuture ? `
+                    <div class="section-block">
+                        <h3>Future Date Locked</h3>
+                        <p>Attendance cannot be marked for future dates.</p>
+                    </div>
+                ` : isWeekOff ? `
                     <div class="section-block">
                         <h3>Week Off</h3>
                         <p>Attendance is not required for this date.</p>
@@ -353,7 +359,7 @@
                         <strong>Punch Details</strong><br>
                         Punch In: ${escapeHtml(payload.punch_in_time || payload.biometric_in_time || 'Not submitted')}<br>
                         Punch Out: ${escapeHtml(payload.biometric_out_time || 'Not submitted')}<br>
-                        ${payload.punch_in_path ? `Geo: ${escapeHtml(payload.punch_in_lat || '-')}, ${escapeHtml(payload.punch_in_lng || '-')}` : ((payload.biometric_in_time || payload.biometric_out_time) ? 'Source: Imported biometric attendance' : 'Geo: Not available')}
+                        ${payload.punch_in_path ? `Bio: ${escapeHtml(payload.punch_in_lat || '-')}, ${escapeHtml(payload.punch_in_lng || '-')}` : ((payload.biometric_in_time || payload.biometric_out_time) ? 'Source: Imported biometric attendance' : 'Bio: Not available')}
                     </div>
                     ` : ''}
                 </section>
@@ -871,8 +877,4 @@
                 }
             });
         });
-
-
-
-
 
