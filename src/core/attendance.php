@@ -150,6 +150,118 @@ function session_has_manual_out(array $session): bool
         || (float) ($session['session_duration'] ?? 0) > 0;
 }
 
+function attendance_seconds_between(?string $start, ?string $end): ?int
+{
+    $start = trim((string) $start);
+    $end = trim((string) $end);
+    if ($start === '' || $end === '') {
+        return null;
+    }
+
+    $startTime = strtotime($start);
+    $endTime = strtotime($end);
+    if ($startTime === false || $endTime === false) {
+        return null;
+    }
+
+    if ($endTime < $startTime) {
+        $endTime += 86400;
+    }
+
+    return max(0, $endTime - $startTime);
+}
+
+function attendance_shift_window_for_record(array $record): ?array
+{
+    $startTime = trim((string) ($record['shift_start_time'] ?? ''));
+    $endTime = trim((string) ($record['shift_end_time'] ?? ''));
+    if ($startTime !== '' && $endTime !== '' && $startTime !== $endTime) {
+        return [
+            'start_time' => $startTime,
+            'end_time' => $endTime,
+        ];
+    }
+
+    $employee = employee_by_id((int) ($record['user_id'] ?? 0));
+    if (!$employee) {
+        return null;
+    }
+
+    return shift_window_for_employee($employee);
+}
+
+function attendance_resolved_work_times(array $record, array $sessions): array
+{
+    $inTimes = [];
+    $outTimes = [];
+
+    foreach (['punch_in_time', 'biometric_in_time'] as $field) {
+        $value = trim((string) ($record[$field] ?? ''));
+        if ($value !== '') {
+            $inTimes[] = $value;
+        }
+    }
+
+    $value = trim((string) ($record['biometric_out_time'] ?? ''));
+    if ($value !== '') {
+        $outTimes[] = $value;
+    }
+
+    foreach ($sessions as $session) {
+        $inTime = trim((string) ($session['punch_in_time'] ?? ''));
+        if ($inTime !== '') {
+            $inTimes[] = $inTime;
+        }
+
+        $outTime = trim((string) ($session['punch_out_time'] ?? ''));
+        if ($outTime !== '') {
+            $outTimes[] = $outTime;
+        }
+    }
+
+    sort($inTimes);
+    sort($outTimes);
+
+    return [
+        'in_time' => $inTimes[0] ?? null,
+        'out_time' => $outTimes ? $outTimes[count($outTimes) - 1] : null,
+    ];
+}
+
+function shift_based_attendance_status(array $record, array $sessions): ?string
+{
+    $shiftWindow = attendance_shift_window_for_record($record);
+    if ($shiftWindow === null) {
+        return null;
+    }
+
+    $workTimes = attendance_resolved_work_times($record, $sessions);
+    $inTime = $workTimes['in_time'];
+    $outTime = $workTimes['out_time'];
+    if ($inTime === null && $outTime === null) {
+        return null;
+    }
+
+    if ($inTime === null || $outTime === null) {
+        return attendance_date_is_closed((string) ($record['attend_date'] ?? '')) ? 'Half Day' : 'Pending';
+    }
+
+    $workedSeconds = attendance_seconds_between($inTime, $outTime);
+    $shiftSeconds = attendance_seconds_between(
+        (string) ($record['attend_date'] ?? date('Y-m-d')) . ' ' . $shiftWindow['start_time'],
+        (string) ($record['attend_date'] ?? date('Y-m-d')) . ' ' . $shiftWindow['end_time']
+    );
+    if ($workedSeconds === null || $shiftSeconds === null || $shiftSeconds <= 0) {
+        return null;
+    }
+
+    if ($workedSeconds >= (int) ceil($shiftSeconds * 0.75)) {
+        return 'Present';
+    }
+
+    return $workedSeconds > 0 ? 'Half Day' : 'Absent';
+}
+
 function manual_attendance_status(array $record, array $sessions): ?string
 {
     $hasIncompleteManual = false;
@@ -185,6 +297,11 @@ function manual_attendance_status(array $record, array $sessions): ?string
     }
 
     if ($hasCompletedManual) {
+        $shiftStatus = shift_based_attendance_status($record, $sessions);
+        if ($shiftStatus !== null) {
+            return $shiftStatus;
+        }
+
         return $hasFullDayManual ? 'Present' : 'Half Day';
     }
 
@@ -210,6 +327,11 @@ function resolved_attendance_status(array $record, array $sessions): string
     $manualStatus = manual_attendance_status($record, $sessions);
     if ($manualStatus !== null) {
         return $manualStatus;
+    }
+
+    $shiftStatus = shift_based_attendance_status($record, $sessions);
+    if ($shiftStatus !== null) {
+        return $shiftStatus;
     }
 
     if ($status === 'Pending' && attendance_date_is_closed((string) ($record['attend_date'] ?? ''))) {
@@ -671,11 +793,63 @@ function attendance_report_date(array $rows): ?string
     return null;
 }
 
+function attendance_report_cell_date(string $value, ?string $fallbackDate = null): ?string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return $fallbackDate;
+    }
+
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1) {
+        return $value;
+    }
+
+    if ($fallbackDate !== null && preg_match('/^(\d{2})[\/\-](\d{2})[\/\-](\d{3})$/', $value, $matches) === 1) {
+        $fallbackYear = (int) substr($fallbackDate, 0, 4);
+        return sprintf('%04d-%02d-%02d', $fallbackYear, (int) $matches[2], (int) $matches[1]);
+    }
+
+    if ($fallbackDate !== null && preg_match('/^(\d{2})[\/\-](\d{2})$/', $value, $matches) === 1) {
+        $fallbackYear = (int) substr($fallbackDate, 0, 4);
+        return sprintf('%04d-%02d-%02d', $fallbackYear, (int) $matches[2], (int) $matches[1]);
+    }
+
+    foreach (['d/m/Y', 'd-m-Y', 'm/d/Y', 'm-d-Y', 'd/m/y', 'd-m-y'] as $format) {
+        $date = DateTimeImmutable::createFromFormat($format, $value);
+        if ($date instanceof DateTimeImmutable) {
+            return $date->format('Y-m-d');
+        }
+    }
+
+    if (is_numeric($value)) {
+        $numeric = (float) $value;
+        // Treat plain numeric values as Excel dates only within a realistic serial range.
+        if ($numeric >= 20000 && $numeric <= 80000) {
+            $excelEpoch = new DateTimeImmutable('1899-12-30');
+            return $excelEpoch->modify('+' . (int) floor($numeric) . ' days')->format('Y-m-d');
+        }
+    }
+
+    $timestamp = strtotime($value);
+    if ($timestamp !== false) {
+        return date('Y-m-d', $timestamp);
+    }
+
+    return $fallbackDate;
+}
+
 function attendance_report_time(?string $date, string $value): ?string
 {
     $value = trim($value);
     if ($date === null || $value === '' || $value === '--:--' || $value === '--') {
         return null;
+    }
+
+    if (preg_match('/^\d{1,2}:\d$/', $value) === 1) {
+        $value .= '0';
+    }
+    if (preg_match('/^\d{1,2}:\d{2}:\d$/', $value) === 1) {
+        $value .= '0';
     }
 
     if (is_numeric($value)) {
@@ -705,14 +879,51 @@ function attendance_report_time(?string $date, string $value): ?string
 function attendance_import_status(string $rawStatus, ?string $inTime, ?string $outTime): string
 {
     $status = strtoupper(trim($rawStatus));
+    if (in_array($status, ['L', 'LEAVE'], true)) {
+        return 'Leave';
+    }
+
+    if (in_array($status, ['WO', 'WEEKOFF', 'WEEK OFF'], true)) {
+        return 'Week Off';
+    }
+
+    if ($inTime !== null && $outTime !== null) {
+        return 'Present';
+    }
+
+    if ($inTime !== null || $outTime !== null) {
+        return 'Half Day';
+    }
+
     return match ($status) {
         'P', 'PR', 'PRESENT' => 'Present',
-        'A', 'ABSENT' => 'Absent',
         'H', 'HD', 'HALF', 'HALFDAY', 'HALF DAY' => 'Half Day',
-        'L', 'LEAVE' => 'Leave',
-        'WO', 'WEEKOFF', 'WEEK OFF' => 'Week Off',
-        default => ($inTime !== null || $outTime !== null ? 'Present' : 'Absent'),
+        default => 'Absent',
     };
+}
+
+function attendance_import_status_for_employee(array $employee, string $date, string $rawStatus, ?string $inTime, ?string $outTime): string
+{
+    $baseStatus = attendance_import_status($rawStatus, $inTime, $outTime);
+    if (in_array($baseStatus, ['Leave', 'Week Off'], true)) {
+        return $baseStatus;
+    }
+
+    $shiftWindow = shift_window_for_employee($employee);
+    if ($shiftWindow === null) {
+        return $baseStatus;
+    }
+
+    $record = [
+        'user_id' => (int) ($employee['id'] ?? 0),
+        'attend_date' => $date,
+        'shift_start_time' => $shiftWindow['start_time'],
+        'shift_end_time' => $shiftWindow['end_time'],
+        'biometric_in_time' => $inTime,
+        'biometric_out_time' => $outTime,
+    ];
+
+    return shift_based_attendance_status($record, []) ?? $baseStatus;
 }
 
 function detect_attendance_csv_delimiter(array $rawLines): string
@@ -1011,31 +1222,216 @@ function attendance_extract_binary_xls_rows(string $path): array
 function attendance_report_rows(string $path, string $originalName = ''): array
 {
     if (attendance_is_xlsx_file($path, $originalName)) {
-        return attendance_extract_xlsx_rows($path);
+        $rows = attendance_extract_xlsx_rows($path);
+    } elseif (attendance_is_binary_xls_file($path, $originalName)) {
+        $rows = attendance_extract_binary_xls_rows($path);
+    } elseif (attendance_is_html_table_file($path, $originalName)) {
+        $rows = attendance_extract_html_rows($path);
+    } else {
+        $rows = attendance_extract_csv_rows($path);
     }
 
-    if (attendance_is_binary_xls_file($path, $originalName)) {
-        return attendance_extract_binary_xls_rows($path);
-    }
-
-    if (attendance_is_html_table_file($path, $originalName)) {
-        return attendance_extract_html_rows($path);
-    }
-
-    return attendance_extract_csv_rows($path);
+    return array_map(static function (array $row): array {
+        return array_map(static function ($cell): string {
+            $text = (string) $cell;
+            $text = str_replace("\0", '', $text);
+            return trim($text);
+        }, $row);
+    }, $rows);
 }
 
 function attendance_header_key(string $header): ?string
 {
     return match ($header) {
-        'empcode', 'empid', 'employeecode', 'employeeid', 'staffid', 'staffcode' => 'empcode',
-        'name', 'employeename', 'staffname', 'fullname', 'username' => 'name',
-        'status', 'attendancestatus' => 'status',
-        'intime', 'inpunch', 'punchin', 'checkin' => 'intime',
-        'outtime', 'outpunch', 'punchout', 'checkout' => 'outtime',
-        'remark', 'remarks' => 'remark',
+        'date', 'attendancedate', 'reportdate', 'workdate', 'day', 'attendanceon' => 'date',
+        'empcode', 'empid', 'empno', 'employeecode', 'employeeid', 'employeeno', 'employeenumber', 'staffid', 'staffcode', 'staffno', 'code', 'id' => 'empcode',
+        'name', 'employeename', 'employee', 'staffname', 'fullname', 'username', 'personname' => 'name',
+        'status', 'statu', 'attendance', 'attendancestatus', 'daystatus', 'presentstatus', 'attstatus' => 'status',
+        'intime', 'intim', 'in', 'intime1', 'inpunch', 'punchin', 'checkin', 'firstin', 'logintime' => 'intime',
+        'outtime', 'outtim', 'out', 'outtime1', 'outpunch', 'punchout', 'checkout', 'firstout', 'logouttime' => 'outtime',
+        'remark', 'remar', 'remarks', 'comment', 'comments', 'reason', 'notes' => 'remark',
         default => null,
     };
+}
+
+function attendance_first_non_empty_column_value(array $row, array $columns): string
+{
+    foreach ($columns as $columnIndex) {
+        $value = trim((string) ($row[$columnIndex] ?? ''));
+        if ($value !== '') {
+            return $value;
+        }
+    }
+
+    return '';
+}
+
+function attendance_month_year_from_title(array $rows): ?array
+{
+    $title = strtoupper(trim((string) ($rows[0][0] ?? '')));
+    if ($title === '') {
+        return null;
+    }
+
+    if (preg_match('/([A-Z]+)\s+(\d{4})/', $title, $matches) !== 1) {
+        return null;
+    }
+
+    $date = DateTimeImmutable::createFromFormat('!F Y', ucfirst(strtolower($matches[1])) . ' ' . $matches[2]);
+    if (!$date instanceof DateTimeImmutable) {
+        return null;
+    }
+
+    return [
+        'month' => (int) $date->format('m'),
+        'year' => (int) $date->format('Y'),
+    ];
+}
+
+function attendance_extract_monthly_register_entries(array $rows): array
+{
+    $title = strtoupper(trim((string) ($rows[0][0] ?? '')));
+    $headerRow = $rows[2] ?? [];
+    $subHeaderRow = $rows[3] ?? [];
+    if (!str_contains($title, 'ATTENDANCE REGISTER')) {
+        return [];
+    }
+
+    $monthYear = attendance_month_year_from_title($rows);
+    if ($monthYear === null) {
+        return [];
+    }
+
+    $empCodeHeader = normalize_attendance_csv_header((string) ($headerRow[1] ?? ''));
+    $employeeNameHeader = normalize_attendance_csv_header((string) ($headerRow[2] ?? ''));
+    if ($empCodeHeader !== 'empcode' || $employeeNameHeader !== 'employeename') {
+        return [];
+    }
+
+    $entries = [];
+    $dateColumns = [];
+    for ($column = 3; $column < count($headerRow); $column += 3) {
+        $label = trim((string) ($headerRow[$column] ?? ''));
+        if (preg_match('/^(\d{1,2})\b/', $label, $matches) !== 1) {
+            break;
+        }
+
+        $day = (int) $matches[1];
+        if (!checkdate((int) $monthYear['month'], $day, (int) $monthYear['year'])) {
+            continue;
+        }
+
+        $dateColumns[] = [
+            'date' => sprintf('%04d-%02d-%02d', (int) $monthYear['year'], (int) $monthYear['month'], $day),
+            'in' => $column,
+            'out' => $column + 1,
+            'status' => $column + 2,
+        ];
+    }
+
+    if ($dateColumns === []) {
+        return [];
+    }
+
+    $inHeader = normalize_attendance_csv_header((string) ($subHeaderRow[3] ?? ''));
+    $outHeader = normalize_attendance_csv_header((string) ($subHeaderRow[4] ?? ''));
+    if (!str_contains($inHeader, 'intime') || !str_contains($outHeader, 'offtime')) {
+        return [];
+    }
+
+    foreach (array_slice($rows, 4) as $row) {
+        $empCode = trim((string) ($row[1] ?? ''));
+        $employeeName = trim((string) ($row[2] ?? ''));
+        if ($empCode === '' && $employeeName === '') {
+            continue;
+        }
+
+        foreach ($dateColumns as $mapping) {
+            $inTime = attendance_report_time($mapping['date'], trim((string) ($row[$mapping['in']] ?? '')));
+            $outTime = attendance_report_time($mapping['date'], trim((string) ($row[$mapping['out']] ?? '')));
+            $statusRaw = trim((string) ($row[$mapping['status']] ?? ''));
+
+            $entries[] = [
+                'emp_code' => $empCode,
+                'employee_name' => $employeeName,
+                'date' => $mapping['date'],
+                'status' => attendance_import_status($statusRaw, $inTime, $outTime),
+                'biometric_in_time' => $inTime,
+                'biometric_out_time' => $outTime,
+                'leave_reason' => null,
+            ];
+        }
+    }
+
+    return $entries;
+}
+
+function attendance_extract_periodic_report_entries(array $rows, ?string $fallbackDate = null): array
+{
+    $entries = [];
+    $totalRows = count($rows);
+
+    for ($i = 0; $i < $totalRows; $i++) {
+        $row = $rows[$i];
+        $firstCell = strtolower(trim((string) ($row[0] ?? '')));
+        if ($firstCell !== 'empcod' && $firstCell !== 'empcode' && $firstCell !== 'empid' && $firstCell !== 'id') {
+            continue;
+        }
+
+        $empCode = trim((string) ($row[1] ?? ''));
+        $employeeName = trim((string) ($row[4] ?? ''));
+        if ($empCode === '' && $employeeName === '') {
+            continue;
+        }
+
+        $headerRow = $rows[$i + 1] ?? [];
+        $headerFirstCell = strtolower(trim((string) ($headerRow[0] ?? '')));
+        if ($headerFirstCell !== 'date') {
+            continue;
+        }
+
+        $candidateMap = [];
+        foreach ($headerRow as $columnIndex => $cell) {
+            $headerKey = attendance_header_key(normalize_attendance_csv_header((string) $cell));
+            if ($headerKey === null || isset($candidateMap[$headerKey])) {
+                continue;
+            }
+            $candidateMap[$headerKey] = $columnIndex;
+        }
+
+        for ($j = $i + 2; $j < $totalRows; $j++) {
+            $dataRow = $rows[$j];
+            $dataFirstCell = strtolower(trim((string) ($dataRow[0] ?? '')));
+            if (in_array($dataFirstCell, ['empcod', 'empcode', 'empid', 'id'], true)) {
+                break;
+            }
+
+            $rowDate = isset($candidateMap['date'])
+                ? attendance_report_cell_date((string) ($dataRow[$candidateMap['date']] ?? ''), $fallbackDate)
+                : $fallbackDate;
+            if ($rowDate === null) {
+                continue;
+            }
+
+            $statusRaw = isset($candidateMap['status']) ? trim((string) ($dataRow[$candidateMap['status']] ?? '')) : '';
+            $remark = isset($candidateMap['remark']) ? trim((string) ($dataRow[$candidateMap['remark']] ?? '')) : '';
+            $inTime = isset($candidateMap['intime']) ? attendance_report_time($rowDate, trim((string) ($dataRow[$candidateMap['intime']] ?? ''))) : null;
+            $outTime = isset($candidateMap['outtime']) ? attendance_report_time($rowDate, trim((string) ($dataRow[$candidateMap['outtime']] ?? ''))) : null;
+            $status = attendance_import_status($statusRaw, $inTime, $outTime);
+
+            $entries[] = [
+                'emp_code' => $empCode,
+                'employee_name' => $employeeName,
+                'date' => $rowDate,
+                'status' => $status,
+                'biometric_in_time' => $inTime,
+                'biometric_out_time' => $outTime,
+                'leave_reason' => ($remark !== '' && $remark !== '--') ? $remark : null,
+            ];
+        }
+    }
+
+    return $entries;
 }
 
 function attendance_summary_row_text(string $rowText): bool
@@ -1076,6 +1472,11 @@ function attendance_value_looks_like_time(string $value): bool
     return is_numeric($trimmed) && (float) $trimmed >= 0 && (float) $trimmed < 1;
 }
 
+function attendance_value_looks_like_date(string $value): bool
+{
+    return attendance_report_cell_date($value, null) !== null;
+}
+
 function attendance_metadata_row_text(string $rowText): bool
 {
     return $rowText === ''
@@ -1088,11 +1489,33 @@ function attendance_metadata_row_text(string $rowText): bool
 function attendance_value_looks_like_empcode(string $value): bool
 {
     $trimmed = trim($value);
-    if ($trimmed === '' || attendance_value_looks_like_status($trimmed) || attendance_value_looks_like_time($trimmed)) {
+    if ($trimmed === '' || attendance_value_looks_like_status($trimmed) || attendance_value_looks_like_time($trimmed) || attendance_value_looks_like_date($trimmed)) {
         return false;
     }
 
-    return preg_match('/^(?=.*\d)[A-Za-z0-9\-]{3,}$/', $trimmed) === 1;
+    return preg_match('/^(?=.*\d)[A-Za-z0-9._\/\-]{2,}$/', $trimmed) === 1;
+}
+
+function attendance_value_looks_like_name(string $value): bool
+{
+    $trimmed = trim($value);
+    if ($trimmed === '') {
+        return false;
+    }
+
+    if (attendance_value_looks_like_status($trimmed) || attendance_value_looks_like_time($trimmed) || attendance_value_looks_like_date($trimmed)) {
+        return false;
+    }
+
+    if (attendance_metadata_row_text(strtolower($trimmed))) {
+        return false;
+    }
+
+    if (!preg_match('/[A-Za-z]/', $trimmed)) {
+        return false;
+    }
+
+    return preg_match('/^[A-Za-z][A-Za-z .\'-]{1,}$/', $trimmed) === 1;
 }
 
 function attendance_guess_header_map(array $rows): array
@@ -1119,6 +1542,7 @@ function attendance_guess_header_map(array $rows): array
 
         $statusScores = [];
         $timeScores = [];
+        $dateScores = [];
         $nameScores = [];
         $empCodeScores = [];
 
@@ -1135,7 +1559,10 @@ function attendance_guess_header_map(array $rows): array
                 if (attendance_value_looks_like_time($value)) {
                     $timeScores[$columnIndex] = ($timeScores[$columnIndex] ?? 0) + 1;
                 }
-                if (preg_match('/[A-Za-z]/', $value) && str_contains($value, ' ') && !attendance_value_looks_like_status($value) && !attendance_metadata_row_text(strtolower($value))) {
+                if (attendance_value_looks_like_date($value)) {
+                    $dateScores[$columnIndex] = ($dateScores[$columnIndex] ?? 0) + 1;
+                }
+                if (attendance_value_looks_like_name($value)) {
                     $nameScores[$columnIndex] = ($nameScores[$columnIndex] ?? 0) + 1;
                 }
                 if (attendance_value_looks_like_empcode($value)) {
@@ -1150,10 +1577,12 @@ function attendance_guess_header_map(array $rows): array
 
         arsort($statusScores);
         arsort($timeScores);
+        arsort($dateScores);
         arsort($nameScores);
         arsort($empCodeScores);
 
         $statusColumn = array_key_first($statusScores);
+        $dateColumn = array_key_first($dateScores);
         $timeColumns = array_keys($timeScores);
         sort($timeColumns);
         if ($statusColumn !== null) {
@@ -1175,6 +1604,7 @@ function attendance_guess_header_map(array $rows): array
         return [
             'header_index' => $start - 1,
             'header_map' => array_filter([
+                'date' => $dateColumn,
                 'empcode' => $empCodeColumn,
                 'name' => $nameColumn,
                 'status' => $statusColumn,
@@ -1195,8 +1625,35 @@ function parse_attendance_report_csv(string $path, ?string $overrideDate = null,
 
     $detectedDate = attendance_report_date($rows);
     $reportDate = $detectedDate ?: (($overrideDate && preg_match('/^\d{4}-\d{2}-\d{2}$/', $overrideDate)) ? $overrideDate : null);
-    if ($reportDate === null) {
-        throw new RuntimeException('Could not detect the report date in the attendance file.');
+
+    $monthlyEntries = attendance_extract_monthly_register_entries($rows);
+    if ($monthlyEntries !== []) {
+        $entryDates = array_values(array_unique(array_map(
+            static fn(array $entry): string => (string) ($entry['date'] ?? ''),
+            array_filter($monthlyEntries, static fn(array $entry): bool => !empty($entry['date']))
+        )));
+        sort($entryDates);
+
+        return [
+            'date' => $entryDates[0] ?? $reportDate,
+            'dates' => $entryDates,
+            'entries' => $monthlyEntries,
+        ];
+    }
+
+    $periodicEntries = attendance_extract_periodic_report_entries($rows, $reportDate);
+    if ($periodicEntries !== []) {
+        $entryDates = array_values(array_unique(array_map(
+            static fn(array $entry): string => (string) ($entry['date'] ?? ''),
+            array_filter($periodicEntries, static fn(array $entry): bool => !empty($entry['date']))
+        )));
+        sort($entryDates);
+
+        return [
+            'date' => $reportDate,
+            'dates' => $entryDates,
+            'entries' => $periodicEntries,
+        ];
     }
 
     $headerIndex = null;
@@ -1206,6 +1663,12 @@ function parse_attendance_report_csv(string $path, ?string $overrideDate = null,
         foreach ($row as $columnIndex => $cell) {
             $normalized = normalize_attendance_csv_header((string) $cell);
             $headerKey = attendance_header_key($normalized);
+            if ($headerKey === 'empcode') {
+                $candidateMap['empcode_columns'] = $candidateMap['empcode_columns'] ?? [];
+                $candidateMap['empcode_columns'][] = $columnIndex;
+                $candidateMap['empcode'] = $candidateMap['empcode'] ?? $columnIndex;
+                continue;
+            }
             if ($headerKey !== null && !isset($candidateMap[$headerKey])) {
                 $candidateMap[$headerKey] = $columnIndex;
             }
@@ -1227,11 +1690,14 @@ function parse_attendance_report_csv(string $path, ?string $overrideDate = null,
     }
 
     if ($headerIndex === null) {
-        throw new RuntimeException('Could not find the Empcode/Status header row in the attendance report.');
+        throw new RuntimeException('Could not find the employee header row in the attendance report. Use columns like Emp ID or Empcode for the employee field, and Attendance or Status for the attendance field.');
     }
 
     if (!isset($headerMap['empcode']) && !isset($headerMap['name'])) {
         throw new RuntimeException('Attendance report is missing the employee column.');
+    }
+    if ($reportDate === null && !isset($headerMap['date'])) {
+        throw new RuntimeException('Could not detect the report date in the attendance file.');
     }
 
     $entries = [];
@@ -1246,22 +1712,31 @@ function parse_attendance_report_csv(string $path, ?string $overrideDate = null,
             break;
         }
 
-        $empCode = isset($headerMap['empcode']) ? trim((string) ($row[$headerMap['empcode']] ?? '')) : '';
+        $empCode = isset($headerMap['empcode_columns'])
+            ? attendance_first_non_empty_column_value($row, (array) $headerMap['empcode_columns'])
+            : (isset($headerMap['empcode']) ? trim((string) ($row[$headerMap['empcode']] ?? '')) : '');
         $employeeName = isset($headerMap['name']) ? trim((string) ($row[$headerMap['name']] ?? '')) : '';
         if (attendance_metadata_row_text($rowText) || ($empCode === '' && $employeeName === '') || str_starts_with(strtolower($empCode), 'total')) {
             continue;
         }
 
+        $rowDate = isset($headerMap['date'])
+            ? attendance_report_cell_date((string) ($row[$headerMap['date']] ?? ''), $reportDate)
+            : $reportDate;
+        if ($rowDate === null) {
+            continue;
+        }
+
         $statusRaw = isset($headerMap['status']) ? trim((string) ($row[$headerMap['status']] ?? '')) : '';
         $remark = isset($headerMap['remark']) ? trim((string) ($row[$headerMap['remark']] ?? '')) : '';
-        $inTime = isset($headerMap['intime']) ? attendance_report_time($reportDate, trim((string) ($row[$headerMap['intime']] ?? ''))) : null;
-        $outTime = isset($headerMap['outtime']) ? attendance_report_time($reportDate, trim((string) ($row[$headerMap['outtime']] ?? ''))) : null;
+        $inTime = isset($headerMap['intime']) ? attendance_report_time($rowDate, trim((string) ($row[$headerMap['intime']] ?? ''))) : null;
+        $outTime = isset($headerMap['outtime']) ? attendance_report_time($rowDate, trim((string) ($row[$headerMap['outtime']] ?? ''))) : null;
         $status = attendance_import_status($statusRaw, $inTime, $outTime);
 
         $entries[] = [
             'emp_code' => $empCode,
             'employee_name' => $employeeName,
-            'date' => $reportDate,
+            'date' => $rowDate,
             'status' => $status,
             'biometric_in_time' => $inTime,
             'biometric_out_time' => $outTime,
@@ -1273,8 +1748,15 @@ function parse_attendance_report_csv(string $path, ?string $overrideDate = null,
         throw new RuntimeException('Attendance report does not contain any usable employee rows.');
     }
 
+    $entryDates = array_values(array_unique(array_map(
+        static fn(array $entry): string => (string) ($entry['date'] ?? ''),
+        array_filter($entries, static fn(array $entry): bool => !empty($entry['date']))
+    )));
+    sort($entryDates);
+
     return [
         'date' => $reportDate,
+        'dates' => $entryDates,
         'entries' => $entries,
     ];
 }
@@ -1294,16 +1776,6 @@ function import_attendance_report_csv(string $path, ?string $overrideDate = null
 
         if ($empCode !== '') {
             $employee = employee_by_emp_code($empCode);
-            if (!$employee) {
-                try {
-                    $employee = create_employee_from_attendance_entry($entry);
-                    if ($employee) {
-                        $created++;
-                    }
-                } catch (Throwable) {
-                    $employee = null;
-                }
-            }
         }
 
         if (!$employee && $empCode === '' && $employeeName !== '') {
@@ -1326,17 +1798,29 @@ function import_attendance_report_csv(string $path, ?string $overrideDate = null
             continue;
         }
 
+        $shiftWindow = shift_window_for_employee($employee);
+        $resolvedStatus = attendance_import_status_for_employee(
+            $employee,
+            (string) $entry['date'],
+            (string) ($entry['status'] ?? ''),
+            $entry['biometric_in_time'] ?? null,
+            $entry['biometric_out_time'] ?? null
+        );
+
         update_attendance_record((int) $employee['id'], (string) $entry['date'], [
-            'status' => $entry['status'],
+            'status' => $resolvedStatus,
             'biometric_in_time' => $entry['biometric_in_time'],
             'biometric_out_time' => $entry['biometric_out_time'],
-            'leave_reason' => in_array($entry['status'], ['Leave', 'Half Day'], true) ? $entry['leave_reason'] : null,
+            'shift_start_time' => $shiftWindow['start_time'] ?? null,
+            'shift_end_time' => $shiftWindow['end_time'] ?? null,
+            'leave_reason' => in_array($resolvedStatus, ['Leave', 'Half Day'], true) ? $entry['leave_reason'] : null,
         ]);
         $imported++;
     }
 
     return [
         'date' => $report['date'],
+        'dates' => $report['dates'] ?? [],
         'imported' => $imported,
         'created' => $created,
         'skipped' => $skipped,

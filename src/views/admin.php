@@ -343,7 +343,7 @@ function render_admin_employees(): void
             </form>
         </section>
         <?php endif; ?>
-        <table>
+        <table class="employee-list-table">
             <thead>
                 <tr>
                     <th>Emp ID</th>
@@ -372,14 +372,14 @@ function render_admin_employees(): void
                     ]));
                 ?>
                     <tr data-filter-row data-filter-text="<?= h($searchText) ?>">
-                        <td><?= h($employee['emp_id']) ?></td>
-                        <td><?= h($employee['name']) ?></td>
-                        <td><?= h($employee['email']) ?></td>
-                        <td><?= h($employee['phone']) ?></td>
-                        <td><?= h((string) ($employee['shift'] ?: '-')) ?></td>
-                        <td><?= h(number_format((float) $employee['salary'], 2)) ?></td>
-                        <td><?= $rulesMarkup ?></td>
-                        <td>
+                        <td data-label="Emp ID"><?= h($employee['emp_id']) ?></td>
+                        <td data-label="Name"><?= h($employee['name']) ?></td>
+                        <td data-label="Email"><?= h($employee['email']) ?></td>
+                        <td data-label="Phone"><?= h($employee['phone']) ?></td>
+                        <td data-label="Shift"><?= h((string) ($employee['shift'] ?: '-')) ?></td>
+                        <td data-label="Salary"><?= h(number_format((float) $employee['salary'], 2)) ?></td>
+                        <td data-label="Rules"><?= $rulesMarkup ?></td>
+                        <td data-label="Actions">
                             <div class="inline-actions">
                                 <a class="button ghost small" href="<?= h(BASE_URL) ?>?page=admin_employees&edit=<?= (int) $employee['id'] ?>">Edit</a>
                                 <button class="button outline small" type="button" data-confirm-delete data-user-id="<?= (int) $employee['id'] ?>" data-user-name="<?= h($employee['name']) ?>">Delete</button>
@@ -532,7 +532,10 @@ function render_admin_employees(): void
                         'manual_punch_out' => true,
                         'manual_out_count' => 1,
                     ]); ?>
-                    <button class="button solid" type="submit" data-rule-submit>Import <?= h($label) ?></button>
+                    <div class="inline-actions">
+                        <button class="button outline" type="submit" name="action" value="employee_csv_cancel">Cancel</button>
+                        <button class="button solid" type="submit" data-rule-submit>Import <?= h($label) ?></button>
+                    </div>
                 </form>
             <?php else: ?>
                 <div class="steps">
@@ -1235,13 +1238,13 @@ function render_admin_attendance(): void
             <button class="modal-close" type="button" data-close-modal>&times;</button>
             <span class="eyebrow">Employee Log Import</span>
             <h2>Bulk Import Employee Log</h2>
-            <p>Upload the daily performance report from Excel or CSV. The importer reads employee rows using Empcode or Name, along with INTime, OUTTime, Status, and Remark, to mark attendance.</p>
+            <p>Upload the attendance report from Excel or CSV. The importer reads employee rows using Empcode or Name, along with Date, INTime, OUTTime, Status, and Remark, to mark the employee calendar.</p>
             <form method="post" enctype="multipart/form-data" class="stack-form" data-validate>
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="admin_attendance_csv_upload">
                 <label class="upload-drop">
                     <strong>Select attendance file</strong>
-                        <p>You can upload `.xlsx`, `.xls`, `.csv`, or `.txt` attendance exports. Employee rows are matched by Empcode first, then by Name if needed. If the report date is not detected, the attendance date below will be used.</p>
+                        <p>You can upload `.xlsx`, `.xls`, `.csv`, or `.txt` attendance exports. Employee rows are matched by Empcode first, then by Name if needed. If the file has a `Date` column, each row is marked on that date in the calendar. If not, the importer uses the detected report date or the attendance date below.</p>
                     <input type="file" name="attendance_csv" accept=".xlsx,.xls,.csv,.txt" required>
                 </label>
                 <label>Attendance Date (optional)<input type="date" name="attendance_date"></label>

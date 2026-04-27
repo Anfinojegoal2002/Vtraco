@@ -95,7 +95,19 @@ function render_header(string $title, string $pageClass = ''): void
     <body class="<?= $isLandingPage ? 'landing-shell' : 'app-fixed' ?>">
     <div class="app-shell <?= $isAdminShell ? 'admin-shell' : ($isEmployeeShell ? 'employee-shell' : '') ?>">
         <?php if ($isSidebarShell): ?>
-            <aside class="<?= $isAdminShell ? 'admin-sidebar' : 'employee-sidebar' ?>">
+            <button
+                class="mobile-nav-toggle"
+                type="button"
+                aria-label="Open navigation menu"
+                aria-expanded="false"
+                data-sidebar-toggle
+            >
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+            <div class="mobile-sidebar-backdrop" data-sidebar-backdrop hidden></div>
+            <aside class="<?= $isAdminShell ? 'admin-sidebar' : 'employee-sidebar' ?>" data-sidebar>
                 <a class="brand" href="<?= h(BASE_URL) ?>?page=<?= $isAdminShell ? (
                     (($user['role'] ?? '') === 'freelancer') ? 'corporate_dashboard'
                     : ((($user['role'] ?? '') === 'external_vendor') ? 'vendor_dashboard' : 'admin_dashboard')

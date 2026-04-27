@@ -192,7 +192,7 @@ function render_register(): void
             <button class="button solid auth-register-submit" type="submit"><?= h($selected['button']) ?></button>
             <div class="auth-register-footer">
                 <span>Already have an account?</span>
-                <button class="auth-register-link" type="button" data-modal-target="landing-login-modal">Login</button>
+                <a class="auth-register-link" href="<?= h(BASE_URL) ?>?page=login&role=<?= h($selectedRole) ?>">Login</a>
             </div>
         </form>
     </div>

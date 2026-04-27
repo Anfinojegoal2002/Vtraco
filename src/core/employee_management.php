@@ -194,6 +194,142 @@ function insert_employee(array $data, array $rules, array $projectIds = []): arr
     ];
 }
 
+function employee_import_scope(array $data): array
+{
+    $adminId = current_admin_id();
+    if ($adminId === null) {
+        throw new RuntimeException('An administrator must be signed in to import employees.');
+    }
+
+    $employeeType = trim((string) ($data['employee_type'] ?? 'regular'));
+    $manager = current_user();
+    if (($manager['role'] ?? '') === 'freelancer') {
+        $employeeType = 'corporate';
+    }
+    if (!in_array($employeeType, ['regular', 'vendor', 'corporate'], true)) {
+        $employeeType = 'regular';
+    }
+
+    if (($manager['role'] ?? '') !== 'freelancer' && ($data['vendor_id'] ?? 0) > 0) {
+        $adminId = (int) $data['vendor_id'];
+    }
+
+    $role = $employeeType === 'corporate' ? 'corporate_employee' : current_manager_target_role();
+
+    return [
+        'admin_id' => $adminId,
+        'employee_type' => $employeeType,
+        'role' => $role,
+    ];
+}
+
+function find_existing_employee_for_import(array $data): ?array
+{
+    $scope = employee_import_scope($data);
+    $email = trim((string) ($data['email'] ?? ''));
+    $empId = trim((string) ($data['emp_id'] ?? ''));
+
+    if ($empId !== '') {
+        $stmt = db()->prepare('SELECT * FROM users WHERE role = :role AND admin_id = :admin_id AND emp_id = :emp_id ORDER BY id DESC LIMIT 1');
+        $stmt->execute([
+            'role' => $scope['role'],
+            'admin_id' => $scope['admin_id'],
+            'emp_id' => $empId,
+        ]);
+        $row = $stmt->fetch();
+        if ($row) {
+            return $row;
+        }
+    }
+
+    if ($email !== '') {
+        $stmt = db()->prepare('SELECT * FROM users WHERE role = :role AND admin_id = :admin_id AND LOWER(email) = LOWER(:email) ORDER BY id DESC LIMIT 1');
+        $stmt->execute([
+            'role' => $scope['role'],
+            'admin_id' => $scope['admin_id'],
+            'email' => $email,
+        ]);
+        $row = $stmt->fetch();
+        if ($row) {
+            return $row;
+        }
+    }
+
+    return null;
+}
+
+function import_employee_row(array $data, array $rules, array $projectIds = []): array
+{
+    $existingEmployee = find_existing_employee_for_import($data);
+    if (!$existingEmployee) {
+        $createdEmployee = insert_employee($data, $rules, $projectIds);
+        $createdEmployee['result'] = 'created';
+        return $createdEmployee;
+    }
+
+    $scope = employee_import_scope($data);
+    $password = random_password();
+    $name = trim((string) ($data['name'] ?? ''));
+    if ($name === '') {
+        $name = generated_employee_name((string) ($data['email'] ?? ''), (string) ($data['emp_id'] ?? ''));
+    }
+    $email = trim((string) ($data['email'] ?? ''));
+    $phone = trim((string) ($data['phone'] ?? ''));
+    $salary = (float) ($data['salary'] ?? 0);
+    $empId = trim((string) ($data['emp_id'] ?? ''));
+
+    if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        throw new RuntimeException('Employee email must be valid.');
+    }
+    if ($phone === '') {
+        throw new RuntimeException('Employee phone number is required.');
+    }
+    if ($salary < 0) {
+        throw new RuntimeException('Employee salary must be zero or greater.');
+    }
+    if (role_email_exists($scope['role'], $email, (int) $existingEmployee['id'])) {
+        throw new RuntimeException('This employee email is already assigned.');
+    }
+
+    $normalizedProjectIds = normalize_project_assignment_ids($projectIds);
+    $pdo = db();
+    $pdo->beginTransaction();
+
+    try {
+        $pdo->prepare('UPDATE users SET admin_id = :admin_id, emp_id = :emp_id, name = :name, email = :email, phone = :phone, shift = :shift, salary = :salary, employee_type = :employee_type, password_hash = :password_hash, force_password_change = 1, password_changed_at = NULL, password_reset_requested_at = NULL WHERE id = :id')
+            ->execute([
+                'id' => (int) $existingEmployee['id'],
+                'admin_id' => $scope['admin_id'],
+                'emp_id' => $empId,
+                'name' => $name,
+                'email' => $email,
+                'phone' => $phone,
+                'shift' => normalize_shift_selection((string) ($data['shift'] ?? '')),
+                'salary' => $salary,
+                'employee_type' => $scope['employee_type'],
+                'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+            ]);
+        save_employee_rules((int) $existingEmployee['id'], $rules);
+        save_employee_project_assignments((int) $existingEmployee['id'], $normalizedProjectIds);
+        $pdo->commit();
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $exception;
+    }
+
+    $employee = employee_by_id((int) $existingEmployee['id']) ?: $existingEmployee;
+    $mailResult = send_employee_credentials_email($employee, $password, $rules);
+
+    return [
+        'employee' => $employee,
+        'mail_result' => $mailResult,
+        'password' => $password,
+        'result' => 'updated',
+    ];
+}
+
 function attendance_import_employee_email(string $empId): string
 {
     $base = strtolower(trim($empId)) !== '' ? strtolower(trim($empId)) : 'employee';
@@ -379,6 +515,24 @@ function normalize_csv_header(string $header): string
     return preg_replace('/[^a-z0-9]+/', '', $header) ?? $header;
 }
 
+function normalize_import_phone(string $phone): string
+{
+    $phone = trim($phone);
+    if ($phone === '') {
+        return '';
+    }
+
+    if (preg_match('/^\d+(?:\.0+)?$/', $phone) === 1) {
+        return preg_replace('/\.0+$/', '', $phone) ?? $phone;
+    }
+
+    if (preg_match('/^\d+(?:\.\d+)?E[+-]?\d+$/i', $phone) === 1) {
+        return number_format((float) $phone, 0, '', '');
+    }
+
+    return $phone;
+}
+
 function parse_employee_csv(string $path, string $originalName = ''): array
 {
     $sourceRows = attendance_report_rows($path, $originalName);
@@ -395,7 +549,7 @@ function parse_employee_csv(string $path, string $originalName = ''): array
     $aliases = [
         'emp_id' => ['empid', 'employeeid', 'employeecode', 'employeeno', 'employeenumber', 'empcode', 'staffid', 'staffcode', 'staffno', 'code'],
         'name' => ['name', 'employeename', 'employee', 'fullname', 'staffname', 'username', 'personname'],
-        'email' => ['email', 'emailaddress', 'mail', 'officialemail', 'workemail'],
+        'email' => ['email', 'emailaddress', 'emailid', 'mail', 'mailid', 'mailaddress', 'officialemail', 'workemail'],
         'phone' => ['phonenumber', 'phone', 'mobilenumber', 'mobile', 'contactnumber', 'contact', 'mobileno', 'phoneno', 'contactno'],
         'shift' => ['shift', 'workshift', 'timeslot', 'timing'],
         'salary' => ['salary', 'monthlysalary', 'pay', 'amount', 'wage', 'salaryamount', 'monthlypay', 'basicpay'],
@@ -428,7 +582,7 @@ function parse_employee_csv(string $path, string $originalName = ''): array
     foreach (array_slice($sourceRows, 1) as $row) {
         $rowNumber++;
         $email = trim((string) (($columns['email'] !== null) ? ($row[$columns['email']] ?? '') : ''));
-        $phone = trim((string) ($row[$columns['phone']] ?? ''));
+        $phone = normalize_import_phone((string) ($row[$columns['phone']] ?? ''));
         $salaryText = trim((string) ($row[$columns['salary']] ?? '0'));
         $empId = trim((string) (($columns['emp_id'] !== null) ? ($row[$columns['emp_id']] ?? '') : ''));
 

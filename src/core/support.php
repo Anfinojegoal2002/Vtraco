@@ -25,7 +25,16 @@ function base_path_url(): string
 
 function asset_url(string $path): string
 {
-    return base_path_url() . '/' . ltrim($path, '/');
+    $normalizedPath = ltrim($path, '/');
+    $url = base_path_url() . '/' . $normalizedPath;
+    $localPath = dirname(__DIR__, 1) . '/' . str_replace('/', DIRECTORY_SEPARATOR, $normalizedPath);
+
+    if (is_file($localPath)) {
+        $version = (string) filemtime($localPath);
+        return $url . '?v=' . rawurlencode($version);
+    }
+
+    return $url;
 }
 
 function normalize_relative_path(string $path): string

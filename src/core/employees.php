@@ -68,6 +68,17 @@ function employee_by_id(int $id): ?array
     return $row ?: null;
 }
 
+function normalize_emp_code_for_match(string $empCode): string
+{
+    $normalized = strtoupper(trim($empCode));
+    $normalized = preg_replace('/[^A-Z0-9]/', '', $normalized) ?? $normalized;
+    if (preg_match('/^([A-Z]+)0*([0-9]+)$/', $normalized, $matches) === 1) {
+        return $matches[1] . $matches[2];
+    }
+
+    return $normalized;
+}
+
 function employee_by_emp_code(string $empCode): ?array
 {
     $empCode = trim($empCode);
@@ -77,20 +88,25 @@ function employee_by_emp_code(string $empCode): ?array
 
     $adminId = current_admin_id();
     $role = current_manager_target_role();
+    $targetCode = normalize_emp_code_for_match($empCode);
     if ($adminId === null) {
-        $stmt = db()->prepare("SELECT * FROM users WHERE emp_id = :emp_id AND role = :role LIMIT 1");
-        $stmt->execute(['emp_id' => $empCode, 'role' => $role]);
+        $stmt = db()->prepare("SELECT * FROM users WHERE role = :role");
+        $stmt->execute(['role' => $role]);
     } else {
-        $stmt = db()->prepare("SELECT * FROM users WHERE emp_id = :emp_id AND role = :role AND admin_id = :admin_id LIMIT 1");
+        $stmt = db()->prepare("SELECT * FROM users WHERE role = :role AND admin_id = :admin_id");
         $stmt->execute([
-            'emp_id' => $empCode,
             'role' => $role,
             'admin_id' => $adminId,
         ]);
     }
 
-    $row = $stmt->fetch();
-    return $row ?: null;
+    foreach ($stmt->fetchAll() as $row) {
+        if (normalize_emp_code_for_match((string) ($row['emp_id'] ?? '')) === $targetCode) {
+            return $row;
+        }
+    }
+
+    return null;
 }
 
 function employee_by_name(string $name): ?array
@@ -263,6 +279,33 @@ function standard_shift_options(): array
     ];
 }
 
+function format_shift_selection_from_times(string $startTime, string $endTime): string
+{
+    return date('h:i A', strtotime($startTime)) . ' - ' . date('h:i A', strtotime($endTime));
+}
+
+function shift_time_to_24h(?string $value): ?string
+{
+    $value = trim((string) $value);
+    if ($value === '') {
+        return null;
+    }
+
+    foreach (['H:i:s', 'H:i', 'g:i A', 'g:iA', 'h:i A', 'h:iA'] as $format) {
+        $time = DateTimeImmutable::createFromFormat($format, $value);
+        if ($time instanceof DateTimeImmutable) {
+            return $time->format('H:i:s');
+        }
+    }
+
+    $timestamp = strtotime($value);
+    if ($timestamp === false) {
+        return null;
+    }
+
+    return date('H:i:s', $timestamp);
+}
+
 function normalize_shift_selection(?string $shift): string
 {
     $shift = trim((string) $shift);
@@ -285,6 +328,83 @@ function normalize_shift_selection(?string $shift): string
     }
 
     return $normalized;
+}
+
+function shift_window_from_label(?string $shift): ?array
+{
+    $shift = normalize_shift_selection($shift);
+    if ($shift === '') {
+        return null;
+    }
+
+    $parts = preg_split('/\s*-\s*/', $shift, 2);
+    if (!is_array($parts) || count($parts) !== 2) {
+        return null;
+    }
+
+    $startTime = shift_time_to_24h($parts[0]);
+    $endTime = shift_time_to_24h($parts[1]);
+    if ($startTime === null || $endTime === null || $startTime === $endTime) {
+        return null;
+    }
+
+    return [
+        'start_time' => $startTime,
+        'end_time' => $endTime,
+        'shift_name' => $shift,
+    ];
+}
+
+function shift_window_for_employee(array $employee): ?array
+{
+    $shift = normalize_shift_selection((string) ($employee['shift'] ?? ''));
+    if ($shift === '') {
+        return null;
+    }
+
+    $window = shift_window_from_label($shift);
+    if ($window !== null) {
+        return $window;
+    }
+
+    $adminId = (int) ($employee['admin_id'] ?? 0);
+    if ($adminId <= 0 && (($employee['role'] ?? '') === 'admin')) {
+        $adminId = (int) ($employee['id'] ?? 0);
+    }
+
+    if ($adminId <= 0) {
+        return null;
+    }
+
+    $stmt = db()->prepare('SELECT shift_name, start_time, end_time FROM shift_timings WHERE admin_id = :admin_id');
+    $stmt->execute(['admin_id' => $adminId]);
+
+    foreach ($stmt->fetchAll() as $row) {
+        $shiftName = normalize_shift_selection((string) ($row['shift_name'] ?? ''));
+        $rowWindow = [
+            'start_time' => trim((string) ($row['start_time'] ?? '')),
+            'end_time' => trim((string) ($row['end_time'] ?? '')),
+            'shift_name' => $shiftName,
+        ];
+
+        if ($shiftName !== '' && strcasecmp($shiftName, $shift) === 0) {
+            return $rowWindow;
+        }
+
+        $formattedWindow = shift_window_from_label(format_shift_selection_from_times(
+            (string) ($row['start_time'] ?? ''),
+            (string) ($row['end_time'] ?? '')
+        ));
+        if ($formattedWindow !== null && strcasecmp($formattedWindow['shift_name'], $shift) === 0) {
+            return [
+                'start_time' => $formattedWindow['start_time'],
+                'end_time' => $formattedWindow['end_time'],
+                'shift_name' => $shift,
+            ];
+        }
+    }
+
+    return null;
 }
 
 function shift_timings(): array
@@ -337,6 +457,40 @@ function add_shift_timing(array $data): void
             'end_time' => $endTime,
             'created_at' => now(),
         ]);
+}
+
+function resolve_shift_selection_from_input(array $source, ?string $fallbackShift = null, bool $allowBlank = false): string
+{
+    $selectedShift = normalize_shift_selection((string) ($source['shift'] ?? $fallbackShift ?? ''));
+    $customStartTime = trim((string) ($source['custom_shift_start_time'] ?? ''));
+    $customEndTime = trim((string) ($source['custom_shift_end_time'] ?? ''));
+
+    if ($customStartTime === '' && $customEndTime === '') {
+        if ($selectedShift === '' && !$allowBlank && $fallbackShift !== null) {
+            return normalize_shift_selection($fallbackShift);
+        }
+        return $selectedShift;
+    }
+
+    if ($customStartTime === '' || $customEndTime === '') {
+        throw new RuntimeException('Enter both custom shift start time and end time.');
+    }
+
+    if ($customStartTime === $customEndTime) {
+        throw new RuntimeException('Custom shift start time and end time must be different.');
+    }
+
+    $resolvedShift = format_shift_selection_from_times($customStartTime, $customEndTime);
+
+    $currentUser = current_user();
+    if (($currentUser['role'] ?? '') === 'admin' && !shift_timing_exists($customStartTime, $customEndTime)) {
+        add_shift_timing([
+            'start_time' => $customStartTime,
+            'end_time' => $customEndTime,
+        ]);
+    }
+
+    return $resolvedShift;
 }
 
 function delete_shift_timing(int $shiftId): void

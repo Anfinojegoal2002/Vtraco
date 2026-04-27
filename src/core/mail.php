@@ -155,10 +155,8 @@ function send_html_mail(string $to, string $subject, string $html, array $attach
 function send_employee_credentials_email(array $employee, string $password, array $rules): array
 {
     $html = '<p>Hello ' . h($employee['name']) . ',</p>'
-        . '<p>Your V Traco employee account has been created.</p>'
-        . '<p>A temporary password was created for your account. Please use the credentials below to sign in and change your password immediately from Profile Settings.</p>'
-        . '<p><strong>Employee Email:</strong> ' . h($employee['email']) . '<br>'
-        . '<strong>Temporary Password:</strong> ' . h($password) . '</p>'
+        . '<p>Your V Traco account has been created.</p>'
+        . '<p><strong>Temporary Password:</strong> ' . h($password) . '</p>'
         . '<p><strong>Assigned Rules</strong><br>' . rules_explanation_html($rules) . '</p>';
     return send_html_mail((string) $employee['email'], 'Your V Traco Login Credentials', $html);
 }

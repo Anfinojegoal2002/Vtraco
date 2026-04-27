@@ -206,7 +206,7 @@ function handle_post_action(string $action): void
                     flash('error', 'Select at least one attendance rule before adding the employee.');
                     redirect_to('admin_employees', ['type' => $returnType, 'stage' => 'manual_rules']);
                 }
-                $pending['shift'] = normalize_shift_selection((string) ($_POST['shift'] ?? ($pending['shift'] ?? '')));
+                $pending['shift'] = resolve_shift_selection_from_input($_POST, (string) ($pending['shift'] ?? ''), false);
                 $createdEmployee = insert_employee($pending, $rules, $_POST['project_ids'] ?? []);
                 unset($_SESSION['pending_employee']);
                 audit_log('employee_created', [
@@ -264,16 +264,18 @@ function handle_post_action(string $action): void
             }
             $rules = normalize_rules_from_input($_POST);
             $projectIds = $_POST['project_ids'] ?? [];
-            $selectedShift = normalize_shift_selection((string) ($_POST['shift'] ?? ''));
+            $selectedShift = resolve_shift_selection_from_input($_POST, '', true);
             if (!$rules['manual_punch_in'] && !$rules['manual_punch_out'] && !$rules['biometric_punch_in'] && !$rules['biometric_punch_out']) {
                 flash('error', 'Select at least one rule before submitting the CSV import.');
                 redirect_to('admin_employees', ['type' => $defaultEmployeeType, 'stage' => 'csv_rules']);
             }
             $created = 0;
+            $updated = 0;
             $skipped = 0;
             $emailsSent = 0;
             $emailsLogged = 0;
-            foreach ($rows as $row) {
+            $skipReasons = [];
+            foreach ($rows as $index => $row) {
                 try {
                     if (!is_array($row)) {
                         $row = [];
@@ -287,8 +289,12 @@ function handle_post_action(string $action): void
                     } else {
                         $row['shift'] = normalize_shift_selection((string) ($row['shift'] ?? ''));
                     }
-                    $createdEmployee = insert_employee($row, $rules, $projectIds);
-                    $created++;
+                    $createdEmployee = import_employee_row($row, $rules, $projectIds);
+                    if (($createdEmployee['result'] ?? 'created') === 'updated') {
+                        $updated++;
+                    } else {
+                        $created++;
+                    }
                     if (!empty($createdEmployee['mail_result']['sent'])) {
                         $emailsSent++;
                     } else {
@@ -296,12 +302,17 @@ function handle_post_action(string $action): void
                     }
                 } catch (Throwable $exception) {
                     $skipped++;
+                    $identifier = trim((string) (($row['emp_id'] ?? '') ?: ($row['email'] ?? '') ?: ($row['name'] ?? 'Row ' . ($index + 1))));
+                    $skipReasons[] = $identifier . ': ' . ($exception->getMessage() ?: 'Import failed.');
                 }
             }
             unset($_SESSION['pending_csv_import']);
             unset($_SESSION['pending_csv_employee_type']);
             unset($_SESSION['pending_csv_vendor_id']);
             $message = 'CSV import completed. Created: ' . $created;
+            if ($updated) {
+                $message .= ' | Updated: ' . $updated;
+            }
             if ($emailsSent) {
                 $message .= ' | Emails sent: ' . $emailsSent;
             }
@@ -313,12 +324,27 @@ function handle_post_action(string $action): void
             }
             audit_log('employee_csv_import_completed', [
                 'created' => $created,
+                'updated' => $updated,
                 'skipped' => $skipped,
                 'emails_sent' => $emailsSent,
                 'emails_logged' => $emailsLogged,
+                'skip_reasons' => $skipReasons,
             ]);
+            if ($skipped && $skipReasons) {
+                flash('info', 'Skipped rows: ' . implode(' | ', array_slice($skipReasons, 0, 5)));
+            }
             flash('success', $message);
             redirect_to('admin_employees', ['type' => $defaultEmployeeType]);
+            break;
+
+        case 'employee_csv_cancel':
+            require_roles(['admin', 'freelancer', 'external_vendor']);
+            $cancelType = trim((string) ($_POST['employee_type'] ?? ($_SESSION['pending_csv_employee_type'] ?? 'regular')));
+            unset($_SESSION['pending_csv_import']);
+            unset($_SESSION['pending_csv_employee_type']);
+            unset($_SESSION['pending_csv_vendor_id']);
+            flash('info', 'Bulk employee import cancelled.');
+            redirect_to('admin_employees', ['type' => $cancelType !== '' ? $cancelType : 'regular']);
             break;
 
         case 'employee_update':
@@ -550,7 +576,7 @@ function handle_post_action(string $action): void
             $ids = array_map('intval', $_POST['employee_ids'] ?? []);
             $rules = normalize_rules_from_input($_POST);
             $projectIds = normalize_project_assignment_ids($_POST['project_ids'] ?? []);
-            $shift = normalize_shift_selection((string) ($_POST['shift'] ?? ''));
+            $shift = resolve_shift_selection_from_input($_POST, '', true);
             if (!$ids) {
                 flash('error', 'Select at least one employee.');
                 redirect_to('admin_rules');
@@ -586,7 +612,10 @@ function handle_post_action(string $action): void
                 validate_attendance_report_upload($_FILES['attendance_csv'] ?? []);
                 $result = import_attendance_report_csv((string) ($_FILES['attendance_csv']['tmp_name'] ?? ''), trim((string) ($_POST['attendance_date'] ?? '')), (string) ($_FILES['attendance_csv']['name'] ?? ''));
                 $message = 'Attendance import completed. Imported: ' . (int) $result['imported'];
-                if (!empty($result['date'])) {
+                $resultDates = array_values(array_filter((array) ($result['dates'] ?? []), static fn($value): bool => is_string($value) && $value !== ''));
+                if (count($resultDates) > 1) {
+                    $message .= ' | Dates: ' . date('d M Y', strtotime($resultDates[0])) . ' to ' . date('d M Y', strtotime($resultDates[count($resultDates) - 1]));
+                } elseif (!empty($result['date'])) {
                     $message .= ' | Date: ' . date('d M Y', strtotime((string) $result['date']));
                 }
                 if (!empty($result['created'])) {
@@ -601,6 +630,7 @@ function handle_post_action(string $action): void
                 audit_log('attendance_import_completed', [
                     'filename' => (string) ($_FILES['attendance_csv']['name'] ?? ''),
                     'date' => $result['date'] ?? null,
+                    'dates' => $resultDates,
                     'imported' => (int) $result['imported'],
                     'created' => (int) ($result['created'] ?? 0),
                     'skipped' => (int) ($result['skipped'] ?? 0),

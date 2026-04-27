@@ -697,6 +697,58 @@
                 setTimeout(() => toast.remove(), 220);
             }, 3400 + (index * 200));
         });
+        const sidebarToggle = document.querySelector('[data-sidebar-toggle]');
+        const sidebar = document.querySelector('[data-sidebar]');
+        const sidebarBackdrop = document.querySelector('[data-sidebar-backdrop]');
+        const closeSidebar = () => {
+            document.body.classList.remove('sidebar-open');
+            if (sidebarToggle) {
+                sidebarToggle.setAttribute('aria-expanded', 'false');
+            }
+            if (sidebarBackdrop) {
+                sidebarBackdrop.hidden = true;
+                sidebarBackdrop.classList.remove('is-visible');
+            }
+        };
+        const openSidebar = () => {
+            document.body.classList.add('sidebar-open');
+            if (sidebarToggle) {
+                sidebarToggle.setAttribute('aria-expanded', 'true');
+            }
+            if (sidebarBackdrop) {
+                sidebarBackdrop.hidden = false;
+                sidebarBackdrop.classList.add('is-visible');
+            }
+        };
+        if (sidebarToggle && sidebar) {
+            sidebarToggle.addEventListener('click', () => {
+                if (document.body.classList.contains('sidebar-open')) {
+                    closeSidebar();
+                } else {
+                    openSidebar();
+                }
+            });
+            sidebar.querySelectorAll('a, button[type="submit"]').forEach(item => {
+                item.addEventListener('click', () => {
+                    if (window.innerWidth <= 760) {
+                        closeSidebar();
+                    }
+                });
+            });
+        }
+        if (sidebarBackdrop) {
+            sidebarBackdrop.addEventListener('click', closeSidebar);
+        }
+        window.addEventListener('resize', () => {
+            if (window.innerWidth > 760) {
+                closeSidebar();
+            }
+        });
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && document.body.classList.contains('sidebar-open')) {
+                closeSidebar();
+            }
+        });
         const landingTopbar = document.querySelector('.landing-topbar');
         if (landingTopbar) {
             const syncTopbar = () => {
@@ -877,4 +929,3 @@
                 }
             });
         });
-

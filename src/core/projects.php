@@ -100,7 +100,10 @@ function assigned_projects_for_employee(int $userId): array
 function employee_available_projects(array $employee): array
 {
     if (!empty($employee['use_assigned_projects'])) {
-        return assigned_projects_for_employee((int) ($employee['id'] ?? 0));
+        $assignedProjects = assigned_projects_for_employee((int) ($employee['id'] ?? 0));
+        if ($assignedProjects !== []) {
+            return $assignedProjects;
+        }
     }
 
     return active_projects();
