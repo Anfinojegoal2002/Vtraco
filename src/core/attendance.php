@@ -866,6 +866,10 @@ function attendance_report_time(?string $date, string $value): ?string
         }
     }
 
+    if (preg_match('/^\d{4}-\d{2}-\d{2}\s+(\d{1,2}:\d{2}(?::\d{2})?)$/', $value, $matches) === 1) {
+        $value = $matches[1];
+    }
+
     foreach (['H:i', 'H:i:s', 'g:i A', 'g:iA', 'h:i A', 'h:iA'] as $format) {
         $time = DateTimeImmutable::createFromFormat('Y-m-d ' . $format, $date . ' ' . $value);
         if ($time instanceof DateTimeImmutable) {
@@ -887,6 +891,10 @@ function attendance_import_status(string $rawStatus, ?string $inTime, ?string $o
         return 'Week Off';
     }
 
+    if (in_array($status, ['P/2', 'P2', '1/2P', 'PRESENT/2'], true)) {
+        return 'Half Day';
+    }
+
     if ($inTime !== null && $outTime !== null) {
         return 'Present';
     }
@@ -905,6 +913,11 @@ function attendance_import_status(string $rawStatus, ?string $inTime, ?string $o
 function attendance_import_status_for_employee(array $employee, string $date, string $rawStatus, ?string $inTime, ?string $outTime): string
 {
     $baseStatus = attendance_import_status($rawStatus, $inTime, $outTime);
+    $normalizedStatus = strtoupper(trim($rawStatus));
+    if (in_array($normalizedStatus, ['P/2', 'P2', '1/2P', 'PRESENT/2', 'H', 'HD', 'HALF', 'HALFDAY', 'HALF DAY'], true)) {
+        return 'Half Day';
+    }
+
     if (in_array($baseStatus, ['Leave', 'Week Off'], true)) {
         return $baseStatus;
     }
@@ -1406,6 +1419,11 @@ function attendance_extract_periodic_report_entries(array $rows, ?string $fallba
                 break;
             }
 
+            $dataRowText = strtolower(trim(implode(' ', array_map(static fn($cell) => trim((string) $cell), $dataRow))));
+            if ($dataRowText === '' || attendance_summary_row_text($dataRowText) || attendance_metadata_row_text($dataRowText)) {
+                continue;
+            }
+
             $rowDate = isset($candidateMap['date'])
                 ? attendance_report_cell_date((string) ($dataRow[$candidateMap['date']] ?? ''), $fallbackDate)
                 : $fallbackDate;
@@ -1774,7 +1792,9 @@ function import_attendance_report_csv(string $path, ?string $overrideDate = null
         $empCode = trim((string) ($entry['emp_code'] ?? ''));
         $employeeName = trim((string) ($entry['employee_name'] ?? ''));
 
-        if ($empCode !== '') {
+        if ($empCode !== '' && $employeeName !== '') {
+            $employee = employee_by_emp_code_and_name($empCode, $employeeName);
+        } elseif ($empCode !== '') {
             $employee = employee_by_emp_code($empCode);
         }
 

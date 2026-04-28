@@ -6,7 +6,6 @@ function render_landing(): void
 {
     $landingAdminCount = admin_count();
     $landingEmployeeCount = employee_count();
-    $landingAttendanceCount = (int) db()->query('SELECT COUNT(*) FROM attendance_records')->fetchColumn();
     render_header('Welcome', 'landing');
     ?>
     <section class="landing-page">
@@ -128,10 +127,6 @@ function render_landing(): void
                 <div class="stat-item reveal">
                     <strong data-counter="<?= (int) $landingEmployeeCount ?>"><?= (int) $landingEmployeeCount ?></strong>
                     <span>Employees Managed</span>
-                </div>
-                <div class="stat-item reveal">
-                    <strong data-counter="<?= (int) $landingAttendanceCount ?>"><?= (int) $landingAttendanceCount ?></strong>
-                    <span>Attendance Records</span>
                 </div>
             </div>
         </section>

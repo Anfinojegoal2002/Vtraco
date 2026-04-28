@@ -6,7 +6,9 @@ function employee_count(): int
 {
     $user = current_user();
     if (($user['role'] ?? '') === 'admin') {
-        return (int) db()->query("SELECT COUNT(*) FROM users WHERE role IN ('employee', 'corporate_employee')")->fetchColumn();
+        $stmt = db()->prepare("SELECT COUNT(*) FROM users WHERE role = 'employee' AND admin_id = :admin_id AND (employee_type IS NULL OR employee_type = '' OR employee_type = 'regular')");
+        $stmt->execute(['admin_id' => (int) $user['id']]);
+        return (int) $stmt->fetchColumn();
     }
 
     $adminId = current_admin_id();
@@ -102,6 +104,40 @@ function employee_by_emp_code(string $empCode): ?array
 
     foreach ($stmt->fetchAll() as $row) {
         if (normalize_emp_code_for_match((string) ($row['emp_id'] ?? '')) === $targetCode) {
+            return $row;
+        }
+    }
+
+    return null;
+}
+
+function employee_by_emp_code_and_name(string $empCode, string $name): ?array
+{
+    $empCode = trim($empCode);
+    $name = trim($name);
+    if ($empCode === '' || $name === '') {
+        return null;
+    }
+
+    $adminId = current_admin_id();
+    $role = current_manager_target_role();
+    $targetCode = normalize_emp_code_for_match($empCode);
+    $targetName = strtolower($name);
+    if ($adminId === null) {
+        $stmt = db()->prepare("SELECT * FROM users WHERE role = :role");
+        $stmt->execute(['role' => $role]);
+    } else {
+        $stmt = db()->prepare("SELECT * FROM users WHERE role = :role AND admin_id = :admin_id");
+        $stmt->execute([
+            'role' => $role,
+            'admin_id' => $adminId,
+        ]);
+    }
+
+    foreach ($stmt->fetchAll() as $row) {
+        $rowCode = normalize_emp_code_for_match((string) ($row['emp_id'] ?? ''));
+        $rowName = strtolower(trim((string) ($row['name'] ?? '')));
+        if ($rowCode === $targetCode && $rowName === $targetName) {
             return $row;
         }
     }

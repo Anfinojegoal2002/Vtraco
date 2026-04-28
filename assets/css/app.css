@@ -636,7 +636,7 @@
             .landing-footer { background: #08122f; color: #dbeafe; padding: 44px 24px 18px; }
             .landing-footer-wrap { width: 100%; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 24px; }
             .footer-links, .social-links { display: flex; gap: 12px; flex-wrap: wrap; }
-            .footer-bottom { width: 100%; margin: 18px 0 0; padding-top: 16px; border-top: 1px solid rgba(219,234,254,0.12); color: rgba(219,234,254,0.7); }
+            .footer-bottom { width: 100%; margin: 18px 0 0; padding-top: 16px; border-top: 1px solid rgba(219,234,254,0.12); color: rgba(219,234,254,0.7); text-align: center; }
             .reveal { opacity: 0; transform: translateY(24px); transition: opacity .6s ease, transform .6s ease; }
             .reveal.visible { opacity: 1; transform: translateY(0); }
             @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
