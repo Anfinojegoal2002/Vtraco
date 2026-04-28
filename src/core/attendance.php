@@ -246,20 +246,27 @@ function shift_based_attendance_status(array $record, array $sessions): ?string
         return attendance_date_is_closed((string) ($record['attend_date'] ?? '')) ? 'Half Day' : 'Pending';
     }
 
-    $workedSeconds = attendance_seconds_between($inTime, $outTime);
-    $shiftSeconds = attendance_seconds_between(
-        (string) ($record['attend_date'] ?? date('Y-m-d')) . ' ' . $shiftWindow['start_time'],
-        (string) ($record['attend_date'] ?? date('Y-m-d')) . ' ' . $shiftWindow['end_time']
-    );
-    if ($workedSeconds === null || $shiftSeconds === null || $shiftSeconds <= 0) {
+    $attendDate = (string) ($record['attend_date'] ?? date('Y-m-d'));
+    $shiftStart = strtotime($attendDate . ' ' . $shiftWindow['start_time']);
+    $shiftEnd = strtotime($attendDate . ' ' . $shiftWindow['end_time']);
+    $actualIn = strtotime($inTime);
+    $actualOut = strtotime($outTime);
+    if ($shiftStart === false || $shiftEnd === false || $actualIn === false || $actualOut === false) {
         return null;
     }
 
-    if ($workedSeconds >= (int) ceil($shiftSeconds * 0.75)) {
-        return 'Present';
+    if ($shiftEnd < $shiftStart) {
+        $shiftEnd += 86400;
+    }
+    if ($actualOut < $actualIn) {
+        $actualOut += 86400;
     }
 
-    return $workedSeconds > 0 ? 'Half Day' : 'Absent';
+    if ($actualIn > $shiftStart || $actualOut < $shiftEnd) {
+        return 'Half Day';
+    }
+
+    return 'Present';
 }
 
 function manual_attendance_status(array $record, array $sessions): ?string
