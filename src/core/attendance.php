@@ -893,6 +893,14 @@ function attendance_report_time(?string $date, string $value): ?string
 
 function attendance_import_status(string $rawStatus, ?string $inTime, ?string $outTime): string
 {
+    if ($inTime !== null && $outTime !== null) {
+        return 'Present';
+    }
+
+    if ($inTime !== null || $outTime !== null) {
+        return 'Half Day';
+    }
+
     $status = strtoupper(trim($rawStatus));
     if (in_array($status, ['L', 'LEAVE'], true)) {
         return 'Leave';
@@ -906,14 +914,6 @@ function attendance_import_status(string $rawStatus, ?string $inTime, ?string $o
         return 'Half Day';
     }
 
-    if ($inTime !== null && $outTime !== null) {
-        return 'Present';
-    }
-
-    if ($inTime !== null || $outTime !== null) {
-        return 'Half Day';
-    }
-
     return match ($status) {
         'P', 'PR', 'PRESENT' => 'Present',
         'H', 'HD', 'HALF', 'HALFDAY', 'HALF DAY' => 'Half Day',
@@ -923,31 +923,7 @@ function attendance_import_status(string $rawStatus, ?string $inTime, ?string $o
 
 function attendance_import_status_for_employee(array $employee, string $date, string $rawStatus, ?string $inTime, ?string $outTime): string
 {
-    $baseStatus = attendance_import_status($rawStatus, $inTime, $outTime);
-    $normalizedStatus = strtoupper(trim($rawStatus));
-    if (in_array($normalizedStatus, ['P/2', 'P2', '1/2P', 'PRESENT/2', 'H', 'HD', 'HALF', 'HALFDAY', 'HALF DAY'], true)) {
-        return 'Half Day';
-    }
-
-    if (in_array($baseStatus, ['Leave', 'Week Off'], true)) {
-        return $baseStatus;
-    }
-
-    $shiftWindow = shift_window_for_employee($employee);
-    if ($shiftWindow === null) {
-        return $baseStatus;
-    }
-
-    $record = [
-        'user_id' => (int) ($employee['id'] ?? 0),
-        'attend_date' => $date,
-        'shift_start_time' => $shiftWindow['start_time'],
-        'shift_end_time' => $shiftWindow['end_time'],
-        'biometric_in_time' => $inTime,
-        'biometric_out_time' => $outTime,
-    ];
-
-    return shift_based_attendance_status($record, []) ?? $baseStatus;
+    return attendance_import_status($rawStatus, $inTime, $outTime);
 }
 
 function detect_attendance_csv_delimiter(array $rawLines): string
@@ -1017,6 +993,23 @@ function attendance_is_binary_xls_file(string $path, string $originalName = ''):
     }
 
     return attendance_file_signature($path, 8) === "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1";
+}
+
+function assert_attendance_import_runtime_ready(string $path, string $originalName): void
+{
+    $extension = strtolower(pathinfo($originalName !== '' ? $originalName : $path, PATHINFO_EXTENSION));
+
+    if (($extension === 'xlsx' || attendance_is_xlsx_file($path, $originalName)) && !class_exists(ZipArchive::class)) {
+        throw new RuntimeException('Attendance .xlsx import requires the PHP zip extension. Enable extension=zip on the live server and restart Apache/PHP.');
+    }
+
+    if (attendance_is_html_table_file($path, $originalName) && !class_exists(DOMDocument::class)) {
+        throw new RuntimeException('Attendance Excel/HTML import requires the PHP dom extension. Enable extension=dom on the live server and restart Apache/PHP.');
+    }
+
+    if (attendance_is_binary_xls_file($path, $originalName) && !class_exists(\Shuchkin\SimpleXLS::class)) {
+        throw new RuntimeException('Attendance .xls import requires Composer dependencies. Run composer install, or php composer.phar install, in the vtraco folder on the live server.');
+    }
 }
 
 function attendance_excel_column_index(string $reference): int
@@ -1350,18 +1343,25 @@ function attendance_month_performance_month_year(array $rows, ?string $fallbackD
 
 function attendance_block_value_after_label(array $row, string $label): string
 {
-    $normalizedLabel = normalize_attendance_csv_header($label);
+    $normalizedLabels = array_map('normalize_attendance_csv_header', array_map('trim', explode('|', $label)));
     $count = count($row);
     for ($index = 0; $index < $count; $index++) {
-        if (normalize_attendance_csv_header((string) ($row[$index] ?? '')) !== $normalizedLabel) {
+        if (!in_array(normalize_attendance_csv_header((string) ($row[$index] ?? '')), $normalizedLabels, true)) {
             continue;
         }
 
-        for ($next = $index + 1; $next < $count; $next++) {
+        for ($next = $index + 1; $next < min($count, $index + 4); $next++) {
             $value = trim((string) ($row[$next] ?? ''));
-            if ($value !== '') {
-                return $value;
+            if ($value === '') {
+                continue;
             }
+
+            $normalizedValue = normalize_attendance_csv_header($value);
+            if (in_array($normalizedValue, ['nam', 'name', 'empcod', 'empcode', 'deptnam', 'deptname', 'designation', 'category', 'status', 'department'], true)) {
+                return '';
+            }
+
+            return $value;
         }
     }
 
@@ -1392,12 +1392,24 @@ function attendance_extract_month_performance_entries(array $rows, ?string $fall
         $outKey = normalize_attendance_csv_header((string) ($outRow[0] ?? ''));
         $statusKey = normalize_attendance_csv_header((string) ($statusRow[0] ?? ''));
 
-        if ($metaKey !== 'deptnam' || $employeeKey !== 'empcod' || $inKey !== 'i' || $outKey !== 'ou' || $statusKey !== 'statu') {
+        if (
+            !in_array($metaKey, ['deptnam', 'deptname', 'department'], true)
+            || !in_array($employeeKey, ['empcod', 'empcode', 'empid', 'employeeid'], true)
+            || !in_array($inKey, ['i', 'in', 'intime', 'punchin'], true)
+            || !in_array($outKey, ['o', 'ou', 'out', 'outtime', 'punchout'], true)
+            || !in_array($statusKey, ['statu', 'status', 'attendance'], true)
+        ) {
             continue;
         }
 
-        $empCode = attendance_block_value_after_label($employeeRow, 'Empcod');
-        $employeeName = attendance_block_value_after_label($employeeRow, 'Nam');
+        $empCode = attendance_block_value_after_label($employeeRow, 'Empcod|Emp Code|Empcode|Emp ID|Employee ID');
+        $employeeName = attendance_block_value_after_label($employeeRow, 'Nam|Name|Employee Name|Staff Name');
+        if (!attendance_value_looks_like_empcode($empCode)) {
+            $empCode = '';
+        }
+        if (!attendance_value_looks_like_name($employeeName)) {
+            $employeeName = '';
+        }
         if ($empCode === '' && $employeeName === '') {
             continue;
         }
@@ -1619,9 +1631,13 @@ function attendance_value_looks_like_date(string $value): bool
 
 function attendance_metadata_row_text(string $rowText): bool
 {
+    $normalized = normalize_attendance_csv_header($rowText);
+
     return $rowText === ''
         || str_contains($rowText, 'daily performance report')
         || str_contains($rowText, 'dept name')
+        || str_contains($rowText, 'dept. name')
+        || str_contains($normalized, 'deptname')
         || str_contains($rowText, 'date :-')
         || preg_match('/^date\s*[:\-]/', $rowText) === 1;
 }
@@ -1920,25 +1936,13 @@ function import_attendance_report_csv(string $path, ?string $overrideDate = null
 {
     $report = parse_attendance_report_csv($path, $overrideDate, $originalName);
     $imported = 0;
-    $created = 0;
     $skipped = 0;
     $unmatched = [];
 
     foreach ($report['entries'] as $entry) {
         $empCode = trim((string) ($entry['emp_code'] ?? ''));
         $employeeName = trim((string) ($entry['employee_name'] ?? ''));
-        $employee = employee_by_attendance_identity($empCode, $employeeName);
-
-        if (!$employee && $empCode === '' && $employeeName !== '') {
-            try {
-                $employee = create_employee_from_attendance_entry($entry);
-                if ($employee) {
-                    $created++;
-                }
-            } catch (Throwable) {
-                $employee = null;
-            }
-        }
+        $employee = $empCode !== '' ? employee_by_emp_code($empCode) : null;
 
         if (!$employee || empty($entry['date'])) {
             $skipped++;
@@ -1970,7 +1974,6 @@ function import_attendance_report_csv(string $path, ?string $overrideDate = null
         'date' => $report['date'],
         'dates' => $report['dates'] ?? [],
         'imported' => $imported,
-        'created' => $created,
         'skipped' => $skipped,
         'unmatched' => array_values(array_unique($unmatched)),
     ];
@@ -1978,11 +1981,13 @@ function import_attendance_report_csv(string $path, ?string $overrideDate = null
 
 function validate_attendance_report_upload(array $file): void
 {
-    validate_uploaded_file($file, ['xlsx', 'xls', 'csv', 'txt'], 8 * 1024 * 1024, 'attendance file');
+    validate_uploaded_file($file, ['xlsx', 'xls', 'csv', 'txt'], 20 * 1024 * 1024, 'attendance file');
 
     $extension = uploaded_file_extension($file);
     $path = (string) ($file['tmp_name'] ?? '');
     $originalName = (string) ($file['name'] ?? '');
+
+    assert_attendance_import_runtime_ready($path, $originalName);
 
     if ($extension === 'xlsx' && !attendance_is_xlsx_file($path, $originalName)) {
         throw new RuntimeException('The uploaded attendance file does not look like a valid .xlsx workbook.');

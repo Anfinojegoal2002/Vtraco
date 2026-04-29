@@ -97,7 +97,7 @@ function employee_by_emp_code(string $empCode): ?array
     $targetCode = normalize_emp_code_for_match($empCode);
 
     if (($user['role'] ?? '') === 'admin') {
-        $stmt = db()->prepare("SELECT * FROM users WHERE role IN ('employee', 'corporate_employee') AND admin_id = :admin_id");
+        $stmt = db()->prepare("SELECT * FROM users WHERE role IN ('employee', 'corporate_employee') AND (admin_id = :admin_id OR admin_id IS NULL)");
         $stmt->execute(['admin_id' => $adminId]);
     } elseif ($adminId === null) {
         $stmt = db()->prepare("SELECT * FROM users WHERE role = :role");
@@ -134,7 +134,7 @@ function employee_by_emp_code_and_name(string $empCode, string $name): ?array
     $targetName = strtolower($name);
 
     if (($user['role'] ?? '') === 'admin') {
-        $stmt = db()->prepare("SELECT * FROM users WHERE role IN ('employee', 'corporate_employee') AND admin_id = :admin_id");
+        $stmt = db()->prepare("SELECT * FROM users WHERE role IN ('employee', 'corporate_employee') AND (admin_id = :admin_id OR admin_id IS NULL)");
         $stmt->execute(['admin_id' => $adminId]);
     } elseif ($adminId === null) {
         $stmt = db()->prepare("SELECT * FROM users WHERE role = :role");
@@ -170,7 +170,7 @@ function employee_by_name(string $name): ?array
     $role = current_manager_target_role();
 
     if (($user['role'] ?? '') === 'admin') {
-        $stmt = db()->prepare("SELECT * FROM users WHERE role IN ('employee', 'corporate_employee') AND admin_id = :admin_id AND LOWER(name) = LOWER(:name) ORDER BY id LIMIT 1");
+        $stmt = db()->prepare("SELECT * FROM users WHERE role IN ('employee', 'corporate_employee') AND (admin_id = :admin_id OR admin_id IS NULL) AND LOWER(name) = LOWER(:name) ORDER BY id LIMIT 1");
         $stmt->execute(['name' => $name, 'admin_id' => $adminId]);
     } elseif ($adminId === null) {
         $stmt = db()->prepare("SELECT * FROM users WHERE role = :role AND LOWER(name) = LOWER(:name) ORDER BY id LIMIT 1");
@@ -201,7 +201,7 @@ function scoped_employee_rows_for_match(): array
     $role = current_manager_target_role();
 
     if (($user['role'] ?? '') === 'admin') {
-        $stmt = db()->prepare("SELECT * FROM users WHERE role IN ('employee', 'corporate_employee') AND admin_id = :admin_id");
+        $stmt = db()->prepare("SELECT * FROM users WHERE role IN ('employee', 'corporate_employee') AND (admin_id = :admin_id OR admin_id IS NULL)");
         $stmt->execute(['admin_id' => $adminId]);
     } elseif ($adminId === null) {
         $stmt = db()->prepare("SELECT * FROM users WHERE role = :role");

@@ -230,13 +230,20 @@ function find_existing_employee_for_import(array $data): ?array
     $email = trim((string) ($data['email'] ?? ''));
     $empId = trim((string) ($data['emp_id'] ?? ''));
 
+    $user = current_user();
+    $isAdmin = ($user['role'] ?? '') === 'admin';
+
     if ($empId !== '') {
-        $stmt = db()->prepare('SELECT * FROM users WHERE role = :role AND admin_id = :admin_id AND emp_id = :emp_id ORDER BY id DESC LIMIT 1');
-        $stmt->execute([
-            'role' => $scope['role'],
-            'admin_id' => $scope['admin_id'],
-            'emp_id' => $empId,
-        ]);
+        $sql = $isAdmin
+            ? "SELECT * FROM users WHERE role IN ('employee', 'corporate_employee') AND (admin_id = :admin_id OR admin_id IS NULL) AND emp_id = :emp_id ORDER BY id DESC LIMIT 1"
+            : 'SELECT * FROM users WHERE role = :role AND admin_id = :admin_id AND emp_id = :emp_id ORDER BY id DESC LIMIT 1';
+        
+        $params = $isAdmin 
+            ? ['admin_id' => $scope['admin_id'], 'emp_id' => $empId]
+            : ['role' => $scope['role'], 'admin_id' => $scope['admin_id'], 'emp_id' => $empId];
+
+        $stmt = db()->prepare($sql);
+        $stmt->execute($params);
         $row = $stmt->fetch();
         if ($row) {
             return $row;
@@ -244,12 +251,16 @@ function find_existing_employee_for_import(array $data): ?array
     }
 
     if ($email !== '') {
-        $stmt = db()->prepare('SELECT * FROM users WHERE role = :role AND admin_id = :admin_id AND LOWER(email) = LOWER(:email) ORDER BY id DESC LIMIT 1');
-        $stmt->execute([
-            'role' => $scope['role'],
-            'admin_id' => $scope['admin_id'],
-            'email' => $email,
-        ]);
+        $sql = $isAdmin
+            ? "SELECT * FROM users WHERE role IN ('employee', 'corporate_employee') AND (admin_id = :admin_id OR admin_id IS NULL) AND LOWER(email) = LOWER(:email) ORDER BY id DESC LIMIT 1"
+            : 'SELECT * FROM users WHERE role = :role AND admin_id = :admin_id AND LOWER(email) = LOWER(:email) ORDER BY id DESC LIMIT 1';
+            
+        $params = $isAdmin 
+            ? ['admin_id' => $scope['admin_id'], 'email' => $email]
+            : ['role' => $scope['role'], 'admin_id' => $scope['admin_id'], 'email' => $email];
+
+        $stmt = db()->prepare($sql);
+        $stmt->execute($params);
         $row = $stmt->fetch();
         if ($row) {
             return $row;
@@ -333,71 +344,6 @@ function import_employee_row(array $data, array $rules, array $projectIds = []):
         'password' => $password,
         'result' => 'updated',
     ];
-}
-
-function attendance_import_employee_email(string $empId): string
-{
-    $base = strtolower(trim($empId)) !== '' ? strtolower(trim($empId)) : 'employee';
-    $base = preg_replace('/[^a-z0-9]+/', '.', $base) ?? $base;
-    $base = trim($base, '.');
-    if ($base === '') {
-        $base = 'employee';
-    }
-
-    $role = current_manager_target_role();
-    for ($suffix = 0; $suffix < 1000; $suffix++) {
-        $email = $suffix === 0
-            ? sprintf('attendance.%s@vtraco.local', $base)
-            : sprintf('attendance.%s.%d@vtraco.local', $base, $suffix);
-
-        $stmt = db()->prepare('SELECT COUNT(*) FROM users WHERE role = :role AND email = :email');
-        $stmt->execute(['role' => $role, 'email' => $email]);
-        if ((int) $stmt->fetchColumn() === 0) {
-            return $email;
-        }
-    }
-
-    return sprintf('attendance.%s.%d@vtraco.local', $base, time());
-}
-
-function create_employee_from_attendance_entry(array $entry): ?array
-{
-    $adminId = current_admin_id();
-    if ($adminId === null) {
-        return null;
-    }
-
-    $empId = trim((string) ($entry['emp_code'] ?? ''));
-    if ($empId === '') {
-        $empId = generate_employee_emp_id();
-    }
-
-    $name = trim((string) ($entry['employee_name'] ?? ''));
-    if ($name === '') {
-        $name = generated_employee_name('', $empId);
-    }
-
-    $email = attendance_import_employee_email($empId);
-    $password = random_password();
-
-    $role = current_manager_target_role();
-    db()->prepare('INSERT INTO users (role, admin_id, emp_id, name, email, phone, shift, salary, password_hash, force_password_change, password_changed_at, created_at) VALUES (:role, :admin_id, :emp_id, :name, :email, :phone, :shift, :salary, :password_hash, :force_password_change, :password_changed_at, :created_at)')
-        ->execute([
-            'role' => $role,
-            'admin_id' => $adminId,
-            'emp_id' => $empId,
-            'name' => $name,
-            'email' => $email,
-            'phone' => '',
-            'shift' => normalize_shift_selection((string) ($entry['shift'] ?? '')),
-            'salary' => 0,
-            'password_hash' => password_hash($password, PASSWORD_DEFAULT),
-            'force_password_change' => 1,
-            'password_changed_at' => null,
-            'created_at' => now(),
-        ]);
-
-    return employee_by_id((int) db()->lastInsertId());
 }
 
 function validate_employee_csv_upload(array $file): void
@@ -570,15 +516,12 @@ function parse_employee_csv(string $path, string $originalName = ''): array
         }
     }
 
-    foreach (['phone', 'salary'] as $required) {
+    foreach (['emp_id', 'name', 'email', 'phone', 'salary'] as $required) {
         if (!array_key_exists($required, $columns)) {
             throw new RuntimeException('Missing required CSV column for ' . $required . '.');
         }
     }
 
-    $columns['emp_id'] = $columns['emp_id'] ?? null;
-    $columns['name'] = $columns['name'] ?? null;
-    $columns['email'] = $columns['email'] ?? null;
     $columns['shift'] = $columns['shift'] ?? null;
 
     $rows = [];
@@ -596,12 +539,12 @@ function parse_employee_csv(string $path, string $originalName = ''): array
         }
 
         if ($empId === '') {
-            $empId = generate_employee_emp_id($reservedEmpIds);
+            throw new RuntimeException('Employee CSV row ' . $rowNumber . ' is missing an employee ID.');
         }
         $reservedEmpIds[] = $empId;
 
         if ($email === '') {
-            $email = attendance_import_employee_email($empId);
+            throw new RuntimeException('Employee CSV row ' . $rowNumber . ' is missing an email address.');
         } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             throw new RuntimeException('Employee CSV row ' . $rowNumber . ' has an invalid email address.');
         }
@@ -612,7 +555,10 @@ function parse_employee_csv(string $path, string $originalName = ''): array
             throw new RuntimeException('Employee CSV row ' . $rowNumber . ' has an invalid salary value.');
         }
 
-        $name = guessed_employee_name($row, $columns, $headerMap, $email, $empId);
+        $name = trim((string) ($row[$columns['name']] ?? ''));
+        if ($name === '') {
+            throw new RuntimeException('Employee CSV row ' . $rowNumber . ' is missing a name.');
+        }
 
         $rows[] = [
             'emp_id' => $empId,

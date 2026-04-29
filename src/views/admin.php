@@ -659,7 +659,7 @@ function render_admin_employees(): void
                     </div>
                     <label class="upload-drop">
                         <strong>Select <?= h(strtolower($singularLabel ?? 'Employee')) ?> file</strong>
-                        <p>Upload a `.xlsx`, `.xls`, `.csv`, or `.txt` file with <?= h(strtolower($singularLabel ?? 'Employee')) ?> details. Supported columns include ID, Name, Email, Phone, and Salary. Email, ID, and Name can be generated automatically if missing.</p>
+                        <p>Upload a `.xlsx`, `.xls`, `.csv`, or `.txt` file with <?= h(strtolower($singularLabel ?? 'Employee')) ?> details. Required columns are ID, Name, Email, Phone, and Salary.</p>
                         <input type="file" name="csv_file" accept=".xlsx,.xls,.csv,.txt" required>
                     </label>
                     <button class="button solid" type="submit">Import File</button>
@@ -1346,13 +1346,13 @@ function render_admin_attendance(): void
             <button class="modal-close" type="button" data-close-modal>&times;</button>
             <span class="eyebrow">Employee Log Import</span>
             <h2>Bulk Import Employee Log</h2>
-            <p>Upload the attendance report from Excel or CSV. The importer reads employee rows using Empcode or Name, along with Date, INTime, OUTTime, Status, and Remark, to mark the employee calendar.</p>
+            <p>Upload the attendance report from Excel or CSV. The importer matches employees by Empcode and reads Date, INTime, OUTTime, Status, and Remark to mark the employee calendar.</p>
             <form method="post" enctype="multipart/form-data" class="stack-form" data-validate>
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="admin_attendance_csv_upload">
                 <label class="upload-drop">
                     <strong>Select attendance file</strong>
-                        <p>You can upload `.xlsx`, `.xls`, `.csv`, or `.txt` attendance exports. Employee rows are matched by Empcode first, then by Name if needed. If the file has a `Date` column, each row is marked on that date in the calendar. If not, the importer uses the detected report date or the attendance date below.</p>
+                        <p>You can upload `.xlsx`, `.xls`, `.csv`, or `.txt` attendance exports. Employee rows are matched by Empcode. If the file has a `Date` column, each row is marked on that date in the calendar. If not, the importer uses the detected report date or the attendance date below.</p>
                     <input type="file" name="attendance_csv" accept=".xlsx,.xls,.csv,.txt" required>
                 </label>
                 <label>Attendance Date (optional)<input type="date" name="attendance_date"></label>

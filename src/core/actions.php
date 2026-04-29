@@ -963,9 +963,6 @@ function handle_post_action(string $action): void
                 if (!empty($result['date'])) {
                     $message .= ' | Date: ' . date('d M Y', strtotime((string) $result['date']));
                 }
-                if (!empty($result['created'])) {
-                    $message .= ' | Auto-added Employees: ' . (int) $result['created'];
-                }
                 if (!empty($result['skipped'])) {
                     $message .= ' | Skipped: ' . (int) $result['skipped'];
                 }
@@ -976,7 +973,6 @@ function handle_post_action(string $action): void
                     'filename' => (string) ($_FILES['attendance_csv']['name'] ?? ''),
                     'date' => $result['date'] ?? null,
                     'imported' => (int) $result['imported'],
-                    'created' => (int) ($result['created'] ?? 0),
                     'skipped' => (int) ($result['skipped'] ?? 0),
                     'unmatched' => $result['unmatched'] ?? [],
                 ]);
