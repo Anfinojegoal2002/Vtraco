@@ -297,13 +297,17 @@ function import_employee_row(array $data, array $rules, array $projectIds = []):
     $pdo->beginTransaction();
 
     try {
+        $emailToSave = (str_ends_with($email, '@vtraco.local') && !str_ends_with($existingEmployee['email'] ?? '', '@vtraco.local'))
+            ? (string) $existingEmployee['email']
+            : $email;
+
         $pdo->prepare('UPDATE users SET admin_id = :admin_id, emp_id = :emp_id, name = :name, email = :email, phone = :phone, shift = :shift, salary = :salary, employee_type = :employee_type, password_hash = :password_hash, force_password_change = 1, password_changed_at = NULL, password_reset_requested_at = NULL WHERE id = :id')
             ->execute([
                 'id' => (int) $existingEmployee['id'],
                 'admin_id' => $scope['admin_id'],
                 'emp_id' => $empId,
                 'name' => $name,
-                'email' => $email,
+                'email' => $emailToSave,
                 'phone' => $phone,
                 'shift' => normalize_shift_selection((string) ($data['shift'] ?? '')),
                 'salary' => $salary,

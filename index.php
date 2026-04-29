@@ -18,9 +18,10 @@ require __DIR__ . '/src/views/super_admin.php';
 initialize_database();
 
 $page = $_GET['page'] ?? 'landing';
-$uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$scriptName = $_SERVER['SCRIPT_NAME'];
-$basePath = str_ends_with($scriptName, 'index.php') ? dirname($scriptName) : $scriptName;
+$uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+$scriptName = $_SERVER['SCRIPT_NAME'] ?? '/index.php';
+$basePath = str_replace('\\', '/', dirname($scriptName));
+$basePath = rtrim($basePath, '/');
 $relativeUri = '/' . ltrim(substr($uri, strlen($basePath)), '/');
 
 if ($relativeUri === '/super-admin') {

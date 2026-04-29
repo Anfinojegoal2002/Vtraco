@@ -1107,9 +1107,17 @@ function attendance_xlsx_first_sheet_path(ZipArchive $zip): ?string
 
 function attendance_extract_xlsx_rows(string $path): array
 {
+    if (!class_exists('ZipArchive')) {
+        throw new RuntimeException('The ZipArchive PHP extension is missing on this server. Please enable it in your hosting panel (e.g., Hostinger PHP extensions) to import .xlsx files.');
+    }
+
+    if (!function_exists('simplexml_load_string')) {
+        throw new RuntimeException('The SimpleXML PHP extension is missing on this server. Please enable it to import .xlsx files.');
+    }
+
     $zip = new ZipArchive();
     if ($zip->open($path) !== true) {
-        throw new RuntimeException('Unable to open the attendance Excel file.');
+        throw new RuntimeException('Unable to open the attendance Excel file. It might be corrupt or in an unsupported format.');
     }
 
     try {
