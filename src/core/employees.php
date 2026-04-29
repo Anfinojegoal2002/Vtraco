@@ -248,24 +248,31 @@ function employee_by_attendance_identity(string $empCode, string $name): ?array
     }
 
     $targetCode = normalize_emp_code_for_match($empCode);
+    $targetNumeric = preg_replace('/[^0-9]/', '', $empCode) ?: null;
     $targetName = normalized_employee_name_for_match($name);
     $matches = [];
 
     foreach (scoped_employee_rows_for_match() as $row) {
         $rowCode = normalize_emp_code_for_match((string) ($row['emp_id'] ?? ''));
+        $rowNumeric = preg_replace('/[^0-9]/', '', (string) ($row['emp_id'] ?? '')) ?: null;
         $rowName = normalized_employee_name_for_match((string) ($row['name'] ?? ''));
 
         $codeMatch = $targetCode !== '' && $rowCode !== '' && (str_starts_with($rowCode, $targetCode) || str_starts_with($targetCode, $rowCode));
+        $numericMatch = $targetNumeric !== null && $rowNumeric !== null && $targetNumeric === $rowNumeric;
         $nameMatch = $targetName !== '' && $rowName !== '' && (str_starts_with($rowName, $targetName) || str_starts_with($targetName, $rowName));
 
-        if (($targetCode !== '' && $targetName !== '' && $codeMatch && $nameMatch)
-            || ($targetCode === '' && $nameMatch)
-            || ($targetName === '' && $codeMatch)) {
-            $matches[] = $row;
+        if ($codeMatch || $numericMatch || $nameMatch) {
+            $score = ($codeMatch ? 3 : ($numericMatch ? 2 : 0)) + ($nameMatch ? 1 : 0);
+            $matches[] = ['row' => $row, 'score' => $score];
         }
     }
 
-    return count($matches) === 1 ? $matches[0] : null;
+    if ($matches !== []) {
+        usort($matches, static fn($a, $b) => $b['score'] <=> $a['score']);
+        return $matches[0]['row'];
+    }
+
+    return null;
 }
 
 function random_password(int $length = 12): string
