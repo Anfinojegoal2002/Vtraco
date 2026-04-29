@@ -48,8 +48,11 @@ function employee_by_id(int $id): ?array
 {
     $user = current_user();
     if (($user['role'] ?? '') === 'admin') {
-        $stmt = db()->prepare("SELECT * FROM users WHERE id = :id AND role IN ('employee', 'corporate_employee')");
-        $stmt->execute(['id' => $id]);
+        $stmt = db()->prepare("SELECT * FROM users WHERE id = :id AND role IN ('employee', 'corporate_employee') AND admin_id = :admin_id");
+        $stmt->execute([
+            'id' => $id,
+            'admin_id' => (int) $user['id'],
+        ]);
     } else {
         $adminId = current_admin_id();
         $role = current_manager_target_role();
@@ -169,6 +172,82 @@ function employee_by_name(string $name): ?array
     $row = $stmt->fetch();
     return $row ?: null;
 }
+
+function normalized_employee_name_for_match(string $name): string
+{
+    $normalized = strtolower(trim($name));
+    return preg_replace('/[^a-z0-9]+/', '', $normalized) ?? $normalized;
+}
+
+function scoped_employee_rows_for_match(): array
+{
+    $adminId = current_admin_id();
+    $role = current_manager_target_role();
+    if ($adminId === null) {
+        $stmt = db()->prepare("SELECT * FROM users WHERE role = :role");
+        $stmt->execute(['role' => $role]);
+    } else {
+        $stmt = db()->prepare("SELECT * FROM users WHERE role = :role AND admin_id = :admin_id");
+        $stmt->execute([
+            'role' => $role,
+            'admin_id' => $adminId,
+        ]);
+    }
+
+    return $stmt->fetchAll();
+}
+
+function employee_by_attendance_identity(string $empCode, string $name): ?array
+{
+    $empCode = trim($empCode);
+    $name = trim($name);
+
+    if ($empCode !== '' && $name !== '') {
+        $exact = employee_by_emp_code_and_name($empCode, $name);
+        if ($exact) {
+            return $exact;
+        }
+    }
+
+    if ($empCode !== '') {
+        $exactCode = employee_by_emp_code($empCode);
+        if ($exactCode) {
+            return $exactCode;
+        }
+    }
+
+    if ($name !== '') {
+        $exactName = employee_by_name($name);
+        if ($exactName) {
+            return $exactName;
+        }
+    }
+
+    if ($empCode === '' && $name === '') {
+        return null;
+    }
+
+    $targetCode = normalize_emp_code_for_match($empCode);
+    $targetName = normalized_employee_name_for_match($name);
+    $matches = [];
+
+    foreach (scoped_employee_rows_for_match() as $row) {
+        $rowCode = normalize_emp_code_for_match((string) ($row['emp_id'] ?? ''));
+        $rowName = normalized_employee_name_for_match((string) ($row['name'] ?? ''));
+
+        $codeMatch = $targetCode !== '' && $rowCode !== '' && (str_starts_with($rowCode, $targetCode) || str_starts_with($targetCode, $rowCode));
+        $nameMatch = $targetName !== '' && $rowName !== '' && (str_starts_with($rowName, $targetName) || str_starts_with($targetName, $rowName));
+
+        if (($targetCode !== '' && $targetName !== '' && $codeMatch && $nameMatch)
+            || ($targetCode === '' && $nameMatch)
+            || ($targetName === '' && $codeMatch)) {
+            $matches[] = $row;
+        }
+    }
+
+    return count($matches) === 1 ? $matches[0] : null;
+}
+
 function random_password(int $length = 12): string
 {
     $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';

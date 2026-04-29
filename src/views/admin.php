@@ -143,7 +143,7 @@ function render_rules_editor(array $existing = [], ?string $submitLabel = null, 
     $defaults = array_merge([
         'manual_punch_in' => false,
         'manual_punch_out' => false,
-        'manual_out_count' => 1,
+        'manual_out_count' => 0,
         'biometric_punch_in' => false,
         'biometric_punch_out' => false,
         'shift' => $shiftOptions[0] ?? '',
@@ -182,7 +182,7 @@ function render_rules_editor(array $existing = [], ?string $submitLabel = null, 
             </label>
         </div>
         <div class="split align-end admin-rules-footer">
-            <label>Manual punch slots<input id="manual-out-count" type="number" min="1" name="manual_out_count" value="<?= h((string) $defaults['manual_out_count']) ?>"></label>
+            <label>Manual punch slots<input id="manual-out-count" type="number" min="0" name="manual_out_count" value="<?= h((string) $defaults['manual_out_count']) ?>"></label>
             <div class="inline-actions">
                 <button class="button outline small" type="button" data-add-manual-slot data-target="#manual-out-count">+ Add Manual Punch</button>
                 <?php if ($submitLabel !== null): ?>
@@ -190,6 +190,8 @@ function render_rules_editor(array $existing = [], ?string $submitLabel = null, 
                 <?php endif; ?>
             </div>
         </div>
+        <div class="spacer"></div>
+        <?php render_project_assignment_picker(); ?>
     </div>
     <?php
 }
@@ -263,17 +265,32 @@ function render_admin_employees(): void
     
     $employeeType = $_GET['type'] ?? 'regular';
     $employeeType = in_array($employeeType, ['regular', 'vendor', 'corporate'], true) ? $employeeType : 'regular';
+    if ($isVendor) {
+        $employeeType = 'vendor';
+    }
+    $canCreateEmployees = $isVendor || $employeeType !== 'vendor';
+    $employeeOwnerLabel = $isVendor ? 'your vendor account' : 'this administrator';
+    $employeeIntro = $canCreateEmployees
+        ? 'Add ' . strtolower($label) . ' manually, import a CSV batch, update records, and manage only the ' . strtolower($label) . ' assigned to ' . $employeeOwnerLabel . '.'
+        : 'View vendor employees assigned by each vendor. Vendor employees can only be added by the vendor.';
+    $vendorCreatedPopup = null;
+    if ($employeeType === 'vendor' && !empty($_SESSION['vendor_created_popup']) && is_array($_SESSION['vendor_created_popup'])) {
+        $vendorCreatedPopup = $_SESSION['vendor_created_popup'];
+        unset($_SESSION['vendor_created_popup']);
+    }
     ?>
     <section class="page-title">
         <div>
             <span class="eyebrow"><?= ($isFreelancer || $isVendor) ? h($label) : ('Admin - ' . h($label)) ?></span>
             <h1><?= h($label) ?></h1>
-            <p>Add <?= h(strtolower($label)) ?> manually, import a CSV batch, update records, and manage only the <?= h(strtolower($label)) ?> assigned to this administrator.</p>
+            <p><?= h($employeeIntro) ?></p>
         </div>
+        <?php if ($canCreateEmployees): ?>
         <div class="action-bar">
             <button class="button outline" type="button" data-modal-target="employee-csv-modal">Bulk Import</button>
             <button class="button solid" type="button" data-modal-target="add-employee-modal">Add <?= h($singularLabel) ?></button>
         </div>
+        <?php endif; ?>
     </section>
     <section class="table-wrap">
         <div class="data-toolbar">
@@ -283,7 +300,7 @@ function render_admin_employees(): void
                     $vendorRegistrations = [];
                     $freelancerRegistrations = [];
                     $filteredEmployees = [];
-                    if ($employeeType === 'vendor') {
+                    if ($employeeType === 'vendor' && !$isVendor) {
                         $vendorRegistrations = db()->query("SELECT * FROM users WHERE role = 'external_vendor' ORDER BY name")->fetchAll();
                         if (!empty($_GET['vendor_id'])) {
                             // Vendor-added employees have role='employee' and admin_id=vendor's user id
@@ -327,8 +344,16 @@ function render_admin_employees(): void
                 </div>
             </div>
         </div>
-        <?php if ($employeeType === 'vendor'): ?>
+        <?php if ($employeeType === 'vendor' && !$isVendor): ?>
         <section class="section-block scroll-panel" style="margin-bottom: 20px; padding: 15px; border-radius: 12px;">
+            <div class="split" style="margin-bottom: 16px;">
+                <div>
+                    <span class="eyebrow">Vendor Directory</span>
+                    <h3 style="margin-bottom: 6px;">Select Vendor</h3>
+                    <p class="hint" style="margin: 0;">Choose a vendor to view the employees assigned to that vendor.</p>
+                </div>
+                <button class="button solid" type="button" data-modal-target="vendor-register-modal">Vendor Register</button>
+            </div>
             <form method="get" class="form-grid">
                 <input type="hidden" name="page" value="admin_employees">
                 <input type="hidden" name="type" value="vendor">
@@ -353,7 +378,9 @@ function render_admin_employees(): void
                     <th>Shift</th>
                     <th>Salary</th>
                     <th>Rules</th>
-                    <th>Actions</th>
+                    <?php if ($canCreateEmployees): ?>
+                        <th>Actions</th>
+                    <?php endif; ?>
                 </tr>
             </thead>
             <tbody id="admin-employees-table">
@@ -379,17 +406,19 @@ function render_admin_employees(): void
                         <td data-label="Shift"><?= h((string) ($employee['shift'] ?: '-')) ?></td>
                         <td data-label="Salary"><?= h(number_format((float) $employee['salary'], 2)) ?></td>
                         <td data-label="Rules"><?= $rulesMarkup ?></td>
-                        <td data-label="Actions">
-                            <div class="inline-actions">
-                                <a class="button ghost small" href="<?= h(BASE_URL) ?>?page=admin_employees&edit=<?= (int) $employee['id'] ?>">Edit</a>
-                                <button class="button outline small" type="button" data-confirm-delete data-user-id="<?= (int) $employee['id'] ?>" data-user-name="<?= h($employee['name']) ?>">Delete</button>
-                            </div>
-                        </td>
+                        <?php if ($canCreateEmployees): ?>
+                            <td data-label="Actions">
+                                <div class="inline-actions">
+                                    <a class="button ghost small" href="<?= h(BASE_URL) ?>?page=admin_employees&edit=<?= (int) $employee['id'] ?>">Edit</a>
+                                    <button class="button outline small" type="button" data-confirm-delete data-user-id="<?= (int) $employee['id'] ?>" data-user-name="<?= h($employee['name']) ?>">Delete</button>
+                                </div>
+                            </td>
+                        <?php endif; ?>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
         </table>
-        <?php if (($employeeType === 'vendor' && empty($_GET['vendor_id']))): ?>
+        <?php if (($employeeType === 'vendor' && !$isVendor && empty($_GET['vendor_id']))): ?>
             <div class="list-item muted" style="display:block; padding: 16px;">Select a vendor from the dropdown above to view their employees.</div>
         <?php elseif (!$filteredEmployees): ?>
             <div class="list-item muted" style="display:block; padding: 16px;">No employees found.</div>
@@ -422,8 +451,10 @@ function render_admin_employees(): void
                         <label>Salary<input type="number" step="0.01" name="salary" value="<?= h((string) $editEmployee['salary']) ?>" required></label>
                         <?php if ($isFreelancer): ?>
                             <input type="hidden" name="employee_type" value="corporate">
+                        <?php elseif ($isVendor): ?>
+                            <input type="hidden" name="employee_type" value="vendor">
                         <?php else: ?>
-                            <label>Employee Type<select name="employee_type"><option value="regular" <?= in_array((string) ($editEmployee['employee_type'] ?? 'regular'), ['regular', ''], true) ? 'selected' : '' ?>>Regular Employee</option><option value="corporate" <?= ((string) ($editEmployee['employee_type'] ?? '')) === 'corporate' || ((string) ($editEmployee['role'] ?? '')) === 'corporate_employee' ? 'selected' : '' ?>>Contractual Employee</option><option value="vendor" <?= ((string) ($editEmployee['employee_type'] ?? '')) === 'vendor' ? 'selected' : '' ?>>Vendor</option></select></label>
+                            <label>Employee Type<select name="employee_type"><option value="regular" <?= in_array((string) ($editEmployee['employee_type'] ?? 'regular'), ['regular', ''], true) ? 'selected' : '' ?>>Regular Employee</option><option value="corporate" <?= ((string) ($editEmployee['employee_type'] ?? '')) === 'corporate' || ((string) ($editEmployee['role'] ?? '')) === 'corporate_employee' ? 'selected' : '' ?>>Contractual Employee</option></select></label>
                         <?php endif; ?>
                     </div>
                     <div class="inline-actions">
@@ -433,6 +464,71 @@ function render_admin_employees(): void
                 </form>
             </div>
         </div>
+    <?php endif; ?>
+    <?php if ($employeeType === 'vendor' && !$isVendor): ?>
+    <div class="modal" id="vendor-register-modal">
+        <div class="modal-card" style="max-width:720px;">
+            <button class="modal-close" type="button" data-close-modal>&times;</button>
+            <span class="eyebrow">Vendor Registration</span>
+            <h2>Add Vendor Account</h2>
+            <p>Create the vendor account here. After saving, select that vendor from the list to manage their employees.</p>
+            <form method="post" class="stack-form" data-validate>
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="admin_create_vendor">
+                <input type="hidden" name="redirect_page" value="admin_employees">
+                <div class="reports-filter-grid">
+                    <div class="field">
+                        <label>Name</label>
+                        <div class="field-row"><input type="text" name="name" placeholder="Vendor name" required></div>
+                        <small class="field-error"><span>!</span>Vendor name is required.</small>
+                    </div>
+                    <div class="field">
+                        <label>Email</label>
+                        <div class="field-row"><input type="email" name="email" placeholder="vendor@company.com" required></div>
+                        <small class="field-error"><span>!</span>Enter a valid vendor email address.</small>
+                    </div>
+                    <div class="field">
+                        <label>Phone Number</label>
+                        <div class="field-row"><input type="text" name="phone" placeholder="Phone number" required></div>
+                        <small class="field-error"><span>!</span>Vendor phone number is required.</small>
+                    </div>
+                </div>
+                <p class="hint">A temporary password will be sent to the vendor email automatically.</p>
+                <button class="button solid" type="submit">Create Vendor Account</button>
+            </form>
+        </div>
+    </div>
+    <?php endif; ?>
+    <?php if ($employeeType === 'vendor' && !$isVendor): ?>
+    <div class="modal <?= $vendorCreatedPopup ? 'open' : '' ?>" id="vendor-created-modal" <?= $vendorCreatedPopup ? 'data-open-on-load' : '' ?>>
+        <div class="modal-card" style="max-width:640px;">
+            <button class="modal-close" type="button" data-close-modal>&times;</button>
+            <span class="eyebrow">Vendor Created</span>
+            <h2>Vendor Account Ready</h2>
+            <?php if ($vendorCreatedPopup): ?>
+                <p>The vendor account has been created. The generated password is shown below for admin reference.</p>
+                <div class="reports-filter-grid">
+                    <div class="field">
+                        <label>Vendor Name</label>
+                        <div class="field-row"><input type="text" value="<?= h((string) ($vendorCreatedPopup['name'] ?? '')) ?>" readonly></div>
+                    </div>
+                    <div class="field">
+                        <label>Vendor Email</label>
+                        <div class="field-row"><input type="text" value="<?= h((string) ($vendorCreatedPopup['email'] ?? '')) ?>" readonly></div>
+                    </div>
+                    <div class="field">
+                        <label>Password</label>
+                        <div class="field-row"><input type="text" value="<?= h((string) ($vendorCreatedPopup['password'] ?? '')) ?>" readonly></div>
+                    </div>
+                </div>
+                <p class="hint">
+                    <?= !empty($vendorCreatedPopup['mail_sent'])
+                        ? 'The password was also sent to the vendor email.'
+                        : 'Email delivery was not confirmed. Check storage/emails/' . h((string) ($vendorCreatedPopup['mail_log'] ?? '')) . (((string) ($vendorCreatedPopup['mail_error'] ?? '')) !== '' ? ' | Error: ' . h((string) $vendorCreatedPopup['mail_error']) : '') . '.' ?>
+                </p>
+            <?php endif; ?>
+        </div>
+    </div>
     <?php endif; ?>
     <div class="modal <?= $stage === 'manual_rules' ? 'open' : '' ?>" id="add-employee-modal" <?= $stage === 'manual_rules' ? 'data-open-on-load' : '' ?>>
         <div class="modal-card">
@@ -478,8 +574,10 @@ function render_admin_employees(): void
                         <div class="field"><label>Salary</label><div class="field-row"><input type="number" step="0.01" min="0" name="salary" required></div><small class="field-error"><span>!</span>Salary is required.</small></div>
                         <?php if ($isFreelancer): ?>
                             <input type="hidden" name="employee_type" value="corporate">
+                        <?php elseif ($isVendor): ?>
+                            <input type="hidden" name="employee_type" value="vendor">
                         <?php else: ?>
-                            <div class="field"><label>Employee Type</label><div class="field-row"><select name="employee_type" required><option value="regular" <?= $employeeType === 'regular' ? 'selected' : '' ?>>Regular Employee</option><option value="corporate" <?= $employeeType === 'corporate' ? 'selected' : '' ?>>Contractual Employee</option><option value="vendor" <?= $employeeType === 'vendor' ? 'selected' : '' ?>>Vendor</option></select></div><small class="field-error"><span>!</span>Employee type is required.</small></div>
+                            <div class="field"><label>Employee Type</label><div class="field-row"><select name="employee_type" required><option value="regular" <?= $employeeType === 'regular' ? 'selected' : '' ?>>Regular Employee</option><option value="corporate" <?= $employeeType === 'corporate' ? 'selected' : '' ?>>Contractual Employee</option></select></div><small class="field-error"><span>!</span>Employee type is required.</small></div>
                         <?php endif; ?>
                     </div>
                     <button class="button solid" type="submit" data-required-submit>Next</button>
@@ -553,8 +651,10 @@ function render_admin_employees(): void
                     <div class="reports-filter-grid">
                         <?php if ($isFreelancer): ?>
                             <input type="hidden" name="employee_type" value="corporate">
+                        <?php elseif ($isVendor): ?>
+                            <input type="hidden" name="employee_type" value="vendor">
                         <?php else: ?>
-                            <div class="field"><label>Employee Type</label><div class="field-row"><select name="employee_type" required><option value="regular" <?= $employeeType === 'regular' ? 'selected' : '' ?>>Regular Employee</option><option value="corporate" <?= $employeeType === 'corporate' ? 'selected' : '' ?>>Contractual Employee</option><option value="vendor" <?= $employeeType === 'vendor' ? 'selected' : '' ?>>Vendor</option></select></div><small class="field-error"><span>!</span>Employee type is required.</small></div>
+                            <div class="field"><label>Employee Type</label><div class="field-row"><select name="employee_type" required><option value="regular" <?= $employeeType === 'regular' ? 'selected' : '' ?>>Regular Employee</option><option value="corporate" <?= $employeeType === 'corporate' ? 'selected' : '' ?>>Contractual Employee</option></select></div><small class="field-error"><span>!</span>Employee type is required.</small></div>
                         <?php endif; ?>
                     </div>
                     <label class="upload-drop">
@@ -754,6 +854,7 @@ function render_admin_rules(): void
                 <form method="post">
                     <?= csrf_field() ?>
                     <input type="hidden" name="action" value="admin_add_shift_timing">
+                    <input type="hidden" name="redirect_page" value="admin_rules">
                     <input type="hidden" name="start_time" value="09:00">
                     <input type="hidden" name="end_time" value="18:00">
                     <button class="button outline" type="submit">Add 9:00 AM - 6:00 PM</button>
@@ -761,6 +862,7 @@ function render_admin_rules(): void
                 <form method="post">
                     <?= csrf_field() ?>
                     <input type="hidden" name="action" value="admin_add_shift_timing">
+                    <input type="hidden" name="redirect_page" value="admin_rules">
                     <input type="hidden" name="start_time" value="10:30">
                     <input type="hidden" name="end_time" value="20:30">
                     <button class="button outline" type="submit">Add 10:30 AM - 8:30 PM</button>
@@ -769,6 +871,7 @@ function render_admin_rules(): void
             <form method="post" class="stack-form rules-shift-form" data-validate>
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="admin_add_shift_timing">
+                <input type="hidden" name="redirect_page" value="admin_rules">
                 <div class="reports-filter-grid">
                     <label>Start Time<input type="time" name="start_time" required></label>
                     <label>End Time<input type="time" name="end_time" required></label>
@@ -1047,6 +1150,7 @@ function render_admin_shift(): void
             <form method="post">
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="admin_add_shift_timing">
+                <input type="hidden" name="redirect_page" value="admin_shift">
                 <input type="hidden" name="start_time" value="09:00">
                 <input type="hidden" name="end_time" value="18:00">
                 <button class="button outline" type="submit">Add 9:00 AM - 6:00 PM</button>
@@ -1054,6 +1158,7 @@ function render_admin_shift(): void
             <form method="post">
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="admin_add_shift_timing">
+                <input type="hidden" name="redirect_page" value="admin_shift">
                 <input type="hidden" name="start_time" value="10:30">
                 <input type="hidden" name="end_time" value="20:30">
                 <button class="button outline" type="submit">Add 10:30 AM - 8:30 PM</button>
@@ -1063,6 +1168,7 @@ function render_admin_shift(): void
         <form method="post" class="stack-form" data-validate>
             <?= csrf_field() ?>
             <input type="hidden" name="action" value="admin_add_shift_timing">
+            <input type="hidden" name="redirect_page" value="admin_shift">
             <div class="reports-filter-grid">
                 <label>Start Time<input type="time" name="start_time" required></label>
                 <label>End Time<input type="time" name="end_time" required></label>
@@ -1123,6 +1229,7 @@ function render_admin_attendance(): void
     $user = current_user();
     $isFreelancer = ($user['role'] ?? '') === 'freelancer';
     $isVendor = ($user['role'] ?? '') === 'external_vendor';
+    $currentAdminId = (int) ($user['id'] ?? 0);
     $canViewReimbursements = !$isFreelancer && !$isVendor && $employeeType === 'regular';
 
     if (!$canViewReimbursements) {
@@ -1142,7 +1249,8 @@ function render_admin_attendance(): void
             $filteredEmployees = $vEmpStmt->fetchAll();
         }
     } elseif ($employeeType === 'corporate' && !$isFreelancer && !$isVendor) {
-        $contractualStmt = db()->query("SELECT * FROM users WHERE role = 'corporate_employee' OR employee_type = 'corporate' ORDER BY created_at DESC, name");
+        $contractualStmt = db()->prepare("SELECT * FROM users WHERE admin_id = :admin_id AND (role = 'corporate_employee' OR employee_type = 'corporate') ORDER BY created_at DESC, name");
+        $contractualStmt->execute(['admin_id' => $currentAdminId]);
         $filteredEmployees = $contractualStmt->fetchAll();
     } else {
         $filteredEmployees = array_values(array_filter($allEmployees, function($emp) use ($employeeType, $isVendor, $isFreelancer) {
@@ -1308,7 +1416,7 @@ function render_admin_profile_settings(): void
             <span class="badge">Administrator</span>
         </div>
         <div class="profile-settings-grid">
-            <div class="list-item">
+            <div class="list-item profile-settings-wide">
                 <strong>Email</strong>
                 <span><?= h((string) $admin['email']) ?></span>
             </div>
@@ -3725,13 +3833,43 @@ function render_admin_vendors(): void
         <div>
             <span class="eyebrow">Admin - Vendors</span>
             <h1>Vendor Registrations</h1>
-            <p>List of external vendors who have registered on the portal.</p>
+            <p>Create vendor accounts here and manage the list of external vendors added by admins.</p>
         </div>
     </section>
+    <section class="section-block">
+        <div class="split">
+            <div>
+                <span class="eyebrow">Create Vendor</span>
+                <h2>Add Vendor Account</h2>
+            </div>
+        </div>
+        <form method="post" class="stack-form" data-validate>
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="admin_create_vendor">
+            <div class="field">
+                <label>Name</label>
+                <div class="field-row"><input type="text" name="name" placeholder="Vendor name" required></div>
+                <small class="field-error"><span>!</span>Vendor name is required.</small>
+            </div>
+            <div class="field">
+                <label>Email</label>
+                <div class="field-row"><input type="email" name="email" placeholder="vendor@company.com" required></div>
+                <small class="field-error"><span>!</span>Enter a valid vendor email address.</small>
+            </div>
+            <div class="field">
+                <label>Phone Number</label>
+                <div class="field-row"><input type="text" name="phone" placeholder="Phone number" required></div>
+                <small class="field-error"><span>!</span>Vendor phone number is required.</small>
+            </div>
+            <p class="hint">A temporary password will be sent to the vendor email automatically.</p>
+            <button class="button solid" type="submit">Create Vendor Account</button>
+        </form>
+    </section>
+    <div class="spacer"></div>
     <section class="table-wrap">
         <div class="data-toolbar">
             <div class="split">
-                <h2>Registered Vendors</h2>
+                <h2>Vendor Accounts</h2>
                 <span class="badge"><?= count($vendors) ?> total</span>
             </div>
             <div class="data-toolbar-right">
@@ -3768,7 +3906,7 @@ function render_admin_vendors(): void
             </tbody>
         </table>
         <?php if (!$vendors): ?>
-            <div class="list-item muted table-empty-state" style="display: block;">No vendor registrations found.</div>
+            <div class="list-item muted table-empty-state" style="display: block;">No vendor accounts found.</div>
         <?php endif; ?>
         <div class="list-item muted hidden table-empty-state" id="admin-vendors-empty">No vendors match your search.</div>
     </section>

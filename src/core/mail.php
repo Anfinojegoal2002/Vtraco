@@ -156,7 +156,7 @@ function send_employee_credentials_email(array $employee, string $password, arra
 {
     $html = '<p>Hello ' . h($employee['name']) . ',</p>'
         . '<p>Your V Traco account has been created.</p>'
-        . '<p><strong>Temporary Password:</strong> ' . h($password) . '</p>'
+        . '<p><strong>Password:</strong> ' . h($password) . '</p>'
         . '<p><strong>Assigned Rules</strong><br>' . rules_explanation_html($rules) . '</p>';
     return send_html_mail((string) $employee['email'], 'Your V Traco Login Credentials', $html);
 }
@@ -173,16 +173,16 @@ function employee_credentials_delivery_message(array $employee, array $mailResul
 {
     $isReset = $context === 'reset';
     $baseMessage = $isReset
-        ? 'Temporary password generated successfully for ' . $employee['name'] . '. '
+        ? 'Password generated successfully for ' . $employee['name'] . '. '
         : 'Employee added successfully for ' . $employee['name'] . '. ';
 
-    $baseMessage .= 'Login email: ' . $employee['email'] . '. The employee must change the temporary password after signing in.';
+    $baseMessage .= 'Login email: ' . $employee['email'] . '. The employee must change the password after signing in.';
 
     if (!empty($mailResult['sent'])) {
         return $baseMessage . ' A notification email was sent successfully.';
     }
 
-    return $baseMessage . ' Email delivery is not configured yet, so a copy containing the temporary password was saved in storage/emails/' . ($mailResult['log_file'] ?? '') . (($mailResult['error'] ?? '') !== '' ? ' | Error: ' . $mailResult['error'] : '') . '.';
+    return $baseMessage . ' Email delivery is not configured yet, so a copy containing the password was saved in storage/emails/' . ($mailResult['log_file'] ?? '') . (($mailResult['error'] ?? '') !== '' ? ' | Error: ' . $mailResult['error'] : '') . '.';
 }
 
 function send_reimbursement_created_email(array $admin, array $employee, array $reimbursement): array

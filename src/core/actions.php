@@ -2,18 +2,349 @@
 
 declare(strict_types=1);
 
+function reset_login_password_by_email(string $role, string $email): array
+{
+    $stmt = db()->prepare('SELECT * FROM users WHERE role = :role AND email = :email ORDER BY id DESC LIMIT 1');
+    $stmt->execute([
+        'role' => $role,
+        'email' => $email,
+    ]);
+    $user = $stmt->fetch();
+
+    if (!$user) {
+        return ['handled' => false, 'rate_limited' => false, 'user' => null];
+    }
+
+    $lastRequestedAt = (string) ($user['password_reset_requested_at'] ?? '');
+    if ($lastRequestedAt !== '' && strtotime($lastRequestedAt) > (time() - forgot_password_cooldown_seconds())) {
+        return ['handled' => true, 'rate_limited' => true, 'user' => $user];
+    }
+
+    $password = (string) random_int(100000, 999999);
+    $hash = password_hash($password, PASSWORD_DEFAULT);
+    $now = date('Y-m-d H:i:s');
+
+    db()->prepare('UPDATE users SET password_hash = :password_hash, force_password_change = 1, password_reset_requested_at = :requested_at, password_changed_at = NULL WHERE id = :id')
+        ->execute([
+            'password_hash' => $hash,
+            'requested_at' => $now,
+            'id' => (int) $user['id'],
+        ]);
+
+    $updatedUser = array_merge($user, [
+        'password_hash' => $hash,
+        'force_password_change' => 1,
+        'password_reset_requested_at' => $now,
+        'password_changed_at' => null,
+    ]);
+
+    $roleLabel = user_role_label($role);
+    $html = '<p>Hello ' . h((string) $updatedUser['name']) . ',</p>'
+        . '<p>A password was created for your ' . h($roleLabel) . ' account.</p>'
+        . '<p><strong>Login Email:</strong> ' . h((string) $updatedUser['email']) . '<br>'
+        . '<strong>Password:</strong> ' . h($password) . '</p>'
+        . '<p>Please sign in and change your password from Profile Settings.</p>';
+    $mailResult = send_html_mail((string) $updatedUser['email'], 'Your V Traco Password', $html);
+
+    return [
+        'handled' => true,
+        'rate_limited' => false,
+        'user' => $updatedUser,
+        'password' => $password,
+        'mail_result' => $mailResult,
+    ];
+}
+
+function password_reset_user_by_email(string $role, string $email): ?array
+{
+    $stmt = db()->prepare('
+        SELECT *
+        FROM users
+        WHERE LOWER(TRIM(email)) = LOWER(:email)
+          AND role IN ("admin", "employee", "corporate_employee", "external_vendor")
+        ORDER BY CASE WHEN role = :role THEN 0 ELSE 1 END, id DESC
+        LIMIT 1
+    ');
+    $stmt->execute([
+        'email' => trim($email),
+        'role' => $role,
+    ]);
+    $user = $stmt->fetch();
+
+    return $user ?: null;
+}
+
+function send_login_password_reset_otp(string $role, string $email): array
+{
+    $user = password_reset_user_by_email($role, $email);
+
+    if (!$user) {
+        return ['handled' => false, 'rate_limited' => false, 'user' => null];
+    }
+
+    $role = (string) $user['role'];
+    $email = (string) $user['email'];
+    $otp = (string) random_int(100000, 999999);
+    $now = date('Y-m-d H:i:s');
+    $expiresAt = date('Y-m-d H:i:s', time() + 10 * 60);
+
+    db()->prepare('UPDATE password_reset_otps SET used_at = :used_at WHERE user_id = :user_id AND role = :role AND used_at IS NULL')
+        ->execute([
+            'used_at' => $now,
+            'user_id' => (int) $user['id'],
+            'role' => $role,
+        ]);
+
+    db()->prepare('INSERT INTO password_reset_otps (user_id, role, email, otp_hash, expires_at, created_at) VALUES (:user_id, :role, :email, :otp_hash, :expires_at, :created_at)')
+        ->execute([
+            'user_id' => (int) $user['id'],
+            'role' => $role,
+            'email' => $email,
+            'otp_hash' => password_hash($otp, PASSWORD_DEFAULT),
+            'expires_at' => $expiresAt,
+            'created_at' => $now,
+        ]);
+
+    db()->prepare('UPDATE users SET password_reset_requested_at = :requested_at WHERE id = :id')
+        ->execute([
+            'requested_at' => $now,
+            'id' => (int) $user['id'],
+        ]);
+
+    $roleLabel = user_role_label($role);
+    $html = '<p>Hello ' . h((string) $user['name']) . ',</p>'
+        . '<p>Use this OTP to continue resetting your ' . h($roleLabel) . ' account password.</p>'
+        . '<p style="font-size:24px;font-weight:800;letter-spacing:6px;">' . h($otp) . '</p>'
+        . '<p>This OTP expires in 10 minutes. If you did not request it, you can ignore this email.</p>';
+    $mailResult = send_html_mail((string) $user['email'], 'Your V Traco Password Reset OTP', $html);
+
+    return [
+        'handled' => true,
+        'rate_limited' => false,
+        'user' => $user,
+        'mail_result' => $mailResult,
+    ];
+}
+
+function verify_login_password_reset_otp(string $role, string $email, string $otp): array
+{
+    $stmt = db()->prepare('
+        SELECT pro.*, u.name, u.email AS user_email
+        FROM password_reset_otps pro
+        JOIN users u ON u.id = pro.user_id
+        WHERE pro.role = :role
+          AND pro.email = :email
+          AND pro.used_at IS NULL
+          AND pro.expires_at > :now
+        ORDER BY pro.id DESC
+        LIMIT 1
+    ');
+    $stmt->execute([
+        'role' => $role,
+        'email' => $email,
+        'now' => date('Y-m-d H:i:s'),
+    ]);
+    $reset = $stmt->fetch();
+
+    if (!$reset || !password_verify($otp, (string) $reset['otp_hash'])) {
+        return ['verified' => false, 'user_id' => null];
+    }
+
+    $now = date('Y-m-d H:i:s');
+    db()->prepare('UPDATE password_reset_otps SET used_at = :used_at WHERE id = :id')
+        ->execute([
+            'used_at' => $now,
+            'id' => (int) $reset['id'],
+        ]);
+
+    return ['verified' => true, 'user_id' => (int) $reset['user_id']];
+}
+
+function complete_verified_password_reset(int $userId, string $role, string $email, string $password): void
+{
+    db()->prepare('UPDATE users SET password_hash = :password_hash, force_password_change = 0, password_changed_at = :changed_at, password_reset_requested_at = NULL WHERE id = :id AND role = :role AND email = :email')
+        ->execute([
+            'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+            'changed_at' => date('Y-m-d H:i:s'),
+            'id' => $userId,
+            'role' => $role,
+            'email' => $email,
+        ]);
+}
+
 function handle_post_action(string $action): void
 {
     verify_csrf_request();
 
     switch ($action) {
+        case 'forgot_password_send_otp':
+            $role = can_login_role((string) ($_POST['role'] ?? 'admin')) ? (string) $_POST['role'] : 'admin';
+            $email = trim((string) ($_POST['forgot_email'] ?? $_POST['email'] ?? ''));
+            $returnPage = (string) ($_POST['return_page'] ?? '');
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                flash('error', 'Enter a valid email address to receive the OTP.');
+                if ($returnPage === 'landing') {
+                    redirect_to('landing', ['auth' => $role, 'reset' => 'email']);
+                }
+                redirect_to('login', ['role' => $role, 'reset' => 'email']);
+            }
+
+            $nextResetMode = 'otp';
+            try {
+                $reset = send_login_password_reset_otp($role, $email);
+                if (!empty($reset['handled']) && empty($reset['rate_limited']) && !empty($reset['user'])) {
+                    $role = (string) $reset['user']['role'];
+                    $email = (string) $reset['user']['email'];
+                    audit_log('password_reset_otp_requested', [
+                        'email' => $email,
+                        'delivery' => !empty($reset['mail_result']['sent']) ? 'email' : 'mail_log',
+                        'role' => $role,
+                        'log_file' => $reset['mail_result']['log_file'] ?? '',
+                        'mail_error' => $reset['mail_result']['error'] ?? '',
+                    ], (int) $reset['user']['id'], ['role' => 'guest']);
+                    app_log(!empty($reset['mail_result']['sent']) ? 'info' : 'warning', 'Password reset OTP mail result.', [
+                        'email' => $email,
+                        'role' => $role,
+                        'sent' => !empty($reset['mail_result']['sent']),
+                        'log_file' => $reset['mail_result']['log_file'] ?? '',
+                        'error' => $reset['mail_result']['error'] ?? '',
+                    ]);
+                    if (!empty($reset['mail_result']['sent'])) {
+                        flash('success', 'OTP sent to ' . $email . '. Please check Inbox and Spam.');
+                    } else {
+                        flash('error', 'OTP could not be sent by SMTP. A copy was saved in storage/emails/' . ($reset['mail_result']['log_file'] ?? '') . (($reset['mail_result']['error'] ?? '') !== '' ? ' | Error: ' . $reset['mail_result']['error'] : '') . '.');
+                    }
+                } elseif (!empty($reset['rate_limited']) && !empty($reset['user'])) {
+                    $role = (string) $reset['user']['role'];
+                    $email = (string) $reset['user']['email'];
+                    audit_log('password_reset_otp_rate_limited', [
+                        'email' => $email,
+                        'role' => $role,
+                    ], (int) $reset['user']['id'], ['role' => 'guest']);
+                    flash('error', 'An OTP was already requested recently for this account. Please wait 15 minutes and try again.');
+                } else {
+                    audit_log('password_reset_otp_unknown_email', [
+                        'email' => $email,
+                        'role' => $role,
+                    ], null, ['role' => 'guest']);
+                    flash('error', 'No ' . user_role_label($role) . ' account was found for ' . $email . '.');
+                    $nextResetMode = 'email';
+                }
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Password reset OTP request failed.', ['email' => $email, 'role' => $role]);
+                flash('error', 'Unable to send the OTP right now.');
+                $nextResetMode = 'email';
+            }
+
+            if ($returnPage === 'landing') {
+                redirect_to('landing', ['auth' => $role, 'reset' => $nextResetMode, 'email' => $email]);
+            }
+            redirect_to('login', ['role' => $role, 'reset' => $nextResetMode, 'email' => $email]);
+            break;
+
+        case 'forgot_password_verify_otp':
+            $role = can_login_role((string) ($_POST['role'] ?? 'admin')) ? (string) $_POST['role'] : 'admin';
+            $email = trim((string) ($_POST['forgot_email'] ?? ''));
+            $otp = preg_replace('/\D+/', '', (string) ($_POST['otp'] ?? '')) ?? '';
+            $returnPage = (string) ($_POST['return_page'] ?? '');
+
+            $redirectParams = ['role' => $role, 'reset' => 'otp', 'email' => $email];
+            if ($returnPage === 'landing') {
+                $redirectParams = ['auth' => $role, 'reset' => 'otp', 'email' => $email];
+            }
+
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($otp) !== 6) {
+                flash('error', 'Enter the email and 6-digit OTP sent to your mail.');
+                redirect_to($returnPage === 'landing' ? 'landing' : 'login', $redirectParams);
+            }
+
+            try {
+                $result = verify_login_password_reset_otp($role, $email, $otp);
+                if (empty($result['verified'])) {
+                    flash('error', 'Invalid or expired OTP. Please check the code or request a new OTP.');
+                    redirect_to($returnPage === 'landing' ? 'landing' : 'login', $redirectParams);
+                }
+
+                $_SESSION['password_reset_verified'] = [
+                    'role' => $role,
+                    'email' => $email,
+                    'user_id' => (int) $result['user_id'],
+                    'expires_at' => time() + 10 * 60,
+                ];
+                audit_log('password_reset_otp_verified', [
+                    'email' => $email,
+                    'role' => $role,
+                ], (int) $result['user_id'], ['role' => 'guest']);
+                flash('success', 'OTP verified. Set your new password.');
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Password reset OTP verification failed.', ['email' => $email, 'role' => $role]);
+                flash('error', 'Unable to verify the OTP right now.');
+                redirect_to($returnPage === 'landing' ? 'landing' : 'login', $redirectParams);
+            }
+
+            if ($returnPage === 'landing') {
+                redirect_to('landing', ['auth' => $role, 'reset' => 'password', 'email' => $email]);
+            }
+            redirect_to('login', ['role' => $role, 'reset' => 'password', 'email' => $email]);
+            break;
+
+        case 'forgot_password_set_password':
+            $role = can_login_role((string) ($_POST['role'] ?? 'admin')) ? (string) $_POST['role'] : 'admin';
+            $email = trim((string) ($_POST['forgot_email'] ?? ''));
+            $password = (string) ($_POST['password'] ?? '');
+            $confirmPassword = (string) ($_POST['confirm_password'] ?? '');
+            $returnPage = (string) ($_POST['return_page'] ?? '');
+            $verified = $_SESSION['password_reset_verified'] ?? null;
+            $redirectParams = $returnPage === 'landing'
+                ? ['auth' => $role, 'reset' => 'password', 'email' => $email]
+                : ['role' => $role, 'reset' => 'password', 'email' => $email];
+
+            if (
+                !is_array($verified)
+                || ($verified['role'] ?? '') !== $role
+                || ($verified['email'] ?? '') !== $email
+                || (int) ($verified['expires_at'] ?? 0) < time()
+            ) {
+                unset($_SESSION['password_reset_verified']);
+                flash('error', 'OTP verification expired. Please request OTP again.');
+                redirect_to($returnPage === 'landing' ? 'landing' : 'login', $returnPage === 'landing' ? ['auth' => $role, 'reset' => 'email'] : ['role' => $role, 'reset' => 'email']);
+            }
+            if ($password !== $confirmPassword) {
+                flash('error', 'Passwords do not match.');
+                redirect_to($returnPage === 'landing' ? 'landing' : 'login', $redirectParams);
+            }
+            if (!password_meets_policy($password)) {
+                flash('error', password_policy_message());
+                redirect_to($returnPage === 'landing' ? 'landing' : 'login', $redirectParams);
+            }
+
+            try {
+                complete_verified_password_reset((int) $verified['user_id'], $role, $email, $password);
+                unset($_SESSION['password_reset_verified']);
+                audit_log('password_reset_completed', [
+                    'email' => $email,
+                    'role' => $role,
+                ], (int) $verified['user_id'], ['role' => 'guest']);
+                flash('success', 'Password reset successful. Please login with your new password.');
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Password reset completion failed.', ['email' => $email, 'role' => $role]);
+                flash('error', 'Unable to reset the password right now.');
+                redirect_to($returnPage === 'landing' ? 'landing' : 'login', $redirectParams);
+            }
+
+            if ($returnPage === 'landing') {
+                redirect_to('landing', ['auth' => $role]);
+            }
+            redirect_to('login', ['role' => $role]);
+            break;
+
         case 'login':
             $role = can_login_role((string) ($_POST['role'] ?? 'admin')) ? (string) $_POST['role'] : 'admin';
             $email = trim((string) ($_POST['email'] ?? ''));
             $returnPage = (string) ($_POST['return_page'] ?? '');
-            if (in_array($role, ['employee', 'corporate_employee'], true) && !empty($_POST['forgot_password'])) {
+            if (!empty($_POST['forgot_password'])) {
                 if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                    flash('error', 'Enter your employee email first, then click Forgot your password.');
+                    flash('error', 'Enter your account email first, then click Forgot your password.');
                     if ($returnPage === 'landing') {
                         redirect_to('landing', ['auth' => $role]);
                     }
@@ -21,24 +352,27 @@ function handle_post_action(string $action): void
                 }
 
                 try {
-                    $reset = reset_employee_password_by_email($email);
-                    if (!empty($reset['handled']) && empty($reset['rate_limited']) && !empty($reset['employee'])) {
-                        audit_log('employee_password_reset_requested', [
+                    $reset = reset_login_password_by_email($role, $email);
+                    if (!empty($reset['handled']) && empty($reset['rate_limited']) && !empty($reset['user'])) {
+                        audit_log('password_reset_requested', [
                             'email' => $email,
                             'delivery' => !empty($reset['mail_result']['sent']) ? 'email' : 'mail_log',
-                        ], (int) $reset['employee']['id'], ['role' => 'guest']);
-                    } elseif (!empty($reset['rate_limited']) && !empty($reset['employee'])) {
-                        audit_log('employee_password_reset_rate_limited', [
+                            'role' => $role,
+                        ], (int) $reset['user']['id'], ['role' => 'guest']);
+                    } elseif (!empty($reset['rate_limited']) && !empty($reset['user'])) {
+                        audit_log('password_reset_rate_limited', [
                             'email' => $email,
-                        ], (int) $reset['employee']['id'], ['role' => 'guest']);
+                            'role' => $role,
+                        ], (int) $reset['user']['id'], ['role' => 'guest']);
                     } else {
-                        audit_log('employee_password_reset_unknown_email', [
+                        audit_log('password_reset_unknown_email', [
                             'email' => $email,
+                            'role' => $role,
                         ], null, ['role' => 'guest']);
                     }
-                    flash('success', 'If that employee email exists, a temporary password has been sent or logged locally. For security, reset requests are rate-limited.');
+                    flash('success', 'If that account email exists, a password has been sent or logged locally. For security, reset requests are rate-limited.');
                 } catch (Throwable $exception) {
-                    report_exception($exception, 'Employee self-service password reset failed.', ['email' => $email]);
+                    report_exception($exception, 'Self-service password reset failed.', ['email' => $email, 'role' => $role]);
                     flash('error', 'Unable to process the password reset request right now.');
                 }
 
@@ -60,6 +394,18 @@ function handle_post_action(string $action): void
                     continue;
                 }
 
+                if (in_array(($candidate['role'] ?? ''), ['admin', 'freelancer', 'external_vendor'], true)) {
+                    $status = (string) ($candidate['status'] ?? 'ACTIVE');
+                    if ($status === 'PENDING') {
+                        flash('error', 'Your account is pending approval from the Super Admin.');
+                        redirect_to($returnPage === 'landing' ? 'landing' : 'login', ['role' => $role]);
+                    }
+                    if ($status === 'BLOCKED') {
+                        flash('error', 'Your account has been blocked. Please contact support.');
+                        redirect_to($returnPage === 'landing' ? 'landing' : 'login', ['role' => $role]);
+                    }
+                }
+
                 $user = $candidate;
                 break;
             }
@@ -71,7 +417,7 @@ function handle_post_action(string $action): void
                     'email' => $email,
                 ], (int) $user['id'], $user);
                 if (in_array(($user['role'] ?? ''), ['employee', 'corporate_employee'], true) && password_change_required($user)) {
-                    flash('success', 'A temporary password is active on this account. Please change it from Profile Settings after signing in.');
+                    flash('success', 'A password is active on this account. Please change it from Profile Settings after signing in.');
                 }
                 redirect_to(home_page_for_user($user));
             }
@@ -102,34 +448,31 @@ function handle_post_action(string $action): void
             $name = trim((string) ($_POST['name'] ?? ''));
             $email = trim((string) ($_POST['email'] ?? ''));
             $phone = trim((string) ($_POST['phone'] ?? ''));
+            $companyName = trim((string) ($_POST['company_name'] ?? ''));
+            $returnPage = (string) ($_POST['return_page'] ?? 'register');
             $password = (string) ($_POST['password'] ?? '');
             if ($name === '') {
                 flash('error', 'Name is required.');
-                redirect_to('register');
+                redirect_to($returnPage);
             }
             if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
                 flash('error', 'Enter a valid email address.');
-                redirect_to('register');
-            }
-            if (role_email_exists($role, $email)) {
-                flash('error', 'This email address is already registered.');
-                redirect_to('register');
+                redirect_to($returnPage);
             }
             if (!password_meets_policy($password)) {
                 flash('error', password_policy_message());
-                redirect_to('register');
+                redirect_to($returnPage);
             }
             try {
-                $empId = $role === 'corporate_employee' ? generate_employee_emp_id() : null;
-                $employeeType = $role === 'corporate_employee' ? 'corporate' : null;
-                db()->prepare('INSERT INTO users (role, emp_id, name, email, phone, salary, employee_type, password_hash, password_changed_at, created_at) VALUES (:role, :emp_id, :name, :email, :phone, 0, :employee_type, :password_hash, :password_changed_at, :created_at)')
+                $status = ($role === 'admin') ? 'PENDING' : 'ACTIVE';
+                db()->prepare('INSERT INTO users (role, status, emp_id, name, company_name, email, phone, salary, password_hash, password_changed_at, created_at) VALUES (:role, :status, NULL, :name, :company_name, :email, :phone, 0, :password_hash, :password_changed_at, :created_at)')
                     ->execute([
                         'role' => $role,
-                        'emp_id' => $empId,
+                        'status' => $status,
                         'name' => $name,
+                        'company_name' => $companyName,
                         'email' => $email,
                         'phone' => $phone,
-                        'employee_type' => $employeeType,
                         'password_hash' => password_hash($password, PASSWORD_DEFAULT),
                         'password_changed_at' => now(),
                         'created_at' => now(),
@@ -138,44 +481,125 @@ function handle_post_action(string $action): void
                     'email' => $email,
                     'role' => $role,
                 ], (int) db()->lastInsertId(), ['role' => 'guest']);
-                flash('success', ($role === 'corporate_employee' ? 'Contractual Employee' : user_role_label($role)) . ' account created.');
-                redirect_to('login', ['role' => $role]);
+                if ($role === 'admin') {
+                    flash('success', 'Registration request submitted. Please wait for Super Admin approval.');
+                } else {
+                    flash('success', 'Registration successful. You can now login.');
+                }
+                redirect_to($returnPage);
             } catch (Throwable $exception) {
-                report_exception($exception, 'User registration failed.', ['email' => $email, 'role' => $role]);
-                flash('error', user_role_label($role) . ' registration failed. Please try again.');
-                redirect_to('register');
+                if (str_contains($exception->getMessage(), 'Duplicate entry')) {
+                    flash('error', 'This email is already registered.');
+                } else {
+                    flash('error', 'Unable to complete registration right now.');
+                }
+                redirect_to($returnPage);
+            }
+            break;
+
+        case 'admin_create_vendor':
+            $admin = require_role('admin');
+            $redirectPage = trim((string) ($_POST['redirect_page'] ?? 'admin_vendors'));
+            $redirectPage = in_array($redirectPage, ['admin_vendors', 'admin_employees'], true) ? $redirectPage : 'admin_vendors';
+            $redirectParams = [];
+            if ($redirectPage === 'admin_employees') {
+                $redirectParams['type'] = 'vendor';
+            }
+
+            $name = trim((string) ($_POST['name'] ?? ''));
+            $email = trim((string) ($_POST['email'] ?? ''));
+            $phone = trim((string) ($_POST['phone'] ?? ''));
+
+            if ($name === '') {
+                flash('error', 'Vendor name is required.');
+                redirect_to($redirectPage, $redirectParams);
+            }
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                flash('error', 'Enter a valid vendor email address.');
+                redirect_to($redirectPage, $redirectParams);
+            }
+            if ($phone === '') {
+                flash('error', 'Vendor phone number is required.');
+                redirect_to($redirectPage, $redirectParams);
+            }
+            if (role_email_exists('external_vendor', $email)) {
+                flash('error', 'A vendor account already exists for this email.');
+                redirect_to($redirectPage, $redirectParams);
+            }
+
+            try {
+                $password = (string) random_int(100000, 999999);
+                db()->prepare('INSERT INTO users (role, emp_id, name, email, phone, salary, password_hash, force_password_change, password_changed_at, created_at) VALUES ("external_vendor", NULL, :name, :email, :phone, 0, :password_hash, 1, NULL, :created_at)')
+                    ->execute([
+                        'name' => $name,
+                        'email' => $email,
+                        'phone' => $phone,
+                        'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+                        'created_at' => now(),
+                    ]);
+
+                $vendorId = (int) db()->lastInsertId();
+                $vendor = [
+                    'id' => $vendorId,
+                    'name' => $name,
+                    'email' => $email,
+                    'phone' => $phone,
+                ];
+                $html = '<p>Hello ' . h($name) . ',</p>'
+                    . '<p>An admin created your V Traco vendor account.</p>'
+                    . '<p><strong>Login Email:</strong> ' . h($email) . '<br>'
+                    . '<strong>Password:</strong> ' . h($password) . '</p>'
+                    . '<p>Please sign in and change your password from Profile Settings.</p>';
+                $mailResult = send_html_mail($email, 'Your V Traco Vendor Account', $html);
+
+                audit_log('vendor_created', [
+                    'email' => $email,
+                    'delivery' => !empty($mailResult['sent']) ? 'email' : 'mail_log',
+                    'created_by' => (int) ($admin['id'] ?? 0),
+                ], $vendorId);
+
+                $_SESSION['vendor_created_popup'] = [
+                    'name' => $name,
+                    'email' => $email,
+                    'password' => $password,
+                    'mail_sent' => !empty($mailResult['sent']),
+                    'mail_log' => (string) ($mailResult['log_file'] ?? ''),
+                    'mail_error' => (string) ($mailResult['error'] ?? ''),
+                ];
+
+                $message = 'Vendor account created for ' . $name . '. Login email: ' . $email . '. The password is ready for admin review.';
+                if (!empty($mailResult['sent'])) {
+                    $message .= ' A notification email was sent successfully.';
+                } else {
+                    $message .= ' Email delivery is not configured yet, so a copy containing the password was saved in storage/emails/' . ($mailResult['log_file'] ?? '') . (($mailResult['error'] ?? '') !== '' ? ' | Error: ' . $mailResult['error'] : '') . '.';
+                }
+
+                flash('success', $message);
+                redirect_to($redirectPage, $redirectParams);
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Vendor creation failed.', ['email' => $email]);
+                flash('error', 'Vendor account creation failed. Please try again.');
+                redirect_to($redirectPage, $redirectParams);
             }
             break;
 
         case 'employee_manual_next':
-            $manager = require_roles(['admin', 'freelancer', 'external_vendor']);
-            $requestedType = trim((string) ($_POST['employee_type'] ?? 'regular'));
-            if (($manager['role'] ?? '') === 'freelancer') {
-                $requestedType = 'corporate';
-            }
-            $returnType = in_array($requestedType, ['regular', 'vendor', 'corporate'], true) ? $requestedType : 'regular';
+            require_roles(['admin', 'freelancer', 'external_vendor']);
             if (!filter_var((string) ($_POST['email'] ?? ''), FILTER_VALIDATE_EMAIL)) {
                 flash('error', 'Enter a valid employee email address.');
-                redirect_to('admin_employees', ['type' => $returnType]);
+                redirect_to('admin_employees');
             }
             if (trim((string) ($_POST['name'] ?? '')) === '') {
                 flash('error', 'Employee name is required.');
-                redirect_to('admin_employees', ['type' => $returnType]);
+                redirect_to('admin_employees');
             }
             if (trim((string) ($_POST['phone'] ?? '')) === '') {
                 flash('error', 'Employee phone number is required.');
-                redirect_to('admin_employees', ['type' => $returnType]);
+                redirect_to('admin_employees');
             }
             if (!is_numeric((string) ($_POST['salary'] ?? '')) || (float) ($_POST['salary'] ?? 0) < 0) {
                 flash('error', 'Employee salary must be zero or greater.');
-                redirect_to('admin_employees', ['type' => $returnType]);
-            }
-            $employeeType = trim((string) ($_POST['employee_type'] ?? 'regular'));
-            if (($manager['role'] ?? '') === 'freelancer') {
-                $employeeType = 'corporate';
-            }
-            if (!in_array($employeeType, ['regular', 'vendor', 'corporate'], true)) {
-                $employeeType = 'regular';
+                redirect_to('admin_employees');
             }
             $_SESSION['pending_employee'] = [
                 'emp_id' => trim((string) ($_POST['emp_id'] ?? '')),
@@ -184,10 +608,9 @@ function handle_post_action(string $action): void
                 'phone' => trim((string) ($_POST['phone'] ?? '')),
                 'shift' => trim((string) ($_POST['shift'] ?? '')),
                 'salary' => (float) ($_POST['salary'] ?? 0),
-                'employee_type' => $employeeType,
-                'vendor_id' => (int) ($_POST['vendor_id'] ?? 0),
+                'employee_type' => trim((string) ($_POST['employee_type'] ?? 'regular')),
             ];
-            redirect_to('admin_employees', ['type' => $employeeType, 'stage' => 'manual_rules']);
+            redirect_to('admin_employees', ['stage' => 'manual_rules']);
             break;
 
         case 'employee_manual_submit':
@@ -198,16 +621,10 @@ function handle_post_action(string $action): void
                 flash('error', 'No pending employee found.');
                 redirect_to('admin_employees');
             }
-            $pendingType = trim((string) ($pending['employee_type'] ?? 'regular'));
-            $returnType = in_array($pendingType, ['regular', 'vendor', 'corporate'], true) ? $pendingType : 'regular';
             try {
                 $rules = normalize_rules_from_input($_POST);
-                if (!$rules['manual_punch_in'] && !$rules['manual_punch_out'] && !$rules['biometric_punch_in'] && !$rules['biometric_punch_out']) {
-                    flash('error', 'Select at least one attendance rule before adding the employee.');
-                    redirect_to('admin_employees', ['type' => $returnType, 'stage' => 'manual_rules']);
-                }
-                $pending['shift'] = resolve_shift_selection_from_input($_POST, (string) ($pending['shift'] ?? ''), false);
-                $createdEmployee = insert_employee($pending, $rules, $_POST['project_ids'] ?? []);
+                $projectIds = array_map('intval', $_POST['project_ids'] ?? []);
+                $createdEmployee = insert_employee($pending, $rules, $projectIds);
                 unset($_SESSION['pending_employee']);
                 audit_log('employee_created', [
                     'email' => (string) $createdEmployee['employee']['email'],
@@ -218,28 +635,20 @@ function handle_post_action(string $action): void
                 report_exception($exception, 'Employee creation failed.', ['email' => $pending['email'] ?? '']);
                 flash('error', $exception->getMessage() ?: 'Unable to add employee. Email or Emp ID may already exist.');
             }
-            redirect_to('admin_employees', ['type' => $returnType]);
+            redirect_to('admin_employees');
             break;
 
         case 'employee_csv_upload':
-            $manager = require_roles(['admin', 'freelancer', 'external_vendor']);
+            require_roles(['admin', 'freelancer', 'external_vendor']);
             try {
-                $employeeType = trim((string) ($_POST['employee_type'] ?? 'regular'));
-                if (($manager['role'] ?? '') === 'freelancer') {
-                    $employeeType = 'corporate';
-                }
-                if (!in_array($employeeType, ['regular', 'vendor', 'corporate'], true)) {
-                    $employeeType = 'regular';
-                }
                 validate_employee_csv_upload($_FILES['csv_file'] ?? []);
-                $_SESSION['pending_csv_import'] = parse_employee_csv(
-                    (string) ($_FILES['csv_file']['tmp_name'] ?? ''),
-                    (string) ($_FILES['csv_file']['name'] ?? '')
+                $employeeType = trim((string) ($_POST['employee_type'] ?? 'regular'));
+                $_SESSION['pending_csv_import'] = array_map(
+                    static fn (array $row): array => array_merge($row, ['employee_type' => $employeeType]),
+                    parse_employee_csv((string) $_FILES['csv_file']['tmp_name'])
                 );
-                $_SESSION['pending_csv_employee_type'] = $employeeType;
-                $_SESSION['pending_csv_vendor_id'] = (int) ($_POST['vendor_id'] ?? 0);
-                flash('success', 'Employee file uploaded. Assign rules to continue.');
-                redirect_to('admin_employees', ['type' => $employeeType, 'stage' => 'csv_rules']);
+                flash('success', 'CSV uploaded. Assign rules to continue.');
+                redirect_to('admin_employees', ['stage' => 'csv_rules']);
             } catch (Throwable $exception) {
                 report_exception($exception, 'Employee CSV upload failed.', [
                     'filename' => (string) (($_FILES['csv_file']['name'] ?? '') ?: ''),
@@ -257,44 +666,20 @@ function handle_post_action(string $action): void
                 flash('error', 'No CSV import is pending.');
                 redirect_to('admin_employees');
             }
-            $defaultEmployeeType = $_SESSION['pending_csv_employee_type'] ?? 'regular';
-            $defaultEmployeeType = trim((string) $defaultEmployeeType);
-            if (!in_array($defaultEmployeeType, ['regular', 'vendor', 'corporate'], true)) {
-                $defaultEmployeeType = 'regular';
-            }
             $rules = normalize_rules_from_input($_POST);
-            $projectIds = $_POST['project_ids'] ?? [];
-            $selectedShift = resolve_shift_selection_from_input($_POST, '', true);
+            $projectIds = array_map('intval', $_POST['project_ids'] ?? []);
             if (!$rules['manual_punch_in'] && !$rules['manual_punch_out'] && !$rules['biometric_punch_in'] && !$rules['biometric_punch_out']) {
                 flash('error', 'Select at least one rule before submitting the CSV import.');
-                redirect_to('admin_employees', ['type' => $defaultEmployeeType, 'stage' => 'csv_rules']);
+                redirect_to('admin_employees', ['stage' => 'csv_rules']);
             }
             $created = 0;
-            $updated = 0;
             $skipped = 0;
             $emailsSent = 0;
             $emailsLogged = 0;
-            $skipReasons = [];
-            foreach ($rows as $index => $row) {
+            foreach ($rows as $row) {
                 try {
-                    if (!is_array($row)) {
-                        $row = [];
-                    }
-                    if (trim((string) ($row['employee_type'] ?? '')) === '') {
-                        $row['employee_type'] = $defaultEmployeeType;
-                    }
-                    $row['vendor_id'] = $_SESSION['pending_csv_vendor_id'] ?? 0;
-                    if ($selectedShift !== '') {
-                        $row['shift'] = $selectedShift;
-                    } else {
-                        $row['shift'] = normalize_shift_selection((string) ($row['shift'] ?? ''));
-                    }
-                    $createdEmployee = import_employee_row($row, $rules, $projectIds);
-                    if (($createdEmployee['result'] ?? 'created') === 'updated') {
-                        $updated++;
-                    } else {
-                        $created++;
-                    }
+                    $createdEmployee = insert_employee($row, $rules, $projectIds);
+                    $created++;
                     if (!empty($createdEmployee['mail_result']['sent'])) {
                         $emailsSent++;
                     } else {
@@ -302,17 +687,10 @@ function handle_post_action(string $action): void
                     }
                 } catch (Throwable $exception) {
                     $skipped++;
-                    $identifier = trim((string) (($row['emp_id'] ?? '') ?: ($row['email'] ?? '') ?: ($row['name'] ?? 'Row ' . ($index + 1))));
-                    $skipReasons[] = $identifier . ': ' . ($exception->getMessage() ?: 'Import failed.');
                 }
             }
             unset($_SESSION['pending_csv_import']);
-            unset($_SESSION['pending_csv_employee_type']);
-            unset($_SESSION['pending_csv_vendor_id']);
             $message = 'CSV import completed. Created: ' . $created;
-            if ($updated) {
-                $message .= ' | Updated: ' . $updated;
-            }
             if ($emailsSent) {
                 $message .= ' | Emails sent: ' . $emailsSent;
             }
@@ -324,27 +702,12 @@ function handle_post_action(string $action): void
             }
             audit_log('employee_csv_import_completed', [
                 'created' => $created,
-                'updated' => $updated,
                 'skipped' => $skipped,
                 'emails_sent' => $emailsSent,
                 'emails_logged' => $emailsLogged,
-                'skip_reasons' => $skipReasons,
             ]);
-            if ($skipped && $skipReasons) {
-                flash('info', 'Skipped rows: ' . implode(' | ', array_slice($skipReasons, 0, 5)));
-            }
             flash('success', $message);
-            redirect_to('admin_employees', ['type' => $defaultEmployeeType]);
-            break;
-
-        case 'employee_csv_cancel':
-            require_roles(['admin', 'freelancer', 'external_vendor']);
-            $cancelType = trim((string) ($_POST['employee_type'] ?? ($_SESSION['pending_csv_employee_type'] ?? 'regular')));
-            unset($_SESSION['pending_csv_import']);
-            unset($_SESSION['pending_csv_employee_type']);
-            unset($_SESSION['pending_csv_vendor_id']);
-            flash('info', 'Bulk employee import cancelled.');
-            redirect_to('admin_employees', ['type' => $cancelType !== '' ? $cancelType : 'regular']);
+            redirect_to('admin_employees');
             break;
 
         case 'employee_update':
@@ -360,7 +723,6 @@ function handle_post_action(string $action): void
                 $name = trim((string) ($_POST['name'] ?? ''));
                 $phone = trim((string) ($_POST['phone'] ?? ''));
                 $salary = (float) ($_POST['salary'] ?? 0);
-                $projectIds = normalize_project_assignment_ids($_POST['project_ids'] ?? []);
                 if ($name === '') {
                     throw new RuntimeException('Employee name is required.');
                 }
@@ -373,45 +735,37 @@ function handle_post_action(string $action): void
                 if (!is_numeric((string) ($_POST['salary'] ?? '')) || $salary < 0) {
                     throw new RuntimeException('Employee salary must be zero or greater.');
                 }
-                $role = $employeeType === 'corporate' ? 'corporate_employee' : current_manager_target_role();
+                $role = current_manager_target_role();
                 if (role_requires_unique_email($role) && role_email_exists($role, $email, $employeeId)) {
                     throw new RuntimeException('This employee email is already assigned.');
                 }
                 
                 $employeeType = trim((string) ($_POST['employee_type'] ?? 'regular'));
+                if (($admin['role'] ?? '') === 'freelancer') {
+                    $employeeType = 'corporate';
+                } elseif (($admin['role'] ?? '') === 'external_vendor') {
+                    $employeeType = 'vendor';
+                }
                 if (!in_array($employeeType, ['regular', 'vendor', 'corporate'], true)) {
                     $employeeType = 'regular';
                 }
-
-                $shift = normalize_shift_selection((string) ($_POST['shift'] ?? ''));
-                db()->beginTransaction();
-                try {
-                    $updateSql = 'UPDATE users SET emp_id = :emp_id, name = :name, email = :email, phone = :phone, shift = :shift, salary = :salary, employee_type = :employee_type WHERE id = :id';
-                    $updateParams = [
+                if ($employeeType === 'vendor' && ($admin['role'] ?? '') !== 'external_vendor') {
+                    throw new RuntimeException('Vendor employees can only be managed by the vendor.');
+                }
+                
+                db()->prepare('UPDATE users SET emp_id = :emp_id, name = :name, email = :email, phone = :phone, shift = :shift, salary = :salary, employee_type = :employee_type WHERE id = :id AND role = :role AND admin_id = :admin_id')
+                    ->execute([
                         'id' => $employeeId,
+                        'role' => $role,
+                        'admin_id' => (int) $admin['id'],
                         'emp_id' => trim((string) ($_POST['emp_id'] ?? '')),
                         'name' => $name,
                         'email' => $email,
                         'phone' => $phone,
-                        'shift' => $shift,
+                        'shift' => trim((string) ($_POST['shift'] ?? '')),
                         'salary' => $salary,
                         'employee_type' => $employeeType,
-                    ];
-                    if ($admin['role'] !== 'admin') {
-                        $updateSql .= ' AND role = :role AND admin_id = :admin_id';
-                        $updateParams['role'] = $role;
-                        $updateParams['admin_id'] = (int) $admin['id'];
-                    }
-                    db()->prepare($updateSql)->execute($updateParams);
-                    save_employee_project_assignments($employeeId, $projectIds);
-                    db()->commit();
-                } catch (Throwable $exception) {
-                    if (db()->inTransaction()) {
-                        db()->rollBack();
-                    }
-
-                    throw $exception;
-                }
+                    ]);
                 audit_log('employee_updated', [
                     'email' => $email,
                 ], $employeeId);
@@ -451,14 +805,13 @@ function handle_post_action(string $action): void
                 flash('error', 'Employee not found for this administrator.');
                 redirect_to('admin_employees');
             }
-            $deleteSql = 'DELETE FROM users WHERE id = :id';
-            $deleteParams = ['id' => $employeeId];
-            if ($admin['role'] !== 'admin') {
-                $deleteSql .= ' AND role = :role AND admin_id = :admin_id';
-                $deleteParams['role'] = $role;
-                $deleteParams['admin_id'] = (int) $admin['id'];
-            }
-            db()->prepare($deleteSql)->execute($deleteParams);
+            $role = current_manager_target_role();
+            db()->prepare('DELETE FROM users WHERE id = :id AND role = :role AND admin_id = :admin_id')
+                ->execute([
+                    'id' => $employeeId,
+                    'role' => $role,
+                    'admin_id' => (int) $admin['id'],
+                ]);
             audit_log('employee_deleted', [], $employeeId);
             flash('success', 'Employee deleted successfully.');
             redirect_to('admin_employees');
@@ -537,6 +890,8 @@ function handle_post_action(string $action): void
 
         case 'admin_add_shift_timing':
             require_role('admin');
+            $redirectPage = trim((string) ($_POST['redirect_page'] ?? 'admin_shift'));
+            $redirectPage = in_array($redirectPage, ['admin_shift', 'admin_rules'], true) ? $redirectPage : 'admin_shift';
             try {
                 $startTime = trim((string) ($_POST['start_time'] ?? ''));
                 $endTime = trim((string) ($_POST['end_time'] ?? ''));
@@ -557,7 +912,7 @@ function handle_post_action(string $action): void
             } catch (Throwable $exception) {
                 flash('error', $exception->getMessage());
             }
-            redirect_to('admin_rules');
+            redirect_to($redirectPage);
             break;
 
         case 'admin_delete_shift_timing':
@@ -568,15 +923,13 @@ function handle_post_action(string $action): void
             } catch (Throwable $exception) {
                 flash('error', 'Unable to delete shift timing.');
             }
-            redirect_to('admin_rules');
+            redirect_to('admin_shift');
             break;
 
         case 'apply_rules':
             require_role('admin');
             $ids = array_map('intval', $_POST['employee_ids'] ?? []);
             $rules = normalize_rules_from_input($_POST);
-            $projectIds = normalize_project_assignment_ids($_POST['project_ids'] ?? []);
-            $shift = resolve_shift_selection_from_input($_POST, '', true);
             if (!$ids) {
                 flash('error', 'Select at least one employee.');
                 redirect_to('admin_rules');
@@ -588,13 +941,8 @@ function handle_post_action(string $action): void
                     continue;
                 }
                 save_employee_rules((int) $employee['id'], $rules);
+                $projectIds = array_map('intval', $_POST['project_ids'] ?? []);
                 save_employee_project_assignments((int) $employee['id'], $projectIds);
-                if ($shift !== '') {
-                    db()->prepare('UPDATE users SET shift = :shift WHERE id = :id')->execute([
-                        'shift' => $shift,
-                        'id' => (int) $employee['id'],
-                    ]);
-                }
                 send_rules_updated_email($employee, $rules);
                 $updated++;
             }
@@ -612,10 +960,7 @@ function handle_post_action(string $action): void
                 validate_attendance_report_upload($_FILES['attendance_csv'] ?? []);
                 $result = import_attendance_report_csv((string) ($_FILES['attendance_csv']['tmp_name'] ?? ''), trim((string) ($_POST['attendance_date'] ?? '')), (string) ($_FILES['attendance_csv']['name'] ?? ''));
                 $message = 'Attendance import completed. Imported: ' . (int) $result['imported'];
-                $resultDates = array_values(array_filter((array) ($result['dates'] ?? []), static fn($value): bool => is_string($value) && $value !== ''));
-                if (count($resultDates) > 1) {
-                    $message .= ' | Dates: ' . date('d M Y', strtotime($resultDates[0])) . ' to ' . date('d M Y', strtotime($resultDates[count($resultDates) - 1]));
-                } elseif (!empty($result['date'])) {
+                if (!empty($result['date'])) {
                     $message .= ' | Date: ' . date('d M Y', strtotime((string) $result['date']));
                 }
                 if (!empty($result['created'])) {
@@ -630,7 +975,6 @@ function handle_post_action(string $action): void
                 audit_log('attendance_import_completed', [
                     'filename' => (string) ($_FILES['attendance_csv']['name'] ?? ''),
                     'date' => $result['date'] ?? null,
-                    'dates' => $resultDates,
                     'imported' => (int) $result['imported'],
                     'created' => (int) ($result['created'] ?? 0),
                     'skipped' => (int) ($result['skipped'] ?? 0),
@@ -643,23 +987,18 @@ function handle_post_action(string $action): void
                 ]);
                 flash('error', $exception->getMessage());
             }
-            redirect_to('admin_employee_log');
+            redirect_to('admin_attendance');
             break;
 
         case 'admin_set_status':
-            require_roles(['admin', 'freelancer', 'external_vendor']);
+            require_role('admin');
             $employeeId = (int) ($_POST['employee_id'] ?? 0);
             $employee = employee_by_id($employeeId);
             if (!$employee) {
                 flash('error', 'Employee not found for this administrator.');
-                redirect_to('admin_employee_log');
+                redirect_to('admin_attendance');
             }
             $status = (string) ($_POST['status'] ?? 'Absent');
-            $allowedStatuses = ['Present', 'Absent', 'Half Day', 'Leave'];
-            if (!in_array($status, $allowedStatuses, true)) {
-                flash('error', 'Select a valid attendance status.');
-                redirect_to('admin_employee_log');
-            }
             update_attendance_record((int) $employee['id'], (string) ($_POST['attend_date'] ?? ''), [
                 'status' => $status,
                 'admin_override_status' => $status,
@@ -669,7 +1008,7 @@ function handle_post_action(string $action): void
                 'status' => $status,
             ], (int) $employee['id']);
             flash('success', 'Attendance status updated.');
-            redirect_to('admin_employee_log', [
+            redirect_to('admin_attendance', [
                 'employee_id' => (int) $employee['id'],
                 'month' => substr((string) ($_POST['attend_date'] ?? date('Y-m-d')), 0, 7),
             ]);
@@ -678,13 +1017,33 @@ function handle_post_action(string $action): void
         case 'admin_profile_update':
             $admin = require_roles(['admin', 'freelancer', 'external_vendor']);
 
-            $returnPage = (string) ($_POST['return_page'] ?? 'admin_dashboard');
-            if (!str_starts_with($returnPage, 'admin_') || $returnPage === 'admin_profile_settings') {
-                $returnPage = 'admin_dashboard';
+            $defaultReturn = home_page_for_user($admin);
+            $returnPage = (string) ($_POST['return_page'] ?? $defaultReturn);
+            $allowedPrefixes = ['admin_', 'vendor_', 'corporate_', 'member_'];
+            $isValid = false;
+            foreach ($allowedPrefixes as $prefix) {
+                if (str_starts_with($returnPage, $prefix)) {
+                    $isValid = true;
+                    break;
+                }
             }
-            $name = trim((string) ($_POST['name'] ?? ''));
+            if (!$isValid || $returnPage === 'admin_profile_settings') {
+                $returnPage = $defaultReturn;
+            }
+            $isVendorProfile = ($admin['role'] ?? '') === 'external_vendor';
+            $name = $isVendorProfile
+                ? trim((string) ($admin['name'] ?? ''))
+                : trim((string) ($_POST['name'] ?? ''));
             $email = trim((string) ($_POST['email'] ?? ''));
             $phone = trim((string) ($_POST['phone'] ?? ''));
+            $companyName = trim((string) ($_POST['company_name'] ?? ''));
+            $representativeName = trim((string) ($_POST['representative_name'] ?? ''));
+            $gstNo = strtoupper(trim((string) ($_POST['gst_no'] ?? '')));
+            $panNo = strtoupper(trim((string) ($_POST['pan_no'] ?? '')));
+            $bankAccountNo = trim((string) ($_POST['bank_account_no'] ?? ''));
+            $bankIfscCode = strtoupper(trim((string) ($_POST['bank_ifsc_code'] ?? '')));
+            $bankBranch = trim((string) ($_POST['bank_branch'] ?? ''));
+            $bankName = trim((string) ($_POST['bank_name'] ?? ''));
 
             if ($name === '') {
                 flash('error', 'Name is required.');
@@ -694,20 +1053,44 @@ function handle_post_action(string $action): void
                 flash('error', 'Enter a valid email address.');
                 redirect_to($returnPage);
             }
-            if (role_email_exists((string) ($admin['role'] ?? 'admin'), $email, (int) $admin['id'])) {
-                flash('error', 'This email address is already registered.');
-                redirect_to($returnPage);
+            if ($isVendorProfile) {
+                if ($companyName === '') {
+                    $companyName = $name;
+                }
+                if ($representativeName === '') {
+                    flash('error', 'Representative name is required.');
+                    redirect_to($returnPage);
+                }
             }
 
             try {
-                db()->prepare('UPDATE users SET name = :name, email = :email, phone = :phone WHERE id = :id AND role = :role')
-                    ->execute([
-                        'id' => (int) $admin['id'],
-                        'role' => $admin['role'],
-                        'name' => $name,
-                        'email' => $email,
-                        'phone' => $phone,
-                    ]);
+                if ($isVendorProfile) {
+                    db()->prepare('UPDATE users SET name = :name, email = :email, phone = :phone, company_name = :company_name, representative_name = :representative_name, gst_no = :gst_no, pan_no = :pan_no, bank_account_no = :bank_account_no, bank_ifsc_code = :bank_ifsc_code, bank_branch = :bank_branch, bank_name = :bank_name WHERE id = :id AND role = :role')
+                        ->execute([
+                            'id' => (int) $admin['id'],
+                            'role' => $admin['role'],
+                            'name' => $name,
+                            'email' => $email,
+                            'phone' => $phone,
+                            'company_name' => $companyName,
+                            'representative_name' => $representativeName,
+                            'gst_no' => $gstNo,
+                            'pan_no' => $panNo,
+                            'bank_account_no' => $bankAccountNo,
+                            'bank_ifsc_code' => $bankIfscCode,
+                            'bank_branch' => $bankBranch,
+                            'bank_name' => $bankName,
+                        ]);
+                } else {
+                    db()->prepare('UPDATE users SET name = :name, email = :email, phone = :phone WHERE id = :id AND role = :role')
+                        ->execute([
+                            'id' => (int) $admin['id'],
+                            'role' => $admin['role'],
+                            'name' => $name,
+                            'email' => $email,
+                            'phone' => $phone,
+                        ]);
+                }
                 audit_log('admin_profile_updated', [
                     'email' => $email,
                 ], (int) $admin['id']);
@@ -719,12 +1102,72 @@ function handle_post_action(string $action): void
             redirect_to($returnPage);
             break;
 
+        case 'super_admin_get_data':
+            require_role('super_admin');
+            $stmt = db()->prepare("SELECT id, name, email, company_name, representative_name, status, created_at FROM users WHERE role IN ('admin', 'freelancer', 'external_vendor') ORDER BY created_at DESC");
+            $stmt->execute();
+            $all = $stmt->fetchAll();
+            $approved = [];
+            $pending = [];
+            foreach ($all as $u) {
+                if ($u['status'] === 'PENDING') {
+                    $pending[] = $u;
+                } else {
+                    $approved[] = $u;
+                }
+            }
+            render_json(['success' => true, 'approved' => $approved, 'pending' => $pending]);
+            break;
+
+        case 'super_admin_toggle_status':
+            require_role('super_admin');
+            verify_csrf_request();
+            $id = (int) ($_POST['id'] ?? 0);
+            $status = (string) ($_POST['status'] ?? 'ACTIVE');
+            if (!in_array($status, ['ACTIVE', 'BLOCKED'], true)) {
+                render_json(['success' => false, 'message' => 'Invalid status'], 400);
+            }
+            db()->prepare("UPDATE users SET status = :status WHERE id = :id AND role IN ('admin', 'freelancer', 'external_vendor')")
+                ->execute(['status' => $status, 'id' => $id]);
+            audit_log('super_admin_company_status_toggled', ['id' => $id, 'status' => $status]);
+            render_json(['success' => true]);
+            break;
+
+        case 'super_admin_approve':
+            require_role('super_admin');
+            verify_csrf_request();
+            $id = (int) ($_POST['id'] ?? 0);
+            db()->prepare("UPDATE users SET status = 'ACTIVE' WHERE id = :id AND status = 'PENDING'")
+                ->execute(['id' => $id]);
+            audit_log('super_admin_company_approved', ['id' => $id]);
+            render_json(['success' => true]);
+            break;
+
+        case 'super_admin_deny':
+            require_role('super_admin');
+            verify_csrf_request();
+            $id = (int) ($_POST['id'] ?? 0);
+            db()->prepare("DELETE FROM users WHERE id = :id AND status = 'PENDING'")
+                ->execute(['id' => $id]);
+            audit_log('super_admin_company_denied', ['id' => $id]);
+            render_json(['success' => true]);
+            break;
+
         case 'admin_change_password':
             $admin = require_roles(['admin', 'freelancer', 'external_vendor']);
 
-            $returnPage = (string) ($_POST['return_page'] ?? 'admin_dashboard');
-            if (!str_starts_with($returnPage, 'admin_') || $returnPage === 'admin_profile_settings') {
-                $returnPage = 'admin_dashboard';
+            $defaultReturn = home_page_for_user($admin);
+            $returnPage = (string) ($_POST['return_page'] ?? $defaultReturn);
+            $allowedPrefixes = ['admin_', 'vendor_', 'corporate_', 'member_'];
+            $isValid = false;
+            foreach ($allowedPrefixes as $prefix) {
+                if (str_starts_with($returnPage, $prefix)) {
+                    $isValid = true;
+                    break;
+                }
+            }
+            if (!$isValid || $returnPage === 'admin_profile_settings') {
+                $returnPage = $defaultReturn;
             }
             $currentPassword = (string) ($_POST['current_password'] ?? '');
             $newPassword = (string) ($_POST['new_password'] ?? '');
@@ -764,15 +1207,15 @@ function handle_post_action(string $action): void
 
             if (!password_verify($currentPassword, (string) $employee['password_hash'])) {
                 flash('error', 'Current password is incorrect.');
-                redirect_to('employee_log');
+                redirect_to('employee_attendance');
             }
             if (!password_meets_policy($newPassword)) {
                 flash('error', password_policy_message());
-                redirect_to('employee_log');
+                redirect_to('employee_attendance');
             }
             if ($newPassword !== $confirmPassword) {
                 flash('error', 'New password and confirm password do not match.');
-                redirect_to('employee_log');
+                redirect_to('employee_attendance');
             }
 
             db()->prepare('UPDATE users SET password_hash = :password_hash, force_password_change = 0, password_changed_at = :password_changed_at WHERE id = :id AND role = :role')
@@ -784,7 +1227,7 @@ function handle_post_action(string $action): void
                 ]);
             audit_log('employee_password_changed', [], (int) $employee['id']);
             flash('success', 'Password updated successfully. Please use the new password the next time you sign in.');
-            redirect_to('employee_log');
+            redirect_to('employee_attendance');
             break;
         case 'employee_manual_in':
         case 'employee_punch_in':
@@ -792,9 +1235,6 @@ function handle_post_action(string $action): void
 
             try {
                 $date = (string) ($_POST['attend_date'] ?? date('Y-m-d'));
-                if ($date > date('Y-m-d')) {
-                    throw new RuntimeException('Future dates cannot be marked for attendance.');
-                }
                 if (is_week_off_for_user_date((int) $employee['id'], $date)) {
                     throw new RuntimeException('Week Off dates do not require attendance.');
                 }
@@ -856,19 +1296,15 @@ function handle_post_action(string $action): void
                 ]);
                 flash('error', $exception->getMessage());
             }
-            redirect_to('employee_log', ['month' => substr((string) ($_POST['attend_date'] ?? date('Y-m-d')), 0, 7)]);
+            redirect_to('employee_attendance', ['month' => substr((string) ($_POST['attend_date'] ?? date('Y-m-d')), 0, 7)]);
             break;
         case 'employee_manual_out':
             $employee = require_roles(['employee', 'corporate_employee']);
 
             $date = (string) ($_POST['attend_date'] ?? date('Y-m-d'));
-            if ($date > date('Y-m-d')) {
-                flash('error', 'Future dates cannot be marked for attendance.');
-                redirect_to('employee_log', ['month' => substr($date, 0, 7)]);
-            }
             if (is_week_off_for_user_date((int) $employee['id'], $date)) {
                 flash('error', 'Week Off dates do not require attendance.');
-                redirect_to('employee_log', ['month' => substr($date, 0, 7)]);
+                redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
             }
             $rules = employee_rules((int) $employee['id']);
             $slotIndex = max(1, (int) ($_POST['slot_index'] ?? 1));
@@ -876,9 +1312,6 @@ function handle_post_action(string $action): void
             $slotName = trim((string) ($_POST['slot_name'] ?? '')) ?: manual_slot_name($rules, $slotIndex);
             $record = ensure_attendance_record((int) $employee['id'], $date);
             $session = attendance_session_by_slot((int) $record['id'], $slotName);
-            $projectId = (int) ($_POST['project_id'] ?? 0);
-            $availableProjectIds = employee_available_project_ids($employee);
-            $project = $projectId > 0 ? project_by_id($projectId) : null;
             $collegeName = trim((string) ($_POST['college_name'] ?? ''));
             $sessionName = trim((string) ($_POST['session_name'] ?? ''));
             $dayPortion = trim((string) ($_POST['day_portion'] ?? 'Full Day'));
@@ -887,11 +1320,11 @@ function handle_post_action(string $action): void
 
             if (empty($rules['manual_punch_out'])) {
                 flash('error', 'Manual Punch Out is not enabled for this employee.');
-                redirect_to('employee_log', ['month' => substr($date, 0, 7)]);
+                redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
             }
             if ($slotIndex > $slotLimit) {
                 flash('error', 'Manual Punch Out ' . $slotIndex . ' is not available for this date.');
-                redirect_to('employee_log', ['month' => substr($date, 0, 7)]);
+                redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
             }
             if (!$session && $slotIndex === 1 && !empty($record['punch_in_path'])) {
                 add_attendance_session((int) $record['id'], [
@@ -906,38 +1339,18 @@ function handle_post_action(string $action): void
             }
             if (!$session || empty($session['punch_in_path'])) {
                 flash('error', 'Submit Manual Punch In ' . $slotIndex . ' first.');
-                redirect_to('employee_log', ['month' => substr($date, 0, 7)]);
+                redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
             }
             if (session_has_manual_out($session)) {
                 flash('error', 'Manual Punch Out ' . $slotIndex . ' is already submitted for this date.');
-                redirect_to('employee_log', ['month' => substr($date, 0, 7)]);
-            }
-            if ($projectId > 0 && !in_array($projectId, $availableProjectIds, true)) {
-                flash('error', 'Select a project assigned by the admin for Manual Punch Out ' . $slotIndex . '.');
-                redirect_to('employee_log', ['month' => substr($date, 0, 7)]);
-            }
-            if ($projectId > 0 && !$project) {
-                flash('error', 'Select a valid project for Manual Punch Out ' . $slotIndex . '.');
-                redirect_to('employee_log', ['month' => substr($date, 0, 7)]);
-            }
-            if ($project) {
-                if ($collegeName === '') {
-                    $collegeName = trim((string) ($project['college_name'] ?? ''));
-                }
-                if ($sessionName === '') {
-                    $sessionName = trim((string) ($project['project_name'] ?? ''));
-                }
-                if ($location === '') {
-                    $location = trim((string) ($project['location'] ?? ''));
-                }
+                redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
             }
             if ($collegeName === '' || $sessionName === '' || $location === '' || $sessionDuration <= 0) {
                 flash('error', 'Manual Punch Out ' . $slotIndex . ' requires College Name, Session Name, Session Duration, and Location.');
-                redirect_to('employee_log', ['month' => substr($date, 0, 7)]);
+                redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
             }
 
             update_attendance_session((int) $session['id'], [
-                'project_id' => $project ? (int) $project['id'] : null,
                 'session_mode' => 'manual_pair',
                 'college_name' => $collegeName,
                 'session_name' => $sessionName,
@@ -958,18 +1371,50 @@ function handle_post_action(string $action): void
                 'day_portion' => $dayPortion,
             ], (int) $employee['id']);
             flash('success', 'Manual punch out ' . $slotIndex . ' of ' . $slotLimit . ' submitted.');
-            redirect_to('employee_log', ['month' => substr($date, 0, 7)]);
+            redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
             break;
         case 'employee_biometric':
             $employee = require_roles(['employee', 'corporate_employee']);
-            
-            // Biometric functionality is disabled
-            flash('error', 'Biometric attendance is currently disabled.');
-            redirect_to('employee_log', ['month' => date('Y-m')]);
+
+            $date = (string) ($_POST['attend_date'] ?? date('Y-m-d'));
+            if (is_week_off_for_user_date((int) $employee['id'], $date)) {
+                flash('error', 'Week Off dates do not require attendance.');
+                redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
+            }
+            $type = (string) ($_POST['stamp_type'] ?? 'in');
+            update_attendance_record((int) $employee['id'], $date, [
+                $type === 'out' ? 'biometric_out_time' : 'biometric_in_time' => now(),
+                'status' => 'Present',
+            ]);
+            audit_log('employee_biometric_marked', [
+                'attend_date' => $date,
+                'stamp_type' => $type,
+            ], (int) $employee['id']);
+            flash('success', 'Biometric ' . ($type === 'out' ? 'out' : 'in') . ' captured.');
+            redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
+            break;
+
+        case 'employee_leave':
+            $employee = require_roles(['employee', 'corporate_employee']);
+
+            $date = (string) ($_POST['attend_date'] ?? date('Y-m-d'));
+            if (is_week_off_for_user_date((int) $employee['id'], $date)) {
+                flash('error', 'Week Off dates do not require attendance.');
+                redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
+            }
+            update_attendance_record((int) $employee['id'], $date, [
+                'status' => 'Leave',
+                'leave_reason' => trim((string) ($_POST['leave_reason'] ?? '')),
+            ]);
+            audit_log('employee_leave_requested', [
+                'attend_date' => $date,
+            ], (int) $employee['id']);
+            flash('success', 'Leave request recorded.');
+            redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
             break;
 
         case 'employee_submit_reimbursement':
-            $employee = require_roles(['employee', 'corporate_employee']);
+            $employee = require_role('employee');
             $date = (string) ($_POST['expense_date'] ?? date('Y-m-d'));
 
             try {
@@ -994,14 +1439,14 @@ function handle_post_action(string $action): void
                 flash('error', $exception->getMessage() ?: 'Unable to submit the reimbursement request right now.');
             }
 
-            redirect_to('employee_log', ['month' => substr($date, 0, 7)]);
+            redirect_to('employee_reimbursements');
             break;
 
         case 'admin_update_reimbursement_status':
             $admin = require_role('admin');
             $reimbursementId = (int) ($_POST['reimbursement_id'] ?? 0);
             $status = (string) ($_POST['status'] ?? 'PENDING');
-            $redirectParams = ['section' => 'request', 'request_month' => date('Y-m')];
+            $redirectParams = reimbursement_admin_filter_params($_POST);
 
             try {
                 $updated = update_admin_reimbursement_status($reimbursementId, $status);
@@ -1019,14 +1464,14 @@ function handle_post_action(string $action): void
                 flash('error', $exception->getMessage() ?: 'Unable to update the reimbursement status.');
             }
 
-            redirect_to('admin_accounts', $redirectParams);
+            redirect_to('admin_reimbursements', $redirectParams);
             break;
 
         case 'admin_mark_reimbursement_partial':
             $admin = require_role('admin');
             $reimbursementId = (int) ($_POST['reimbursement_id'] ?? 0);
             $partialAmount = (float) ($_POST['partial_amount'] ?? 0);
-            $redirectParams = ['section' => 'request', 'request_month' => date('Y-m')];
+            $redirectParams = reimbursement_admin_filter_params($_POST);
 
             try {
                 $updated = mark_reimbursement_partially_paid($reimbursementId, $partialAmount);
@@ -1045,13 +1490,13 @@ function handle_post_action(string $action): void
                 flash('error', $exception->getMessage() ?: 'Unable to record the partial payment.');
             }
 
-            redirect_to('admin_accounts', $redirectParams);
+            redirect_to('admin_reimbursements', $redirectParams);
             break;
 
         case 'admin_mark_reimbursement_paid':
             $admin = require_role('admin');
             $reimbursementId = (int) ($_POST['reimbursement_id'] ?? 0);
-            $redirectParams = ['section' => 'request', 'request_month' => date('Y-m')];
+            $redirectParams = reimbursement_admin_filter_params($_POST);
 
             try {
                 $updated = mark_reimbursement_paid(
@@ -1073,13 +1518,13 @@ function handle_post_action(string $action): void
                 flash('error', $exception->getMessage() ?: 'Unable to complete the payment flow.');
             }
 
-            redirect_to('admin_accounts', $redirectParams);
+            redirect_to('admin_reimbursements', $redirectParams);
             break;
 
         case 'admin_record_reimbursement_payment':
             $admin = require_role('admin');
             $reimbursementId = (int) ($_POST['reimbursement_id'] ?? 0);
-            $redirectParams = ['section' => 'payment', 'request_month' => date('Y-m')];
+            $redirectParams = reimbursement_admin_filter_params($_POST);
 
             try {
                 $reimbursement = admin_reimbursement_by_id($reimbursementId);
@@ -1105,11 +1550,6 @@ function handle_post_action(string $action): void
                     throw new RuntimeException('Unable to reload the reimbursement request.');
                 }
 
-                $employee = reimbursement_user_by_id((int) ($updated['user_id'] ?? 0));
-                if ($employee) {
-                    notify_employee_reimbursement_status($updated, $employee, (float) ($payment['amount'] ?? 0));
-                }
-
                 audit_log('admin_reimbursement_payment_recorded', [
                     'reimbursement_id' => $reimbursementId,
                     'payment_id' => (int) ($payment['id'] ?? 0),
@@ -1126,7 +1566,7 @@ function handle_post_action(string $action): void
                 flash('error', $exception->getMessage() ?: 'Unable to record the reimbursement payment.');
             }
 
-            redirect_to('admin_accounts', $redirectParams);
+            redirect_to('admin_reimbursements', $redirectParams);
             break;
 
         case 'admin_save_payment':
@@ -1150,16 +1590,7 @@ function handle_post_action(string $action): void
                         'payment_type' => (string) $payment['payment_type'],
                         'amount' => (float) $payment['amount'],
                     ], (int) $payment['user_id'], $admin);
-                    $mailResult = is_array($payment['mail_result'] ?? null) ? $payment['mail_result'] : [];
-                    $message = 'Payment added successfully.';
-                    if (!empty($mailResult['sent'])) {
-                        $message .= ' Employee email sent successfully.';
-                    } elseif (!empty($mailResult['handled']) && !empty($mailResult['log_file'])) {
-                        $message .= ' Employee email was saved locally in storage/emails/' . $mailResult['log_file'] . '.';
-                    } elseif (!empty($mailResult['error'])) {
-                        $message .= ' Employee email was not sent: ' . $mailResult['error'];
-                    }
-                    flash('success', $message);
+                    flash('success', 'Payment added successfully.');
                 }
             } catch (Throwable $exception) {
                 report_exception($exception, 'Admin payment save failed.', [
@@ -1171,116 +1602,6 @@ function handle_post_action(string $action): void
             }
 
             redirect_to('admin_accounts', payment_redirect_query($filters));
-            break;
-
-        case 'admin_process_accounts_payment':
-            $admin = require_role('admin');
-            $filters = payment_filter_params($_POST);
-            $redirectFilters = $filters;
-
-            try {
-                $payments = create_accounts_payment_batch($_POST, $_FILES['proof_upload'] ?? []);
-                $paymentCount = count($payments);
-                $totalAmount = array_reduce($payments, static function (float $carry, array $payment): float {
-                    return $carry + (float) ($payment['amount'] ?? 0);
-                }, 0.0);
-
-                foreach ($payments as $payment) {
-                    audit_log('admin_payment_created', [
-                        'payment_id' => (int) ($payment['id'] ?? 0),
-                        'payment_type' => (string) ($payment['payment_type'] ?? ''),
-                        'amount' => (float) ($payment['amount'] ?? 0),
-                    ], (int) ($payment['user_id'] ?? 0), $admin);
-                }
-
-                flash('success', sprintf('%d payment record(s) processed successfully for Rs %s.', $paymentCount, number_format($totalAmount, 2)));
-                $redirectFilters['section'] = 'history';
-                $redirectFilters['pay_group'] = 'employee';
-                $redirectFilters['history_accounts'] = [];
-                $redirectFilters['history_vendor_ids'] = [];
-                $redirectFilters['from_date'] = '';
-                $redirectFilters['to_date'] = '';
-                $redirectFilters['history_employee_ids'] = [];
-                if (!empty($payments[0]['user_id'])) {
-                    $redirectFilters['history_employee_ids'] = [(int) $payments[0]['user_id']];
-                }
-            } catch (Throwable $exception) {
-                report_exception($exception, 'Accounts batch payment failed.', [
-                    'admin_id' => (int) $admin['id'],
-                    'employee_id' => (int) ($_POST['employee_id'] ?? 0),
-                ]);
-                flash('error', $exception->getMessage() ?: 'Unable to process the payment.');
-            }
-
-            redirect_to('admin_accounts', payment_redirect_query($redirectFilters));
-            break;
-
-        case 'admin_approve_payment_request':
-            require_role('admin');
-            $requestKey = (string) ($_POST['request_key'] ?? '');
-            $filters = payment_filter_params($_POST);
-            try {
-                $approvedAmountSource = $_POST['approved_amount'] ?? [];
-                $approvedAmount = null;
-                if (is_array($approvedAmountSource)) {
-                    $firstValue = reset($approvedAmountSource);
-                    if ($firstValue !== false && $firstValue !== null && $firstValue !== '') {
-                        $approvedAmount = round((float) $firstValue, 2);
-                    }
-                }
-                update_payment_request_status($requestKey, 'APPROVED', $approvedAmount);
-                flash('success', 'Payment request approved.');
-            } catch (Throwable $exception) {
-                flash('error', $exception->getMessage() ?: 'Unable to approve request.');
-            }
-            redirect_to('admin_accounts', payment_redirect_query($filters));
-            break;
-
-        case 'admin_reject_payment_request':
-            require_role('admin');
-            $requestKey = (string) ($_POST['request_key'] ?? '');
-            $filters = payment_filter_params($_POST);
-            try {
-                update_payment_request_status($requestKey, 'REJECTED');
-                flash('success', 'Payment request rejected.');
-            } catch (Throwable $exception) {
-                flash('error', $exception->getMessage() ?: 'Unable to reject request.');
-            }
-            redirect_to('admin_accounts', payment_redirect_query($filters));
-            break;
-
-        case 'admin_approve_reimbursement':
-            require_role('admin');
-            $reimbursementId = (int) ($_POST['reimbursement_id'] ?? 0);
-            $approvedAmounts = $_POST['approved_amount'] ?? [];
-            try {
-                $updated = approve_reimbursement_request($reimbursementId, is_array($approvedAmounts) ? $approvedAmounts : []);
-                audit_log('admin_reimbursement_status_updated', [
-                    'reimbursement_id' => (int) ($updated['id'] ?? 0),
-                    'status' => (string) ($updated['status'] ?? ''),
-                    'amount_requested' => (float) ($updated['amount_requested'] ?? 0),
-                ], (int) ($updated['user_id'] ?? 0), current_user());
-                flash('success', 'Reimbursement approved successfully.');
-            } catch (Throwable $exception) {
-                flash('error', 'Unable to approve reimbursement: ' . $exception->getMessage());
-            }
-            redirect_to('admin_accounts', payment_redirect_query(['section' => 'approval', 'approval_type' => 'REIMBURSEMENT', 'request_month' => $_POST['filter_request_month'] ?? date('Y-m')]));
-            break;
-
-        case 'admin_deny_reimbursement':
-            require_role('admin');
-            $reimbursementId = (int) ($_POST['reimbursement_id'] ?? 0);
-            try {
-                $updated = deny_reimbursement_request($reimbursementId);
-                audit_log('admin_reimbursement_status_updated', [
-                    'reimbursement_id' => (int) ($updated['id'] ?? 0),
-                    'status' => (string) ($updated['status'] ?? ''),
-                ], (int) ($updated['user_id'] ?? 0), current_user());
-                flash('success', 'Reimbursement denied successfully.');
-            } catch (Throwable $exception) {
-                flash('error', 'Unable to deny reimbursement: ' . $exception->getMessage());
-            }
-            redirect_to('admin_accounts', payment_redirect_query(['section' => 'approval', 'approval_type' => 'REIMBURSEMENT', 'request_month' => $_POST['filter_request_month'] ?? date('Y-m')]));
             break;
 
         case 'admin_delete_payment':
@@ -1304,6 +1625,27 @@ function handle_post_action(string $action): void
             }
 
             redirect_to('admin_accounts', payment_redirect_query($filters));
+            break;
+
+        case 'mark_notifications_read':
+            $user = require_roles(['admin', 'employee', 'corporate_employee', 'external_vendor', 'freelancer']);
+            mark_notifications_read((int) $user['id']);
+            flash('success', 'Notifications marked as read.');
+            redirect_to((string) ($_POST['return_page'] ?? 'notifications'));
+            break;
+
+        case 'dismiss_notification':
+            $user = require_roles(['admin', 'employee', 'corporate_employee', 'external_vendor', 'freelancer']);
+            $notificationId = max(0, (int) ($_POST['notification_id'] ?? 0));
+            if ($notificationId > 0) {
+                mark_notification_read((int) $user['id'], $notificationId);
+            }
+            if (!empty($_POST['ajax'])) {
+                header('Content-Type: application/json');
+                echo json_encode(['ok' => true]);
+                exit;
+            }
+            redirect_to((string) ($_POST['return_page'] ?? 'notifications'));
             break;
 
         case 'filter_reports':
@@ -1335,40 +1677,39 @@ function handle_post_action(string $action): void
             export_report_pdf($data);
             break;
 
-        case 'mark_notifications_read':
-            $user = require_roles(['admin', 'employee', 'corporate_employee', 'external_vendor', 'freelancer']);
-            $returnPage = (string) ($_POST['return_page'] ?? 'notifications');
-            if ($returnPage !== 'notifications') {
-                $returnPage = 'notifications';
-            }
-            mark_all_notifications_read_for_user((int) $user['id']);
-            flash('success', 'Notifications marked as read.');
-            redirect_to($returnPage);
-            break;
-
-        case 'hide_notification':
-            $user = require_roles(['admin', 'employee', 'corporate_employee', 'external_vendor', 'freelancer']);
-            $notificationId = (int) ($_POST['notification_id'] ?? 0);
-            
-            if ($notificationId > 0 && hide_notification($notificationId, (int) $user['id'])) {
-                // Return JSON response for AJAX requests
-                if (!empty($_POST['ajax'])) {
-                    header('Content-Type: application/json');
-                    echo json_encode(['success' => true, 'message' => 'Notification dismissed']);
-                    exit;
-                }
-                flash('success', 'Notification dismissed.');
-            }
-            
-            // For non-AJAX requests, redirect to the referring page
-            $referrer = $_SERVER['HTTP_REFERER'] ?? '';
-            if ($referrer && strpos($referrer, BASE_URL) === 0) {
-                header('Location: ' . $referrer);
-            } else {
-                redirect_to('admin_dashboard');
-            }
+        case 'super_admin_get_data':
+            require_role('super_admin');
+            $approved = db()->query("SELECT id, name, email, role, representative_name, company_name, status FROM users WHERE role = 'admin' AND status IN ('ACTIVE', 'BLOCKED') ORDER BY company_name ASC, name ASC")->fetchAll();
+            $pending = db()->query("SELECT id, name, email, role, representative_name, company_name, created_at FROM users WHERE role = 'admin' AND status = 'PENDING' ORDER BY created_at DESC")->fetchAll();
+            error_log('Super Admin Data Request: ' . count($approved) . ' approved, ' . count($pending) . ' pending');
+            header('Content-Type: application/json');
+            echo json_encode(['approved' => $approved, 'pending' => $pending]);
             exit;
-            break;
+
+        case 'super_admin_toggle_status':
+            require_role('super_admin');
+            $id = (int) ($_POST['id'] ?? 0);
+            $status = in_array($_POST['status'] ?? '', ['ACTIVE', 'BLOCKED'], true) ? $_POST['status'] : 'ACTIVE';
+            db()->prepare("UPDATE users SET status = :status WHERE id = :id AND role = 'admin'")->execute(['status' => $status, 'id' => $id]);
+            header('Content-Type: application/json');
+            echo json_encode(['success' => true]);
+            exit;
+
+        case 'super_admin_approve':
+            require_role('super_admin');
+            $id = (int) ($_POST['id'] ?? 0);
+            db()->prepare("UPDATE users SET status = 'ACTIVE' WHERE id = :id AND role = 'admin'")->execute(['id' => $id]);
+            header('Content-Type: application/json');
+            echo json_encode(['success' => true]);
+            exit;
+
+        case 'super_admin_deny':
+            require_role('super_admin');
+            $id = (int) ($_POST['id'] ?? 0);
+            db()->prepare("DELETE FROM users WHERE id = :id AND role = 'admin' AND status = 'PENDING'")->execute(['id' => $id]);
+            header('Content-Type: application/json');
+            echo json_encode(['success' => true]);
+            exit;
 
         case 'logout':
             $user = current_user();

@@ -30,22 +30,63 @@ function project_form_defaults(): array
     ];
 }
 
-function projects(): array
+function project_scope_admin_id(?array $user = null): ?int
 {
+    $user = $user ?? current_user();
+    if (!$user) {
+        return null;
+    }
+
+    if (in_array((string) ($user['role'] ?? ''), ['admin', 'freelancer', 'external_vendor'], true)) {
+        return (int) $user['id'];
+    }
+
+    if (in_array((string) ($user['role'] ?? ''), ['employee', 'corporate_employee'], true) && !empty($user['admin_id'])) {
+        return (int) $user['admin_id'];
+    }
+
+    return null;
+}
+
+function projects(?int $adminId = null): array
+{
+    $adminId ??= project_scope_admin_id();
+    if ($adminId !== null) {
+        $stmt = db()->prepare('SELECT * FROM projects WHERE admin_id = :admin_id ORDER BY is_active DESC, updated_at DESC, project_name ASC, id DESC');
+        $stmt->execute(['admin_id' => $adminId]);
+        return $stmt->fetchAll();
+    }
+
     $stmt = db()->query('SELECT * FROM projects ORDER BY is_active DESC, updated_at DESC, project_name ASC, id DESC');
     return $stmt->fetchAll();
 }
 
-function active_projects(): array
+function active_projects(?int $adminId = null): array
 {
+    $adminId ??= project_scope_admin_id();
+    if ($adminId !== null) {
+        $stmt = db()->prepare('SELECT * FROM projects WHERE admin_id = :admin_id AND is_active = 1 ORDER BY project_name ASC, id DESC');
+        $stmt->execute(['admin_id' => $adminId]);
+        return $stmt->fetchAll();
+    }
+
     $stmt = db()->query('SELECT * FROM projects WHERE is_active = 1 ORDER BY project_name ASC, id DESC');
     return $stmt->fetchAll();
 }
 
-function project_by_id(int $projectId): ?array
+function project_by_id(int $projectId, ?int $adminId = null): ?array
 {
-    $stmt = db()->prepare('SELECT * FROM projects WHERE id = :id LIMIT 1');
-    $stmt->execute(['id' => $projectId]);
+    $adminId ??= project_scope_admin_id();
+    if ($adminId !== null) {
+        $stmt = db()->prepare('SELECT * FROM projects WHERE id = :id AND admin_id = :admin_id LIMIT 1');
+        $stmt->execute([
+            'id' => $projectId,
+            'admin_id' => $adminId,
+        ]);
+    } else {
+        $stmt = db()->prepare('SELECT * FROM projects WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $projectId]);
+    }
     $row = $stmt->fetch();
 
     return $row ?: null;
@@ -62,9 +103,16 @@ function normalize_project_assignment_ids(array $projectIds): array
         return [];
     }
 
+    $adminId = project_scope_admin_id();
     $placeholders = implode(',', array_fill(0, count($projectIds), '?'));
-    $stmt = db()->prepare('SELECT id FROM projects WHERE id IN (' . $placeholders . ')');
-    $stmt->execute($projectIds);
+    $params = $projectIds;
+    $sql = 'SELECT id FROM projects WHERE id IN (' . $placeholders . ')';
+    if ($adminId !== null) {
+        $sql .= ' AND admin_id = ?';
+        $params[] = $adminId;
+    }
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
 
     $validLookup = [];
     foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $projectId) {
@@ -87,12 +135,18 @@ function normalize_project_assignment_ids(array $projectIds): array
 
 function assigned_projects_for_employee(int $userId): array
 {
+    $adminId = project_scope_admin_id();
+    $adminSql = $adminId !== null ? ' AND p.admin_id = :admin_id' : '';
     $stmt = db()->prepare('SELECT p.*
         FROM employee_project_assignments a
         INNER JOIN projects p ON p.id = a.project_id
-        WHERE a.user_id = :user_id
+        WHERE a.user_id = :user_id' . $adminSql . '
         ORDER BY p.is_active DESC, p.project_name ASC, p.id DESC');
-    $stmt->execute(['user_id' => $userId]);
+    $params = ['user_id' => $userId];
+    if ($adminId !== null) {
+        $params['admin_id'] = $adminId;
+    }
+    $stmt->execute($params);
 
     return $stmt->fetchAll();
 }
@@ -106,7 +160,7 @@ function employee_available_projects(array $employee): array
         }
     }
 
-    return active_projects();
+    return active_projects(project_scope_admin_id($employee));
 }
 
 function employee_available_project_ids(array $employee): array
@@ -194,9 +248,13 @@ function normalize_project_payload(array $source): array
 function save_project(array $source, ?int $projectId = null): int
 {
     $payload = normalize_project_payload($source);
+    $adminId = project_scope_admin_id();
+    if ($adminId === null) {
+        throw new RuntimeException('An administrator must be signed in to manage projects.');
+    }
 
     if ($projectId !== null && $projectId > 0) {
-        $existing = project_by_id($projectId);
+        $existing = project_by_id($projectId, $adminId);
         if (!$existing) {
             throw new RuntimeException('Project not found.');
         }
@@ -208,9 +266,10 @@ function save_project(array $source, ?int $projectId = null): int
                 total_days = :total_days,
                 session_type = :session_type,
                 is_active = :is_active
-            WHERE id = :id')
+            WHERE id = :id AND admin_id = :admin_id')
             ->execute([
                 'id' => $projectId,
+                'admin_id' => $adminId,
                 'project_name' => $payload['project_name'],
                 'college_name' => $payload['college_name'],
                 'location' => $payload['location'],
@@ -222,9 +281,10 @@ function save_project(array $source, ?int $projectId = null): int
         return $projectId;
     }
 
-    db()->prepare('INSERT INTO projects (project_name, college_name, location, total_days, session_type, is_active)
-        VALUES (:project_name, :college_name, :location, :total_days, :session_type, :is_active)')
+    db()->prepare('INSERT INTO projects (admin_id, project_name, college_name, location, total_days, session_type, is_active)
+        VALUES (:admin_id, :project_name, :college_name, :location, :total_days, :session_type, :is_active)')
         ->execute([
+            'admin_id' => $adminId,
             'project_name' => $payload['project_name'],
             'college_name' => $payload['college_name'],
             'location' => $payload['location'],
@@ -244,9 +304,10 @@ function toggle_project_active(int $projectId): array
     }
 
     $nextState = !empty($project['is_active']) ? 0 : 1;
-    db()->prepare('UPDATE projects SET is_active = :is_active WHERE id = :id')
+    db()->prepare('UPDATE projects SET is_active = :is_active WHERE id = :id AND admin_id = :admin_id')
         ->execute([
             'id' => $projectId,
+            'admin_id' => (int) $project['admin_id'],
             'is_active' => $nextState,
         ]);
 
@@ -265,6 +326,9 @@ function delete_project(int $projectId): void
         throw new RuntimeException('Project not found.');
     }
 
-    db()->prepare('DELETE FROM projects WHERE id = :id')
-        ->execute(['id' => $projectId]);
+    db()->prepare('DELETE FROM projects WHERE id = :id AND admin_id = :admin_id')
+        ->execute([
+            'id' => $projectId,
+            'admin_id' => (int) $project['admin_id'],
+        ]);
 }

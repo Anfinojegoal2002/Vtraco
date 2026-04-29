@@ -13,17 +13,30 @@ require __DIR__ . '/src/views/auth.php';
 require __DIR__ . '/src/views/admin.php';
 require __DIR__ . '/src/views/employee.php';
 require __DIR__ . '/src/views/notifications.php';
+require __DIR__ . '/src/views/super_admin.php';
 
 initialize_database();
 
 $page = $_GET['page'] ?? 'landing';
-$action = $_POST['action'] ?? null;
+$uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$scriptName = $_SERVER['SCRIPT_NAME'];
+$basePath = str_ends_with($scriptName, 'index.php') ? dirname($scriptName) : $scriptName;
+$relativeUri = '/' . ltrim(substr($uri, strlen($basePath)), '/');
+
+if ($relativeUri === '/super-admin') {
+    $page = 'super_admin_dashboard';
+}
+
+$action = $_POST['action'] ?? $_GET['action'] ?? null;
 
 if ($action) {
     try {
-        handle_post_action($action);
+        handle_post_action((string) $action);
     } catch (Throwable $exception) {
-        report_exception($exception, 'Unhandled POST action failed.', ['action' => $action]);
+        if (($_SERVER['HTTP_ACCEPT'] ?? '') === 'application/json' || isset($_GET['action'])) {
+            render_json(['success' => false, 'message' => $exception->getMessage()], 500);
+        }
+        report_exception($exception, 'Unhandled action failed.', ['action' => $action]);
         flash('error', $exception instanceof RuntimeException ? $exception->getMessage() : 'Unable to complete the request right now.');
         $user = null;
         try {

@@ -11,6 +11,7 @@ declare(strict_types=1);
 function get_attendance_report_data(array $filters): array
 {
     $db = db();
+    $adminId = project_scope_admin_id();
     $sql = "SELECT
                 ar.attend_date AS date,
                 u.name AS employee_name,
@@ -32,6 +33,10 @@ function get_attendance_report_data(array $filters): array
             WHERE 1=1";
 
     $params = [];
+    if ($adminId !== null) {
+        $sql .= " AND u.admin_id = ?";
+        $params[] = $adminId;
+    }
 
     if (!empty($filters['employee_ids'])) {
         $placeholders = implode(',', array_fill(0, count($filters['employee_ids']), '?'));

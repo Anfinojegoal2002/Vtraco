@@ -20,9 +20,9 @@ function render_landing(): void
                         <button class="button solid landing-button" type="button" data-modal-target="landing-login-modal">
                             <strong>Login</strong>
                         </button>
-                        <a class="button outline landing-button" href="<?= h(BASE_URL) ?>?page=register">
+                        <button class="button outline landing-button" type="button" data-modal-target="admin-register-modal">
                             <strong>Register</strong>
-                        </a>
+                        </button>
                     </div>
                     <div class="trust-line">Trusted by growing teams to manage attendance and payroll seamlessly.</div>
                 </div>
@@ -135,7 +135,7 @@ function render_landing(): void
             <div class="landing-footer-wrap">
                 <div>
                     <a class="brand" href="<?= h(BASE_URL) ?>">
-                        <span class="brand-mark">VT</span>
+                        <img class="brand-mark" src="<?= h(asset_url('assets/images/vtraco-logo.svg')) ?>" alt="" aria-hidden="true">
                         <span class="brand-copy"><strong style="color:#fff;">V Traco</strong><small style="color:rgba(219,234,254,0.72);">Attendance & Payroll</small></span>
                     </a>
                     <p>Designed to simplify attendance capture, payroll accuracy, and workforce accountability.</p>

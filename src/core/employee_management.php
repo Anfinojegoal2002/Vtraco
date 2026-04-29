@@ -108,14 +108,14 @@ function insert_employee(array $data, array $rules, array $projectIds = []): arr
     $manager = current_user();
     if (($manager['role'] ?? '') === 'freelancer') {
         $employeeType = 'corporate';
+    } elseif (($manager['role'] ?? '') === 'external_vendor') {
+        $employeeType = 'vendor';
     }
     if (!in_array($employeeType, ['regular', 'vendor', 'corporate'], true)) {
         $employeeType = 'regular';
     }
-
-    // Allow Admin to assign employees to a specific Vendor.
-    if (($manager['role'] ?? '') !== 'freelancer' && ($data['vendor_id'] ?? 0) > 0) {
-        $adminId = (int) $data['vendor_id'];
+    if ($employeeType === 'vendor' && ($manager['role'] ?? '') !== 'external_vendor') {
+        throw new RuntimeException('Vendor employees can only be added by the vendor.');
     }
 
     $empId = trim((string) ($data['emp_id'] ?? ''));
@@ -205,13 +205,14 @@ function employee_import_scope(array $data): array
     $manager = current_user();
     if (($manager['role'] ?? '') === 'freelancer') {
         $employeeType = 'corporate';
+    } elseif (($manager['role'] ?? '') === 'external_vendor') {
+        $employeeType = 'vendor';
     }
     if (!in_array($employeeType, ['regular', 'vendor', 'corporate'], true)) {
         $employeeType = 'regular';
     }
-
-    if (($manager['role'] ?? '') !== 'freelancer' && ($data['vendor_id'] ?? 0) > 0) {
-        $adminId = (int) $data['vendor_id'];
+    if ($employeeType === 'vendor' && ($manager['role'] ?? '') !== 'external_vendor') {
+        throw new RuntimeException('Vendor employees can only be added by the vendor.');
     }
 
     $role = $employeeType === 'corporate' ? 'corporate_employee' : current_manager_target_role();

@@ -877,6 +877,10 @@ function attendance_report_time(?string $date, string $value): ?string
         $value = $matches[1];
     }
 
+    if (preg_match('/^([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?\s*(AM|PM)$/i', $value, $matches) === 1) {
+        $value = sprintf('%02d:%02d:%02d', (int) $matches[1], (int) $matches[2], (int) ($matches[3] ?? 0));
+    }
+
     foreach (['H:i', 'H:i:s', 'g:i A', 'g:iA', 'h:i A', 'h:iA'] as $format) {
         $time = DateTimeImmutable::createFromFormat('Y-m-d ' . $format, $date . ' ' . $value);
         if ($time instanceof DateTimeImmutable) {
@@ -894,7 +898,7 @@ function attendance_import_status(string $rawStatus, ?string $inTime, ?string $o
         return 'Leave';
     }
 
-    if (in_array($status, ['WO', 'WEEKOFF', 'WEEK OFF'], true)) {
+    if (in_array($status, ['W', 'WO', 'WEEKOFF', 'WEEK OFF'], true)) {
         return 'Week Off';
     }
 
@@ -1308,6 +1312,109 @@ function attendance_month_year_from_title(array $rows): ?array
     ];
 }
 
+function attendance_month_performance_month_year(array $rows, ?string $fallbackDate = null): ?array
+{
+    foreach ($rows as $row) {
+        $line = trim(implode(' ', array_map(static fn($cell) => trim((string) $cell), $row)));
+        if ($line === '') {
+            continue;
+        }
+
+        if (preg_match('/([A-Za-z]+)\s*-\s*(\d{3,4})/', $line, $matches) !== 1) {
+            continue;
+        }
+
+        $monthName = ucfirst(strtolower($matches[1]));
+        $yearDigits = $matches[2];
+        $fallbackYear = $fallbackDate !== null ? (int) substr($fallbackDate, 0, 4) : (int) date('Y');
+        $year = strlen($yearDigits) === 4 ? (int) $yearDigits : $fallbackYear;
+        $date = DateTimeImmutable::createFromFormat('!F Y', $monthName . ' ' . $year);
+        if ($date instanceof DateTimeImmutable) {
+            return [
+                'month' => (int) $date->format('m'),
+                'year' => (int) $date->format('Y'),
+            ];
+        }
+    }
+
+    return null;
+}
+
+function attendance_block_value_after_label(array $row, string $label): string
+{
+    $normalizedLabel = normalize_attendance_csv_header($label);
+    $count = count($row);
+    for ($index = 0; $index < $count; $index++) {
+        if (normalize_attendance_csv_header((string) ($row[$index] ?? '')) !== $normalizedLabel) {
+            continue;
+        }
+
+        for ($next = $index + 1; $next < $count; $next++) {
+            $value = trim((string) ($row[$next] ?? ''));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+    }
+
+    return '';
+}
+
+function attendance_extract_month_performance_entries(array $rows, ?string $fallbackDate = null): array
+{
+    $monthYear = attendance_month_performance_month_year($rows, $fallbackDate);
+    if ($monthYear === null) {
+        return [];
+    }
+
+    $daysInMonth = cal_days_in_month(CAL_GREGORIAN, (int) $monthYear['month'], (int) $monthYear['year']);
+    $entries = [];
+    $totalRows = count($rows);
+
+    for ($index = 0; $index + 9 < $totalRows; $index++) {
+        $metaRow = $rows[$index] ?? [];
+        $employeeRow = $rows[$index + 1] ?? [];
+        $inRow = $rows[$index + 4] ?? [];
+        $outRow = $rows[$index + 5] ?? [];
+        $statusRow = $rows[$index + 9] ?? [];
+
+        $metaKey = normalize_attendance_csv_header((string) ($metaRow[0] ?? ''));
+        $employeeKey = normalize_attendance_csv_header((string) ($employeeRow[0] ?? ''));
+        $inKey = normalize_attendance_csv_header((string) ($inRow[0] ?? ''));
+        $outKey = normalize_attendance_csv_header((string) ($outRow[0] ?? ''));
+        $statusKey = normalize_attendance_csv_header((string) ($statusRow[0] ?? ''));
+
+        if ($metaKey !== 'deptnam' || $employeeKey !== 'empcod' || $inKey !== 'i' || $outKey !== 'ou' || $statusKey !== 'statu') {
+            continue;
+        }
+
+        $empCode = attendance_block_value_after_label($employeeRow, 'Empcod');
+        $employeeName = attendance_block_value_after_label($employeeRow, 'Nam');
+        if ($empCode === '' && $employeeName === '') {
+            continue;
+        }
+
+        for ($day = 1; $day <= $daysInMonth; $day++) {
+            $date = sprintf('%04d-%02d-%02d', (int) $monthYear['year'], (int) $monthYear['month'], $day);
+            $inTime = attendance_report_time($date, trim((string) ($inRow[$day] ?? '')));
+            $outTime = attendance_report_time($date, trim((string) ($outRow[$day] ?? '')));
+            $statusRaw = trim((string) ($statusRow[$day] ?? ''));
+
+            $entries[] = [
+                'emp_code' => $empCode,
+                'employee_name' => $employeeName,
+                'date' => $date,
+                'status' => attendance_import_status($statusRaw, $inTime, $outTime),
+                'biometric_in_time' => $inTime,
+                'biometric_out_time' => $outTime,
+                'leave_reason' => null,
+            ];
+        }
+    }
+
+    return $entries;
+}
+
 function attendance_extract_monthly_register_entries(array $rows): array
 {
     $title = strtoupper(trim((string) ($rows[0][0] ?? '')));
@@ -1666,6 +1773,21 @@ function parse_attendance_report_csv(string $path, ?string $overrideDate = null,
         ];
     }
 
+    $monthPerformanceEntries = attendance_extract_month_performance_entries($rows, $reportDate);
+    if ($monthPerformanceEntries !== []) {
+        $entryDates = array_values(array_unique(array_map(
+            static fn(array $entry): string => (string) ($entry['date'] ?? ''),
+            array_filter($monthPerformanceEntries, static fn(array $entry): bool => !empty($entry['date']))
+        )));
+        sort($entryDates);
+
+        return [
+            'date' => $entryDates[0] ?? $reportDate,
+            'dates' => $entryDates,
+            'entries' => $monthPerformanceEntries,
+        ];
+    }
+
     $periodicEntries = attendance_extract_periodic_report_entries($rows, $reportDate);
     if ($periodicEntries !== []) {
         $entryDates = array_values(array_unique(array_map(
@@ -1795,27 +1917,18 @@ function import_attendance_report_csv(string $path, ?string $overrideDate = null
     $unmatched = [];
 
     foreach ($report['entries'] as $entry) {
-        $employee = null;
         $empCode = trim((string) ($entry['emp_code'] ?? ''));
         $employeeName = trim((string) ($entry['employee_name'] ?? ''));
-
-        if ($empCode !== '' && $employeeName !== '') {
-            $employee = employee_by_emp_code_and_name($empCode, $employeeName);
-        } elseif ($empCode !== '') {
-            $employee = employee_by_emp_code($empCode);
-        }
+        $employee = employee_by_attendance_identity($empCode, $employeeName);
 
         if (!$employee && $empCode === '' && $employeeName !== '') {
-            $employee = employee_by_name($employeeName);
-            if (!$employee) {
-                try {
-                    $employee = create_employee_from_attendance_entry($entry);
-                    if ($employee) {
-                        $created++;
-                    }
-                } catch (Throwable) {
-                    $employee = null;
+            try {
+                $employee = create_employee_from_attendance_entry($entry);
+                if ($employee) {
+                    $created++;
                 }
+            } catch (Throwable) {
+                $employee = null;
             }
         }
 

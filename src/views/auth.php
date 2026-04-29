@@ -26,7 +26,19 @@ function auth_login_roles(): array
             'label' => 'External Vendor',
             'title' => 'External Vendor Login',
             'eyebrow' => 'Vendor Access',
-            'description' => 'Use your vendor registration details to access your account.',
+            'description' => 'Use the credentials shared by your admin to access your vendor account.',
+        ],
+        'freelancer' => [
+            'label' => 'Contractual Admin',
+            'title' => 'Contractual Admin Login',
+            'eyebrow' => 'Admin Access',
+            'description' => 'Sign in to manage your contractual employees and attendance.',
+        ],
+        'super_admin' => [
+            'label' => 'Super Admin',
+            'title' => 'Super Admin Login',
+            'eyebrow' => 'System Control',
+            'description' => 'Sign in to manage companies, approvals, and system-wide settings.',
         ],
     ];
 }
@@ -37,23 +49,16 @@ function auth_registration_roles(): array
         'admin' => [
             'label' => 'Admin',
             'eyebrow' => 'Admin Setup',
-            'title' => 'Create Admin Account',
+            'title' => 'Register Your Company',
             'description' => 'Register a management account for payroll, rules, attendance review, and employee operations.',
-            'button' => 'Register',
-        ],
-        'external_vendor' => [
-            'label' => 'External Vendor',
-            'eyebrow' => 'Vendor Registration',
-            'title' => 'Create External Vendor Account',
-            'description' => 'Register an external vendor account for partner and service-provider access.',
-            'button' => 'Register Vendor',
+            'button' => 'Register Admin',
         ],
         'corporate_employee' => [
             'label' => 'Contractual Employee',
-            'eyebrow' => 'Contractual Employee Registration',
-            'title' => 'Create Contractual Employee Account',
-            'description' => 'Register as a contractual employee. After registration, you will use the normal Employee workspace.',
-            'button' => 'Register Contractual Employee',
+            'eyebrow' => 'Employee Setup',
+            'title' => 'Register as Contractual',
+            'description' => 'Self-register as a contractual employee to track your own attendance and view your payroll.',
+            'button' => 'Register Employee',
         ],
     ];
 }
@@ -61,8 +66,13 @@ function auth_registration_roles(): array
 function render_login(): void
 {
     $roles = auth_login_roles();
-    $role = can_login_role((string) ($_GET['role'] ?? 'admin')) ? (string) $_GET['role'] : 'admin';
+    $role = (string) ($_GET['role'] ?? 'admin');
+    if (!isset($roles[$role]) || !can_login_role($role)) {
+        $role = 'admin';
+    }
     $selected = $roles[$role];
+    $resetEmail = filter_var((string) ($_GET['email'] ?? ''), FILTER_VALIDATE_EMAIL) ? (string) $_GET['email'] : '';
+    $resetMode = (string) ($_GET['reset'] ?? '');
     render_header($selected['title']);
     ?>
     <section class="auth-page-wrap">
@@ -75,42 +85,104 @@ function render_login(): void
                     <p><?= h($selected['description']) ?></p>
                 </div>
             </div>
-            <div class="cards-2 auth-role-grid">
-                <?php foreach ($roles as $key => $meta): ?>
-                    <a class="action-card<?= $key === $role ? ' active-auth-role' : '' ?>" href="<?= h(BASE_URL) ?>?page=login&role=<?= h($key) ?>">
-                        <strong><?= h((string) ($meta['label'] ?? user_role_label($key))) ?></strong>
-                        <span class="hint"><?= h($meta['eyebrow']) ?></span>
-                    </a>
-                <?php endforeach; ?>
-            </div>
+            <?php if ($role !== 'super_admin'): ?>
+                <div class="cards-2 auth-role-grid">
+                    <?php foreach ($roles as $key => $meta): ?>
+                        <a class="action-card<?= $key === $role ? ' active-auth-role' : '' ?>" href="<?= h(BASE_URL) ?>?page=login&role=<?= h($key) ?>">
+                            <strong><?= h((string) ($meta['label'] ?? user_role_label($key))) ?></strong>
+                            <span class="hint"><?= h($meta['eyebrow']) ?></span>
+                        </a>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
             <div class="spacer"></div>
-            <form method="post" class="stack-form" data-validate>
-                <?= csrf_field() ?>
-                <input type="hidden" name="action" value="login">
-                <input type="hidden" name="role" value="<?= h($role) ?>">
-                <div class="field">
-                    <label>Email</label>
-                    <div class="field-row"><input type="email" name="email" placeholder="name@company.com" required></div>
-                    <small class="field-error"><span>!</span>Enter a valid email address.</small>
+            <?php if ($resetMode === 'email' && in_array($role, ['admin', 'employee', 'corporate_employee', 'external_vendor'], true)): ?>
+                <div class="stack-form">
+                    <h3>Forgot Password</h3>
+                    <form method="post" class="stack-form" style="margin-top:14px;" data-validate>
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="action" value="forgot_password_send_otp">
+                        <input type="hidden" name="role" value="<?= h($role) ?>">
+                        <div class="field">
+                            <label>Email</label>
+                            <div class="field-row"><input type="email" name="forgot_email" placeholder="name@company.com" required></div>
+                            <small class="field-error"><span>!</span>Enter the email linked to this account.</small>
+                        </div>
+                        <button class="button solid" type="submit">Send OTP</button>
+                        <p class="hint">We will send a 6-digit OTP to this email.</p>
+                    </form>
+                    <a class="button ghost" href="<?= h(BASE_URL) ?>?page=login&role=<?= h($role) ?>">Back to login</a>
                 </div>
-                <div class="field">
-                    <label>Password</label>
-                    <div class="field-row">
-                        <input id="login-password" type="password" name="password" placeholder="Enter your password" required>
-                        <button class="password-toggle" type="button" data-password-toggle="login-password">Show</button>
+            <?php elseif ($resetMode === 'otp' && in_array($role, ['admin', 'employee', 'corporate_employee', 'external_vendor'], true)): ?>
+                <div class="stack-form">
+                    <h3>Enter OTP</h3>
+                    <p class="hint">Enter the OTP sent to <?= h($resetEmail ?: 'your email') ?>.</p>
+                    <form method="post" class="stack-form" style="margin-top:14px;" data-validate>
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="action" value="forgot_password_verify_otp">
+                        <input type="hidden" name="role" value="<?= h($role) ?>">
+                        <input type="hidden" name="forgot_email" value="<?= h($resetEmail) ?>">
+                        <div class="field">
+                            <label>OTP</label>
+                            <div class="field-row"><input type="text" name="otp" inputmode="numeric" minlength="6" maxlength="6" pattern="\d{6}" placeholder="6-digit OTP" required></div>
+                            <small class="field-error"><span>!</span>Enter the 6-digit OTP.</small>
+                        </div>
+                        <button class="button solid" type="submit">Verify OTP</button>
+                    </form>
+                    <a class="button ghost" href="<?= h(BASE_URL) ?>?page=login&role=<?= h($role) ?>&reset=email">Change email</a>
+                </div>
+            <?php elseif ($resetMode === 'password' && in_array($role, ['admin', 'employee', 'corporate_employee', 'external_vendor'], true)): ?>
+                <div class="stack-form">
+                    <h3>Set New Password</h3>
+                    <p class="hint">Create a new password for <?= h($resetEmail ?: 'your account') ?>.</p>
+                    <form method="post" class="stack-form" style="margin-top:14px;" data-validate>
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="action" value="forgot_password_set_password">
+                        <input type="hidden" name="role" value="<?= h($role) ?>">
+                        <input type="hidden" name="forgot_email" value="<?= h($resetEmail) ?>">
+                        <div class="field">
+                            <label>New Password</label>
+                            <div class="field-row"><input type="password" name="password" maxlength="6" placeholder="Max 6 characters" required></div>
+                            <small class="field-error"><span>!</span>Password can be letters, numbers, or symbols. Max 6 characters.</small>
+                        </div>
+                        <div class="field">
+                            <label>Confirm Password</label>
+                            <div class="field-row"><input type="password" name="confirm_password" maxlength="6" placeholder="Repeat password" required></div>
+                            <small class="field-error"><span>!</span>Please confirm the password.</small>
+                        </div>
+                        <button class="button solid" type="submit">Reset Password</button>
+                    </form>
+                </div>
+            <?php else: ?>
+                <form method="post" class="stack-form" data-validate>
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="action" value="login">
+                    <input type="hidden" name="role" value="<?= h($role) ?>">
+                    <div class="field">
+                        <label>Email</label>
+                        <div class="field-row"><input type="email" name="email" placeholder="name@company.com" required></div>
+                        <small class="field-error"><span>!</span>Enter a valid email address.</small>
                     </div>
-                    <small class="field-error"><span>!</span>Password is required.</small>
-                </div>
-                <button class="button solid" type="submit"><?= h($selected['title']) ?></button>
-                <?php if (in_array($role, ['employee', 'corporate_employee'], true)): ?>
-                    <button class="button ghost" type="submit" name="forgot_password" value="1">Forgot your password?</button>
-                    <p class="hint">Enter your employee email above and we will send or log a temporary password for that account.</p>
-                <?php endif; ?>
-            </form>
+                    <div class="field">
+                        <label>Password</label>
+                        <div class="field-row">
+                            <input id="login-password" type="password" name="password" placeholder="Enter your password" required>
+                            <button class="password-toggle" type="button" data-password-toggle="login-password">Show</button>
+                        </div>
+                        <small class="field-error"><span>!</span>Password is required.</small>
+                    </div>
+                    <button class="button solid" type="submit"><?= h($selected['title']) ?></button>
+                    <?php if (in_array($role, ['admin', 'employee', 'corporate_employee', 'external_vendor'], true)): ?>
+                        <a class="button ghost" href="<?= h(BASE_URL) ?>?page=login&role=<?= h($role) ?>&reset=email">Forgot your password?</a>
+                    <?php endif; ?>
+                </form>
+            <?php endif; ?>
             <div class="spacer"></div>
             <?php if (in_array($role, ['employee', 'corporate_employee'], true)): ?>
-                <p class="hint">Company employees use credentials sent by their admin. Contractual employees can register from the registration page.</p>
-            <?php else: ?>
+                <p class="hint">Employees use credentials sent by their admin.</p>
+            <?php elseif ($role === 'external_vendor'): ?>
+                <p class="hint">External vendors use credentials shared by the admin.</p>
+            <?php elseif ($role !== 'super_admin'): ?>
                 <p><a href="<?= h(BASE_URL) ?>?page=register">Need an account? Open registration.</a></p>
             <?php endif; ?>
         </div>
@@ -131,22 +203,14 @@ function render_register(): void
     <section class="auth-page-wrap auth-showcase-wrap">
     <div class="auth-register-card">
         <div class="auth-register-brand">
-            <span class="brand-mark auth-register-brand-mark">VT</span>
+            <img class="brand-mark auth-register-brand-mark" src="<?= h(asset_url('assets/images/vtraco-logo.svg')) ?>" alt="" aria-hidden="true">
             <div class="auth-register-brand-copy">
                 <strong>V Traco</strong>
                 <span>Attendance &amp; Payroll</span>
             </div>
         </div>
 
-        <p class="auth-register-tagline">Choose your registration type, then fill in the form below.</p>
-
-        <div class="auth-register-segmented" role="tablist" aria-label="Registration types">
-            <?php foreach ($roles as $role => $meta): ?>
-                <a class="auth-register-segment<?= $role === $selectedRole ? ' active-auth-role' : '' ?>" href="<?= h(BASE_URL) ?>?page=register&role=<?= h($role) ?>">
-                    <strong><?= h((string) ($meta['label'] ?? user_role_label($role))) ?></strong>
-                </a>
-            <?php endforeach; ?>
-        </div>
+        <p class="auth-register-tagline">Fill in the form below to create an admin account.</p>
 
         <div class="auth-register-copy">
             <span class="eyebrow"><?= h($selected['eyebrow']) ?></span>
@@ -176,15 +240,15 @@ function render_register(): void
             <div class="field">
                 <label>Password</label>
                 <div class="field-row">
-                    <input id="register-password-<?= h($selectedRole) ?>" type="password" name="password" minlength="6" maxlength="6" pattern="\d{6}" placeholder="6 numbers only" required>
+                    <input id="register-password-<?= h($selectedRole) ?>" type="password" name="password" maxlength="6" placeholder="Max 6 characters" required>
                     <button class="password-toggle" type="button" data-password-toggle="register-password-<?= h($selectedRole) ?>">Show</button>
                 </div>
-                <small class="field-error"><span>!</span>Password must be exactly 6 numbers.</small>
+                <small class="field-error"><span>!</span>Password can be letters, numbers, or symbols. Max 6 characters.</small>
             </div>
             <div class="field">
                 <label>Confirm Password</label>
                 <div class="field-row">
-                    <input id="register-confirm-password-<?= h($selectedRole) ?>" type="password" name="confirm_password" minlength="6" maxlength="6" pattern="\d{6}" placeholder="6 numbers only" required>
+                    <input id="register-confirm-password-<?= h($selectedRole) ?>" type="password" name="confirm_password" maxlength="6" placeholder="Repeat password" required>
                     <button class="password-toggle" type="button" data-password-toggle="register-confirm-password-<?= h($selectedRole) ?>">Show</button>
                 </div>
                 <small class="field-error"><span>!</span>Please confirm the password.</small>

@@ -790,7 +790,8 @@
             }
 
             const role = card.dataset.profileRole || 'employee';
-            const settingsModal = document.getElementById(role === 'admin' ? 'admin-profile-settings-modal' : 'employee-profile-settings-modal');
+            const adminShellRoles = ['admin', 'freelancer', 'external_vendor'];
+            const settingsModal = document.getElementById(adminShellRoles.includes(role) ? 'admin-profile-settings-modal' : 'employee-profile-settings-modal');
             if (!settingsModal) {
                 return;
             }

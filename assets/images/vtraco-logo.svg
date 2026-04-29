@@ -1,0 +1,25 @@
+<svg width="160" height="160" viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Vtraco logo</title>
+  <desc id="desc">A modern V and tracking path mark for Vtraco.</desc>
+  <defs>
+    <linearGradient id="shield" x1="28" y1="20" x2="132" y2="140" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4F46E5"/>
+      <stop offset="0.55" stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#0F766E"/>
+    </linearGradient>
+    <linearGradient id="path" x1="42" y1="99" x2="119" y2="50" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#BAE6FD"/>
+      <stop offset="1" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <filter id="softShadow" x="10" y="12" width="140" height="140" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="14" stdDeviation="13" flood-color="#0F172A" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <rect x="22" y="20" width="116" height="116" rx="34" fill="url(#shield)" filter="url(#softShadow)"/>
+  <path d="M43 54L70.5 109C74.5 117 85.8 117.4 90.4 109.8L119 62" stroke="white" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M50 99C65.5 79 83.5 68.5 111 66" stroke="url(#path)" stroke-width="9" stroke-linecap="round" stroke-dasharray="1 17"/>
+  <circle cx="119" cy="62" r="12" fill="#ECFEFF"/>
+  <circle cx="119" cy="62" r="5" fill="#2563EB"/>
+  <path d="M95 38H124" stroke="#DFF7FF" stroke-width="9" stroke-linecap="round"/>
+  <path d="M110 38V72" stroke="#DFF7FF" stroke-width="9" stroke-linecap="round"/>
+</svg>

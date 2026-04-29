@@ -2,6 +2,11 @@
 
 declare(strict_types=1);
 
+$composerAutoload = __DIR__ . '/../vendor/autoload.php';
+if (file_exists($composerAutoload)) {
+    require_once $composerAutoload;
+}
+
 function load_config(string $name): array
 {
     $path = __DIR__ . '/../config/' . $name . '.php';
