@@ -969,12 +969,16 @@ function handle_post_action(string $action): void
                 if (!empty($result['unmatched'])) {
                     $message .= ' | Unmatched Employees: ' . implode(', ', $result['unmatched']);
                 }
+                if (!empty($result['ambiguous'])) {
+                    $message .= ' | Duplicate Empcode Matches: ' . implode(', ', $result['ambiguous']);
+                }
                 audit_log('attendance_import_completed', [
                     'filename' => (string) ($_FILES['attendance_csv']['name'] ?? ''),
                     'date' => $result['date'] ?? null,
                     'imported' => (int) $result['imported'],
                     'skipped' => (int) ($result['skipped'] ?? 0),
                     'unmatched' => $result['unmatched'] ?? [],
+                    'ambiguous' => $result['ambiguous'] ?? [],
                 ]);
                 flash('success', $message);
             } catch (Throwable $exception) {

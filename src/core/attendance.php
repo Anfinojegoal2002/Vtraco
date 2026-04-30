@@ -1244,6 +1244,73 @@ function attendance_extract_binary_xls_rows(string $path): array
     return $xls->rows();
 }
 
+function attendance_binary_xls_full_emp_codes(string $path): array
+{
+    $contents = @file_get_contents($path);
+    if ($contents === false || $contents === '') {
+        return [];
+    }
+
+    $text = preg_replace('/[^\x20-\x7E]+/', ' ', $contents) ?? '';
+    $blocks = preg_split('/Empcode/i', $text) ?: [];
+    $codes = [];
+    foreach ($blocks as $block) {
+        if (preg_match('/\b[A-Z][0-9]{3,}\b/i', $block, $matches) === 1) {
+            $codes[] = strtoupper($matches[0]);
+        }
+    }
+
+    return $codes;
+}
+
+function attendance_replace_value_after_label(array &$row, string $label, string $value): void
+{
+    $target = normalize_attendance_csv_header($label);
+    $count = count($row);
+    for ($index = 0; $index < $count; $index++) {
+        if (normalize_attendance_csv_header((string) ($row[$index] ?? '')) !== $target) {
+            continue;
+        }
+
+        for ($next = $index + 1; $next < min($count, $index + 4); $next++) {
+            if (trim((string) ($row[$next] ?? '')) !== '') {
+                $row[$next] = $value;
+                return;
+            }
+        }
+
+        $row[min($count, $index + 2)] = $value;
+        return;
+    }
+}
+
+function attendance_restore_binary_xls_emp_codes(array $rows, string $path, string $originalName): array
+{
+    if (!attendance_is_binary_xls_file($path, $originalName)) {
+        return $rows;
+    }
+
+    $codes = attendance_binary_xls_full_emp_codes($path);
+    if ($codes === []) {
+        return $rows;
+    }
+
+    $codeIndex = 0;
+    foreach ($rows as &$row) {
+        if (normalize_attendance_csv_header((string) ($row[0] ?? '')) !== 'empcod') {
+            continue;
+        }
+        if (!isset($codes[$codeIndex])) {
+            break;
+        }
+        attendance_replace_value_after_label($row, 'Empcod', $codes[$codeIndex]);
+        $codeIndex++;
+    }
+    unset($row);
+
+    return $rows;
+}
+
 function attendance_report_rows(string $path, string $originalName = ''): array
 {
     if (attendance_is_xlsx_file($path, $originalName)) {
@@ -1256,13 +1323,15 @@ function attendance_report_rows(string $path, string $originalName = ''): array
         $rows = attendance_extract_csv_rows($path);
     }
 
-    return array_map(static function (array $row): array {
+    $rows = array_map(static function (array $row): array {
         return array_map(static function ($cell): string {
             $text = (string) $cell;
             $text = str_replace("\0", '', $text);
             return trim($text);
         }, $row);
     }, $rows);
+
+    return attendance_restore_binary_xls_emp_codes($rows, $path, $originalName);
 }
 
 function attendance_header_key(string $header): ?string
@@ -1938,15 +2007,23 @@ function import_attendance_report_csv(string $path, ?string $overrideDate = null
     $imported = 0;
     $skipped = 0;
     $unmatched = [];
+    $ambiguous = [];
 
     foreach ($report['entries'] as $entry) {
         $empCode = trim((string) ($entry['emp_code'] ?? ''));
         $employeeName = trim((string) ($entry['employee_name'] ?? ''));
-        $employee = $empCode !== '' ? employee_by_emp_code($empCode) : null;
+        $employee = $employeeName !== ''
+            ? employee_by_attendance_identity($empCode, $employeeName)
+            : ($empCode !== '' ? employee_by_emp_code($empCode) : null);
 
         if (!$employee || empty($entry['date'])) {
             $skipped++;
-            $unmatched[] = $empCode !== '' ? $empCode : ($employeeName !== '' ? $employeeName : 'Unknown Employee');
+            $label = $empCode !== '' ? $empCode : ($employeeName !== '' ? $employeeName : 'Unknown Employee');
+            if ($empCode !== '' && employee_emp_code_match_issue($empCode) === 'duplicate_numeric') {
+                $ambiguous[] = $label;
+            } else {
+                $unmatched[] = $label;
+            }
             continue;
         }
 
@@ -1976,6 +2053,7 @@ function import_attendance_report_csv(string $path, ?string $overrideDate = null
         'imported' => $imported,
         'skipped' => $skipped,
         'unmatched' => array_values(array_unique($unmatched)),
+        'ambiguous' => array_values(array_unique($ambiguous)),
     ];
 }
 

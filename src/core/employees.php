@@ -84,6 +84,18 @@ function normalize_emp_code_for_match(string $empCode): string
     return $normalized;
 }
 
+function emp_code_numeric_key(string $empCode): string
+{
+    $digits = preg_replace('/[^0-9]/', '', strtoupper(trim($empCode))) ?? '';
+    $digits = ltrim($digits, '0');
+    return $digits === '' ? '' : $digits;
+}
+
+function emp_code_raw_key(string $empCode): string
+{
+    return preg_replace('/[^A-Z0-9]/', '', strtoupper(trim($empCode))) ?? '';
+}
+
 function employee_by_emp_code(string $empCode): ?array
 {
     $empCode = trim($empCode);
@@ -95,6 +107,8 @@ function employee_by_emp_code(string $empCode): ?array
     $adminId = current_admin_id();
     $role = current_manager_target_role();
     $targetCode = normalize_emp_code_for_match($empCode);
+    $targetNumeric = emp_code_numeric_key($empCode);
+    $targetRaw = emp_code_raw_key($empCode);
 
     if (($user['role'] ?? '') === 'admin') {
         $stmt = db()->prepare("SELECT * FROM users WHERE role IN ('employee', 'corporate_employee') AND (admin_id = :admin_id OR admin_id IS NULL)");
@@ -110,13 +124,81 @@ function employee_by_emp_code(string $empCode): ?array
         ]);
     }
 
+    $numericMatches = [];
+    $prefixMatches = [];
     foreach ($stmt->fetchAll() as $row) {
-        if (normalize_emp_code_for_match((string) ($row['emp_id'] ?? '')) === $targetCode) {
+        $rowEmpId = (string) ($row['emp_id'] ?? '');
+        if (normalize_emp_code_for_match($rowEmpId) === $targetCode) {
             return $row;
+        }
+
+        if ($targetNumeric !== '' && emp_code_numeric_key($rowEmpId) === $targetNumeric) {
+            $numericMatches[] = $row;
+        }
+
+        $rowRaw = emp_code_raw_key($rowEmpId);
+        if ($targetRaw !== '' && $rowRaw !== '' && (str_starts_with($rowRaw, $targetRaw) || str_starts_with($targetRaw, $rowRaw))) {
+            $prefixMatches[] = $row;
         }
     }
 
+    if (count($numericMatches) === 1) {
+        return $numericMatches[0];
+    }
+
+    if (count($prefixMatches) === 1) {
+        return $prefixMatches[0];
+    }
+
     return null;
+}
+
+function employee_emp_code_match_issue(string $empCode): string
+{
+    $empCode = trim($empCode);
+    if ($empCode === '') {
+        return 'missing';
+    }
+
+    $user = current_user();
+    $adminId = current_admin_id();
+    $role = current_manager_target_role();
+    $targetNumeric = emp_code_numeric_key($empCode);
+    $targetRaw = emp_code_raw_key($empCode);
+
+    if ($targetNumeric === '' && $targetRaw === '') {
+        return 'not_found';
+    }
+
+    if (($user['role'] ?? '') === 'admin') {
+        $stmt = db()->prepare("SELECT emp_id FROM users WHERE role IN ('employee', 'corporate_employee') AND (admin_id = :admin_id OR admin_id IS NULL)");
+        $stmt->execute(['admin_id' => $adminId]);
+    } elseif ($adminId === null) {
+        $stmt = db()->prepare("SELECT emp_id FROM users WHERE role = :role");
+        $stmt->execute(['role' => $role]);
+    } else {
+        $stmt = db()->prepare("SELECT emp_id FROM users WHERE role = :role AND admin_id = :admin_id");
+        $stmt->execute([
+            'role' => $role,
+            'admin_id' => $adminId,
+        ]);
+    }
+
+    $numericMatches = 0;
+    $prefixMatches = 0;
+    foreach ($stmt->fetchAll() as $row) {
+        $rowEmpId = (string) ($row['emp_id'] ?? '');
+        if ($targetNumeric !== '' && emp_code_numeric_key($rowEmpId) === $targetNumeric) {
+            $numericMatches++;
+        }
+
+        $rowRaw = emp_code_raw_key($rowEmpId);
+        if ($targetRaw !== '' && $rowRaw !== '' && (str_starts_with($rowRaw, $targetRaw) || str_starts_with($targetRaw, $rowRaw))) {
+            $prefixMatches++;
+        }
+    }
+
+    return ($numericMatches > 1 || $prefixMatches > 1) ? 'duplicate_numeric' : 'not_found';
 }
 
 function employee_by_emp_code_and_name(string $empCode, string $name): ?array
