@@ -131,7 +131,62 @@ function render_vendor_dashboard(): void
     render_footer();
 }
 
-function render_rules_editor(array $existing = [], ?string $submitLabel = null, bool $allowBlankShift = false, bool $includeProjectPicker = true, bool $includeRuleDetails = true, bool $includeEmployeeDateRange = false, bool $includeManualPunch = true): void
+function render_employee_rules_detail_modal(array $employee, array $rules, array $projects, string $modalId): void
+{
+    $shift = normalize_shift_selection((string) ($employee['shift'] ?? ''));
+    $rulesHtml = rules_explanation_html($rules);
+    $employeeRange = (!empty($rules['employee_from']) || !empty($rules['employee_to']))
+        ? rule_date_range_label((string) $rules['employee_from'], (string) $rules['employee_to'])
+        : 'Not assigned';
+    $projectSessionRange = (!empty($rules['project_session_from']) || !empty($rules['project_session_to']))
+        ? rule_date_range_label((string) $rules['project_session_from'], (string) $rules['project_session_to'])
+        : 'Not assigned';
+    ?>
+    <div class="modal" id="<?= h($modalId) ?>">
+        <div class="modal-card employee-rules-modal-card">
+            <button class="modal-close" type="button" data-close-modal>&times;</button>
+            <span class="eyebrow">Employee Rules</span>
+            <h2><?= h((string) $employee['name']) ?></h2>
+            <div class="rules-detail-grid">
+                <section class="rules-detail-panel">
+                    <h3>Time Allocation</h3>
+                    <div class="session-detail-grid">
+                        <div class="session-detail-row"><strong>Shift Timing</strong><span><?= h($shift !== '' ? str_replace('-', ' - ', $shift) : 'Not assigned') ?></span></div>
+                        <div class="session-detail-row"><strong>Attendance Rules</strong><span><?= $rulesHtml !== '' ? $rulesHtml : 'No rules assigned' ?></span></div>
+                        <div class="session-detail-row"><strong>Employee Date Range</strong><span><?= h($employeeRange) ?></span></div>
+                        <div class="session-detail-row"><strong>Project Session Range</strong><span><?= h($projectSessionRange) ?></span></div>
+                    </div>
+                </section>
+                <section class="rules-detail-panel">
+                    <h3>Project Allocation</h3>
+                    <?php if ($projects): ?>
+                        <div class="list">
+                            <?php foreach ($projects as $project): ?>
+                                <?php $range = project_assignment_mail_range((string) ($project['project_from'] ?? ''), (string) ($project['project_to'] ?? '')); ?>
+                                <div class="list-item">
+                                    <div class="split">
+                                        <strong><?= h((string) ($project['project_name'] ?? 'Project')) ?></strong>
+                                        <span class="status-pill status-<?= !empty($project['is_active']) ? 'Active' : 'Inactive' ?>"><?= !empty($project['is_active']) ? 'Active' : 'Inactive' ?></span>
+                                    </div>
+                                    <div class="session-detail-grid compact-detail-grid">
+                                        <div class="session-detail-row"><strong>College</strong><span><?= h((string) (($project['college_name'] ?? '') ?: '-')) ?></span></div>
+                                        <div class="session-detail-row"><strong>Location</strong><span><?= h((string) (($project['location'] ?? '') ?: '-')) ?></span></div>
+                                        <div class="session-detail-row"><strong>Date Range</strong><span><?= h($range !== '' ? $range : 'Not assigned') ?></span></div>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php else: ?>
+                        <div class="list-item muted">No projects assigned.</div>
+                    <?php endif; ?>
+                </section>
+            </div>
+        </div>
+    </div>
+    <?php
+}
+
+function render_rules_editor(array $existing = [], ?string $submitLabel = null, bool $allowBlankShift = false, bool $includeProjectPicker = true, bool $includeRuleDetails = true, bool $includeEmployeeDateRange = false, bool $includeManualPunch = true, bool $includeBiometricPunch = true): void
 {
     $postedShiftOptions = array_map(
         static function (array $timing): string {
@@ -171,6 +226,7 @@ function render_rules_editor(array $existing = [], ?string $submitLabel = null, 
                 </select>
             </div>
         </div>
+        <?php if ($includeManualPunch || $includeBiometricPunch): ?>
         <div class="rules-grid">
             <?php if ($includeManualPunch): ?>
                 <label class="rule-card <?= ($defaults['manual_punch_in'] || $defaults['manual_punch_out']) ? 'active' : '' ?>">
@@ -180,13 +236,16 @@ function render_rules_editor(array $existing = [], ?string $submitLabel = null, 
                     <span class="hint">Allow employees to submit punch-in photos and complete punch-out details.</span>
                 </label>
             <?php endif; ?>
-            <label class="rule-card <?= ($defaults['biometric_punch_in'] || $defaults['biometric_punch_out']) ? 'active' : '' ?>">
-                <input type="checkbox" name="biometric_punch" value="1" <?= ($defaults['biometric_punch_in'] || $defaults['biometric_punch_out']) ? 'checked' : '' ?>>
-                <span class="rule-icon">BP</span>
-                <strong>Biometric Punch</strong>
-                <span class="hint">Enable biometric punch-in and punch-out time capture.</span>
-            </label>
+            <?php if ($includeBiometricPunch): ?>
+                <label class="rule-card <?= ($defaults['biometric_punch_in'] || $defaults['biometric_punch_out']) ? 'active' : '' ?>">
+                    <input type="checkbox" name="biometric_punch" value="1" <?= ($defaults['biometric_punch_in'] || $defaults['biometric_punch_out']) ? 'checked' : '' ?>>
+                    <span class="rule-icon">BP</span>
+                    <strong>Biometric Punch</strong>
+                    <span class="hint">Enable biometric punch-in and punch-out time capture.</span>
+                </label>
+            <?php endif; ?>
         </div>
+        <?php endif; ?>
         <?php if ($includeRuleDetails): ?>
             <div class="inline-actions admin-rules-top-actions">
                 <button class="button outline small" type="button" data-add-manual-slot data-target="#manual-out-count">+ Add Manual Punch</button>
@@ -287,7 +346,7 @@ function render_project_assignment_picker(array $selectedProjectIds = [], string
                         <div class="project-date-range<?= $isChecked ? '' : ' hidden' ?>" data-project-date-fields>
                             <label>From<input type="date" name="project_from[<?= $projectId ?>]" value="<?= h($dateFrom) ?>"></label>
                             <label>To<input type="date" name="project_to[<?= $projectId ?>]" value="<?= h($dateTo) ?>"></label>
-                            <label>Incentive<input type="number" min="0" step="0.01" name="project_incentive[<?= $projectId ?>]" value="<?= h($projectIncentive) ?>" placeholder="0.00"></label>
+                            <label>Incentive Per Session<input type="number" min="0" step="0.01" name="project_incentive[<?= $projectId ?>]" value="<?= h($projectIncentive) ?>" placeholder="0.00"></label>
                         </div>
                     </div>
                 <?php endforeach; ?>
@@ -452,7 +511,18 @@ function render_admin_employees(): void
                 foreach ($filteredEmployees as $employee):
                     $rules = employee_rules((int) $employee['id']);
                     $rulesMarkup = rules_summary($rules);
+                    $assignedProjects = assigned_projects_for_employee((int) $employee['id']);
+                    $projectSearchText = strtolower(trim(implode(' ', array_map(static function (array $project): string {
+                        return implode(' ', [
+                            (string) ($project['project_name'] ?? ''),
+                            (string) ($project['college_name'] ?? ''),
+                            (string) ($project['location'] ?? ''),
+                            (string) ($project['project_from'] ?? ''),
+                            (string) ($project['project_to'] ?? ''),
+                        ]);
+                    }, $assignedProjects))));
                     $rulesText = strtolower(trim(preg_replace('/\s+/', ' ', strip_tags(str_replace('<br>', ' ', $rulesMarkup)))));
+                    $rulesModalId = 'employee-rules-modal-' . (int) $employee['id'];
                     $searchText = strtolower(implode(' ', [
                         (string) $employee['emp_id'],
                         (string) $employee['name'],
@@ -460,6 +530,7 @@ function render_admin_employees(): void
                         (string) $employee['phone'],
                         (string) ($employee['shift'] ?? ''),
                         $rulesText,
+                        $projectSearchText,
                     ]));
                 ?>
                     <tr data-filter-row data-filter-text="<?= h($searchText) ?>">
@@ -469,7 +540,9 @@ function render_admin_employees(): void
                         <td data-label="Phone"><?= h($employee['phone']) ?></td>
                         <td data-label="Shift"><?= h((string) ($employee['shift'] ?: '-')) ?></td>
                         <td data-label="Salary"><?= h(number_format((float) $employee['salary'], 2)) ?></td>
-                        <td data-label="Rules"><?= $rulesMarkup ?></td>
+                        <td data-label="Rules">
+                            <button class="button outline small" type="button" data-modal-target="<?= h($rulesModalId) ?>">Rules</button>
+                        </td>
                         <?php if ($canCreateEmployees): ?>
                             <td data-label="Actions">
                                 <div class="inline-actions">
@@ -489,6 +562,9 @@ function render_admin_employees(): void
         <?php endif; ?>
         <div class="list-item muted hidden table-empty-state" id="admin-employees-empty">No records match your search.</div>
     </section>
+    <?php foreach ($filteredEmployees as $employee): ?>
+        <?php render_employee_rules_detail_modal($employee, employee_rules((int) $employee['id']), assigned_projects_for_employee((int) $employee['id']), 'employee-rules-modal-' . (int) $employee['id']); ?>
+    <?php endforeach; ?>
     <?php if ($editEmployee): ?>
         <div class="modal open" id="edit-employee-modal" data-open-on-load>
             <div class="modal-card" style="max-width:720px;">
@@ -781,7 +857,7 @@ function render_admin_projects(): void
         <div>
             <span class="eyebrow">Admin - Projects</span>
             <h1>Projects</h1>
-            <p>Create and manage project colleges, locations, durations, and session types from one place. Deactivated projects stay saved, become currently unavailable, and can be activated again later.</p>
+            <p>Create and manage project colleges and locations from one place. Deactivated projects stay saved, become currently unavailable, and can be activated again later.</p>
         </div>
         <div class="action-bar">
             <button class="button solid" type="button" data-modal-target="project-modal">Add Project</button>
@@ -801,8 +877,6 @@ function render_admin_projects(): void
                     <th>Project Name</th>
                     <th>College Name</th>
                     <th>Location</th>
-                    <th>Total Days</th>
-                    <th>Session Type</th>
                     <th>Status</th>
                     <th>Actions</th>
                 </tr>
@@ -814,8 +888,6 @@ function render_admin_projects(): void
                         <td><?= h((string) $project['project_name']) ?></td>
                         <td><?= h((string) $project['college_name']) ?></td>
                         <td><?= h((string) $project['location']) ?></td>
-                        <td><?= (int) $project['total_days'] ?></td>
-                        <td><?= h(project_session_label((string) $project['session_type'])) ?></td>
                         <td><span class="status-pill status-<?= h($statusLabel) ?>"><?= h($statusLabel) ?></span></td>
                         <td>
                             <div class="inline-actions">
@@ -865,16 +937,6 @@ function render_admin_projects(): void
                     </label>
                     <label>Location
                         <input type="text" name="location" value="<?= h((string) ($formValues['location'] ?? '')) ?>" placeholder="Ahmedabad, Gujarat" required>
-                    </label>
-                    <label>Total Days
-                        <input type="number" min="1" name="total_days" value="<?= h((string) ($formValues['total_days'] ?? 1)) ?>" required>
-                    </label>
-                    <label>Session Type
-                        <select name="session_type" required>
-                            <?php foreach (project_session_types() as $sessionType): ?>
-                                <option value="<?= h($sessionType) ?>" <?= (string) ($formValues['session_type'] ?? '') === $sessionType ? 'selected' : '' ?>><?= h(project_session_label($sessionType)) ?></option>
-                            <?php endforeach; ?>
-                        </select>
                     </label>
                     <label class="project-checkbox-field">Active
                         <input type="checkbox" name="is_active" value="1" <?= !empty($formValues['is_active']) ? 'checked' : '' ?>>
@@ -976,14 +1038,14 @@ function render_admin_rules(): void
                         <span class="eyebrow">Time Allocation</span>
                         <h2>Time Allocation</h2>
                     </div>
-                    <span class="hint">Assign shift timing, punch type, and date ranges to selected employees.</span>
+                    <span class="hint">Assign shift timing and employee date ranges to selected employees.</span>
                 </div>
                 <form method="post" class="stack-form" data-rule-form data-employee-form>
                     <?= csrf_field() ?>
                     <input type="hidden" name="action" value="apply_rules">
                     <input type="hidden" name="allocation_type" value="time">
                     <?php render_employee_assignment_picker($allEmployees, 'time-employee-options', 'time-selected-employee-tags'); ?>
-                    <?php render_rules_editor([], null, true, false, false, true, true); ?>
+                    <?php render_rules_editor([], null, true, false, false, true, false, false); ?>
                     <div class="inline-actions">
                         <button class="button solid" type="submit" data-rule-submit>Save Time Allocation</button>
                     </div>
@@ -1081,7 +1143,7 @@ function render_calendar(string $context, array $employee, string $month, array 
     $attendanceCounts = attendance_counts($monthAttendance);
     $salaryBreakdown = employee_salary_breakdown_for_month($employee, $monthAttendance);
     $incentiveBreakdown = incentive_breakdown_for_month($monthAttendance);
-    $summaryIncentiveAmount = (float) (($incentiveBreakdown['amount'] ?? 0) > 0 ? $incentiveBreakdown['amount'] : ($incentiveBreakdown['assigned_amount'] ?? 0));
+    $summaryIncentiveAmount = (float) ($incentiveBreakdown['amount'] ?? 0);
     ?>
     <div class="calendar-shell<?= $compact ? ' calendar-shell-compact' : '' ?>">
         <?php if ($calendarActionsHtml !== ''): ?>
@@ -1117,6 +1179,7 @@ function render_calendar(string $context, array $employee, string $month, array 
                 } ?>
                 <?php $statusClass = str_replace(' ', '-', $status); ?>
                 <?php $dayCopy = in_array($status, ['Week Off', 'Pending', 'Absent'], true) ? $status : ''; ?>
+                <?php $isAdminChanged = trim((string) ($entry['record']['admin_override_status'] ?? '')) !== '' && trim((string) ($entry['record']['admin_override_status'] ?? '')) !== 'Pending'; ?>
                 <?php if ($usesSessionAttendance && $viewMode !== 'reimbursement'): ?>
                     <?php $vendorSessionDisplay = vendor_session_display_for_entry($entry); ?>
                     <?php $statusClass = (string) ($vendorSessionDisplay['status_class'] ?? ''); ?>
@@ -1148,6 +1211,9 @@ function render_calendar(string $context, array $employee, string $month, array 
                             <?php if (!empty($reimbursementMeta['count'])): ?>
                                 <span class="day-badge reimbursement">R <?= (int) $reimbursementMeta['count'] ?></span>
                             <?php endif; ?>
+                            <?php if ($isAdminChanged): ?>
+                                <span class="day-badge admin-change" title="Admin changed attendance">A</span>
+                            <?php endif; ?>
                         <?php endif; ?>
                     </div>
                 <?php else: ?>
@@ -1167,6 +1233,9 @@ function render_calendar(string $context, array $employee, string $month, array 
                             <span class="day-copy"><?= h($dayCopy) ?></span>
                             <?php if (!empty($reimbursementMeta['count'])): ?>
                                 <span class="day-badge reimbursement">R <?= (int) $reimbursementMeta['count'] ?></span>
+                            <?php endif; ?>
+                            <?php if ($isAdminChanged): ?>
+                                <span class="day-badge admin-change" title="Admin changed attendance">A</span>
                             <?php endif; ?>
                         <?php endif; ?>
                     </button>
@@ -1423,6 +1492,14 @@ function render_admin_attendance(): void
             <form method="post" enctype="multipart/form-data" class="stack-form" data-validate>
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="admin_attendance_csv_upload">
+                <input type="hidden" name="return_page" value="admin_employee_log">
+                <input type="hidden" name="return_type" value="<?= h($employeeType) ?>">
+                <input type="hidden" name="return_view" value="<?= h($view) ?>">
+                <input type="hidden" name="return_employee_id" value="<?= (int) ($employee['id'] ?? 0) ?>">
+                <input type="hidden" name="return_month" value="<?= h($month) ?>">
+                <?php if ($employeeType === 'vendor' && !empty($_GET['vendor_id'])): ?>
+                    <input type="hidden" name="return_vendor_id" value="<?= (int) $_GET['vendor_id'] ?>">
+                <?php endif; ?>
                 <label class="upload-drop">
                     <strong>Select attendance file</strong>
                         <p>You can upload `.xlsx`, `.xls`, `.csv`, or `.txt` attendance exports. Employee rows are matched by Empcode. If the file has a `Date` column, each row is marked on that date in the calendar. If not, the importer uses the detected report date or the attendance date below.</p>
@@ -1693,6 +1770,9 @@ function render_admin_reports(): void
                     <th>Attendance Status</th>
                     <th>Manual Punch In</th>
                     <th>Manual Punch Out</th>
+                    <th>Total Students</th>
+                    <th>Present Students</th>
+                    <th>Topics Handled</th>
                 </tr>
             </thead>
             <tbody>
@@ -1710,11 +1790,14 @@ function render_admin_reports(): void
                             </td>
                             <td><?= h((string) (($row['manual_punch_in'] ?? '') ?: '-')) ?></td>
                             <td><?= h((string) (($row['manual_punch_out'] ?? '') ?: '-')) ?></td>
+                            <td><?= h((string) (($row['total_students'] ?? '') ?: '-')) ?></td>
+                            <td><?= h((string) (($row['present_students'] ?? '') ?: '-')) ?></td>
+                            <td><?= h((string) (($row['topics_handled'] ?? '') ?: '-')) ?></td>
                         </tr>
                     <?php endforeach; ?>
                 <?php else: ?>
                     <tr>
-                        <td colspan="8" class="muted center">No records found for the selected filters.</td>
+                        <td colspan="11" class="muted center">No records found for the selected filters.</td>
                     </tr>
                 <?php endif; ?>
             </tbody>

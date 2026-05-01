@@ -715,9 +715,44 @@ function shift_timings(): array
         return [];
     }
 
+    return shift_timings_for_admin($adminId);
+}
+
+function shift_timings_for_admin(int $adminId): array
+{
+    if ($adminId <= 0) {
+        return [];
+    }
+
     $stmt = db()->prepare('SELECT * FROM shift_timings WHERE admin_id = :admin_id ORDER BY start_time, shift_name, id');
     $stmt->execute(['admin_id' => $adminId]);
     return $stmt->fetchAll();
+}
+
+function employee_shift_display(array $employee): string
+{
+    $shift = normalize_shift_selection((string) ($employee['shift'] ?? ''));
+    if ($shift !== '') {
+        return str_replace('-', ' - ', $shift);
+    }
+
+    $timings = shift_timings_for_admin((int) ($employee['admin_id'] ?? 0));
+    $labels = [];
+    foreach ($timings as $timing) {
+        $label = normalize_shift_selection((string) ($timing['shift_name'] ?? ''));
+        if ($label === '') {
+            $label = format_shift_selection_from_times((string) ($timing['start_time'] ?? ''), (string) ($timing['end_time'] ?? ''));
+        }
+        if ($label !== '') {
+            $labels[] = str_replace('-', ' - ', $label);
+        }
+    }
+
+    if ($labels === []) {
+        $labels = standard_shift_options();
+    }
+
+    return $labels ? implode(', ', array_values(array_unique($labels))) : 'Not assigned';
 }
 
 function shift_timing_exists(string $startTime, string $endTime): bool

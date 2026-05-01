@@ -276,6 +276,9 @@
             .day-card-Leave .day-copy { color: #2563eb; }
             .day-card .day-number { font-size: 1.15rem; font-weight: 800; line-height: 1; color: var(--ink); }
             .day-card .day-copy { min-height: 0; font-size: 0.65rem; font-weight: 700; color: var(--muted); line-height: 1; }
+            .day-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; font-size: 0.62rem; line-height: 1; font-weight: 900; }
+            .day-badge.reimbursement { background: rgba(99, 102, 241, 0.14); color: #3730a3; }
+            .day-badge.admin-change { background: #312e81; color: #fff; }
             .day-dot { width: 10px; height: 10px; border-radius: 999px; }
             .dot-Present { background: var(--present); }
             .dot-Absent { background: var(--absent); }
@@ -563,6 +566,11 @@
             .project-modal-card { width: min(760px, 100%); }
             .project-checkbox-field { display: flex; align-items: center; gap: 10px; align-self: end; min-height: 46px; font-weight: 700; }
             .project-checkbox-field input { width: auto; min-height: auto; margin: 0; }
+            .employee-rules-modal-card { width: min(980px, 100%); }
+            .rules-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+            .rules-detail-panel { display: grid; gap: 12px; min-width: 0; }
+            .rules-detail-panel h3 { margin: 0; }
+            .compact-detail-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); margin-top: 10px; }
             .project-modal-actions { justify-content: flex-end; }
             .scroll-panel { max-height: 620px; overflow: auto; }
             .attendance-panel { display: grid; gap: 18px; min-height: 0; }
@@ -610,28 +618,81 @@
             .employee-main .calendar-summary { order: 3; flex-shrink: 0; margin-top: 14px; margin-bottom: 0; }
             .employee-main .summary-card { min-height: 82px; padding: 14px; }
             .employee-main .summary-card strong { font-size: 1.3rem; }
-            /* Employee reimbursements calendar should always remain visible (above the submitted list). */
-            .employee-reimbursements-page .reimbursement-calendar-block { margin-bottom: 18px; }
+            .employee-reimbursements-page { gap: 14px; padding-bottom: 24px; }
+            .employee-reimbursements-page .page-title { align-items: flex-start; margin-bottom: 0; }
+            .employee-reimbursements-page .page-title p { margin: 0; }
+            .employee-reimbursements-page .reimbursement-calendar-block { margin-bottom: 18px; padding: 20px 30px 22px; overflow: visible; }
+            .employee-reimbursements-page .reimbursement-calendar-block .split { align-items: flex-end; margin-bottom: 12px; }
+            .employee-reimbursements-page .reimbursement-calendar-block h2 { margin-bottom: 0; }
             .employee-reimbursements-page .reimbursement-calendar-scroll {
-              display: block !important;
-              height: auto;
-              min-height: 0;
-              max-height: none;
+              display: block;
+              width: 100%;
               overflow: visible;
               border-radius: 18px;
-              border: 1px solid rgba(36,52,109,0.18);
-              background: rgba(255,255,255,0.92);
+              border: 1px solid rgba(36,52,109,0.12);
+              background: rgba(255,255,255,0.7);
+              padding: 10px;
             }
             .employee-reimbursements-page .reimbursement-calendar-grid {
-              display: grid !important;
-              height: auto !important;
-              min-height: 0 !important;
-              overflow: visible !important;
+              display: grid;
+              grid-template-columns: repeat(7, minmax(0, 1fr));
+              grid-template-rows: 24px;
+              grid-auto-rows: 74px;
+              height: auto;
+              min-height: 0;
+              overflow: visible;
               align-content: start;
-              padding: 6px 6px 6px 0;
+              gap: 5px;
+              padding: 0;
             }
-            .employee-reimbursements-page .reimbursement-calendar-grid .weekday { display: block !important; }
-            .2employee-reimbursements-page .reimbursement-calendar-grid .day-card { display: flex !important; }
+            .employee-reimbursements-page .reimbursement-calendar-grid .weekday {
+              height: 24px;
+              padding-bottom: 0;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+            }
+            .employee-reimbursements-page .reimbursement-calendar-grid .day-card {
+              display: flex;
+              width: 100%;
+              min-height: 0;
+              height: 74px;
+              border: 1px solid transparent;
+              border-radius: 12px;
+              padding: 8px;
+              gap: 3px;
+              background: rgba(255,255,255,0.78);
+              color: var(--ink);
+              font: inherit;
+            }
+            .employee-reimbursements-page .reimbursement-calendar-grid .day-card.blank {
+              height: 74px;
+              visibility: hidden;
+            }
+            .employee-reimbursements-page .reimbursement-calendar-grid button.day-card {
+              background: #ffffff;
+              border-color: rgba(30,41,59,0.08);
+            }
+            .employee-reimbursements-page .reimbursement-calendar-grid button.day-card:hover {
+              border-color: rgba(67,56,202,0.26);
+              box-shadow: 0 10px 24px rgba(15,23,42,0.08);
+            }
+            .employee-reimbursements-page .reimbursement-calendar-grid .day-card.static {
+              background: rgba(248,250,252,0.64);
+              color: #64748b;
+            }
+            .employee-reimbursements-page .reimbursement-calendar-grid .day-number { font-size: 1.1rem; }
+            .employee-reimbursements-page .reimbursement-calendar-grid .day-copy { font-size: 0.62rem; line-height: 1.1; }
+            .reimbursement-modal-card { max-width: 760px; }
+            .reimbursement-existing-list { max-height: 220px; overflow: auto; }
+            .reimbursement-radio-group { display: flex; gap: 12px; flex-wrap: wrap; }
+            .reimbursement-radio { display: inline-flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid rgba(36, 52, 109, 0.12); border-radius: 16px; cursor: pointer; background: rgba(248, 250, 255, 0.9); }
+            .reimbursement-radio input { width: auto; min-height: auto; margin: 0; }
+            .reimbursement-status.pending { background: #e5e7eb; color: #374151; }
+            .reimbursement-status.approved { background: #fef3c7; color: #92400e; }
+            .reimbursement-status.denied { background: #fee2e2; color: #b91c1c; }
+            .reimbursement-status.partially-paid { background: #e0f2fe; color: #0369a1; }
+            .reimbursement-status.paid { background: #dcfce7; color: #166534; }
             .profile-settings-modal-card { width: min(560px, 100%); }
             .vendor-profile-settings-card {
                 width: min(1200px, calc(100vw - 40px)) !important;
@@ -1063,6 +1124,7 @@
                 .manual-punch-popup { width: min(100%, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 18px; border-radius: 22px; }
                 .manual-punch-grid,
                 .manual-punch-pairs,
+                .rules-detail-grid,
                 .session-detail-grid,
                 .profile-settings-grid { grid-template-columns: 1fr; }
                 .vendor-profile-settings-card {

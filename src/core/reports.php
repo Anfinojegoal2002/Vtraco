@@ -25,7 +25,10 @@ function get_attendance_report_data(array $filters): array
                 END AS attendance_status,
                 s.slot_name AS slot_name,
                 COALESCE(s.punch_in_time, ar.punch_in_time) AS manual_punch_in,
-                s.punch_out_time AS manual_punch_out
+                s.punch_out_time AS manual_punch_out,
+                s.total_students AS total_students,
+                s.present_students AS present_students,
+                s.topics_handled AS topics_handled
             FROM attendance_records ar
             JOIN users u ON ar.user_id = u.id
             LEFT JOIN attendance_sessions s ON s.attendance_id = ar.id
@@ -81,7 +84,7 @@ function export_report_csv(array $data): void
     header('Content-Disposition: attachment; filename=attendance_report_' . date('Ymd_His') . '.csv');
 
     $output = fopen('php://output', 'w');
-    fputcsv($output, ['Date', 'Employee Name', 'Project Name', 'Slot', 'Session Type', 'Attendance Status', 'Manual Punch In', 'Manual Punch Out']);
+    fputcsv($output, ['Date', 'Employee Name', 'Project Name', 'Slot', 'Session Type', 'Attendance Status', 'Manual Punch In', 'Manual Punch Out', 'Total Students', 'Present Students', 'Topics Handled']);
 
     foreach ($data as $row) {
         fputcsv($output, [
@@ -93,6 +96,9 @@ function export_report_csv(array $data): void
             $row['attendance_status'],
             $row['manual_punch_in'] ?: 'N/A',
             $row['manual_punch_out'] ?: 'N/A',
+            $row['total_students'] ?: 'N/A',
+            $row['present_students'] ?: 'N/A',
+            $row['topics_handled'] ?: 'N/A',
         ]);
     }
     fclose($output);
@@ -132,6 +138,9 @@ function export_report_pdf(array $data): void
                     <th>Attendance Status</th>
                     <th>Manual Punch In</th>
                     <th>Manual Punch Out</th>
+                    <th>Total Students</th>
+                    <th>Present Students</th>
+                    <th>Topics Handled</th>
                 </tr>
             </thead>
             <tbody>
@@ -145,6 +154,9 @@ function export_report_pdf(array $data): void
                         <td><?= h((string)$row['attendance_status']) ?></td>
                         <td><?= h((string) (($row['manual_punch_in'] ?? '') ?: 'N/A')) ?></td>
                         <td><?= h((string) (($row['manual_punch_out'] ?? '') ?: 'N/A')) ?></td>
+                        <td><?= h((string) (($row['total_students'] ?? '') ?: 'N/A')) ?></td>
+                        <td><?= h((string) (($row['present_students'] ?? '') ?: 'N/A')) ?></td>
+                        <td><?= h((string) (($row['topics_handled'] ?? '') ?: 'N/A')) ?></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>

@@ -163,12 +163,21 @@ function send_employee_credentials_email(array $employee, string $password, arra
     return send_html_mail((string) $employee['email'], 'Your V Traco Login Credentials', $html);
 }
 
-function send_rules_updated_email(array $employee, array $rules): array
+function send_rules_updated_email(array $employee, array $rules, bool $includeAssignedProjects = true): array
 {
-    $assignedProjectsHtml = assigned_projects_mail_html((int) ($employee['id'] ?? 0));
+    $assignedProjectsHtml = $includeAssignedProjects ? assigned_projects_mail_html((int) ($employee['id'] ?? 0)) : '';
+    $appliedRulesHtml = rules_explanation_html($rules);
+    $shift = normalize_shift_selection((string) ($employee['shift'] ?? ''));
+    if ($shift !== '') {
+        $shiftHtml = h('Shift Timing: ' . str_replace('-', ' - ', $shift));
+        $appliedRulesHtml = $appliedRulesHtml !== '' ? $appliedRulesHtml . '<br>' . $shiftHtml : $shiftHtml;
+    }
+    if ($appliedRulesHtml === '') {
+        $appliedRulesHtml = '<span class="muted">No rules assigned</span>';
+    }
     $html = '<p>Hello ' . h($employee['name']) . ',</p>'
         . '<p>Your attendance rules have been updated in V Traco.</p>'
-        . '<p><strong>Applied Rules</strong><br>' . rules_explanation_html($rules) . '</p>'
+        . '<p><strong>Applied Rules</strong><br>' . $appliedRulesHtml . '</p>'
         . $assignedProjectsHtml;
     return send_html_mail((string) $employee['email'], 'V Traco Rules Updated', $html);
 }

@@ -20,10 +20,6 @@
             return availableProjects.find(project => Number(project.id || 0) === numericId) || null;
         }
 
-        function projectDayPortion(sessionType) {
-            return sessionType === 'FULL_DAY' ? 'Full Day' : 'Half Day';
-        }
-
         function projectIsAvailableForDate(project, dateValue) {
             const date = String(dateValue || '').trim();
             if (!date) {
@@ -117,8 +113,10 @@
                                 <div class="session-detail-row"><strong>Project</strong><span>${escapeHtml(detailValue(projectName))}</span></div>
                                 <div class="session-detail-row"><strong>College Name</strong><span>${escapeHtml(detailValue(session.college_name))}</span></div>
                                 <div class="session-detail-row"><strong>Session Name</strong><span>${escapeHtml(detailValue(session.session_name))}</span></div>
-                                <div class="session-detail-row"><strong>Day Portion</strong><span>${escapeHtml(detailValue(session.day_portion))}</span></div>
                                 <div class="session-detail-row"><strong>Session Duration</strong><span>${escapeHtml(sessionDuration)}</span></div>
+                                <div class="session-detail-row"><strong>Total Students</strong><span>${escapeHtml(detailValue(session.total_students))}</span></div>
+                                <div class="session-detail-row"><strong>Present Students</strong><span>${escapeHtml(detailValue(session.present_students))}</span></div>
+                                <div class="session-detail-row"><strong>Topics Handled</strong><span>${escapeHtml(detailValue(session.topics_handled))}</span></div>
                                 <div class="session-detail-row"><strong>Location</strong><span>${escapeHtml(detailValue(session.location))}</span></div>
                                 <div class="session-detail-row"><strong>Punch In Time</strong><span>${escapeHtml(detailValue(session.punch_in_time))}</span></div>
                                 <div class="session-detail-row"><strong>Geo Coordinates</strong><span>${escapeHtml(geoText)}</span></div>
@@ -233,9 +231,6 @@
                                 ? `Manual Punch Out ${pairNumber} is already submitted.`
                                 : `Fill the required fields for Manual Punch Out ${pairNumber}.`)));
                     const pairStatus = pairPunchOutDone ? 'Completed' : (pairPunchInDone ? 'Punch In Submitted' : 'Pending');
-                    const selectedDayPortion = pairSession && pairSession.day_portion
-                        ? pairSession.day_portion
-                        : (selectedProject ? projectDayPortion(selectedProject.session_type) : 'Full Day');
                     const sessionDurationValue = pairSession && pairSession.session_duration ? pairSession.session_duration : '';
                     const collegeNameValue = pairSession && pairSession.college_name
                         ? pairSession.college_name
@@ -246,6 +241,9 @@
                     const locationValue = pairSession && pairSession.location
                         ? pairSession.location
                         : (selectedProject && selectedProject.location ? selectedProject.location : '');
+                    const totalStudentsValue = pairSession && pairSession.total_students ? pairSession.total_students : '';
+                    const presentStudentsValue = pairSession && pairSession.present_students ? pairSession.present_students : '';
+                    const topicsHandledValue = pairSession && pairSession.topics_handled ? pairSession.topics_handled : '';
                     const sessionIdField = pairSession && pairSession.id ? `<input type="hidden" name="session_id" value="${escapeHtml(pairSession.id)}">` : '';
 
                     return `
@@ -292,12 +290,10 @@
                                         <label>Project<input type="text" value="${escapeHtml(selectedProject.project_name || '')}" ${manualOutFormDisabled} readonly></label>
                                         <label>College Name *<input type="text" name="college_name" data-project-college value="${escapeHtml(collegeNameValue)}" ${manualOutFormDisabled} required></label>
                                         <label>Session Name *<input type="text" name="session_name" data-project-session value="${escapeHtml(sessionNameValue)}" ${manualOutFormDisabled} required></label>
-                                        <label>Half Day / Full Day
-                                            <select name="day_portion" data-project-day-portion ${manualOutFormDisabled}>
-                                                ${['Full Day', 'Half Day'].map(option => `<option value="${option}" ${option === selectedDayPortion ? 'selected' : ''}>${option}</option>`).join('')}
-                                            </select>
-                                        </label>
                                         <label>Session Duration in hours *<input type="number" step="0.5" min="0.5" name="session_duration" value="${escapeHtml(sessionDurationValue)}" ${manualOutFormDisabled} required></label>
+                                        <label>Total Students *<input type="number" min="1" step="1" name="total_students" value="${escapeHtml(totalStudentsValue)}" ${manualOutFormDisabled} required></label>
+                                        <label>Present Students *<input type="number" min="0" step="1" name="present_students" value="${escapeHtml(presentStudentsValue)}" ${manualOutFormDisabled} required></label>
+                                        <label>Topics Handled *<textarea name="topics_handled" rows="3" ${manualOutFormDisabled} required>${escapeHtml(topicsHandledValue)}</textarea></label>
                                         <label>Location *<input type="text" name="location" data-project-location value="${escapeHtml(locationValue)}" ${manualOutFormDisabled} required></label>
                                         <button class="button secondary" type="submit" ${manualOutFormDisabled}>${pairPunchOutDone ? 'Submitted' : `Punch Out ${pairNumber}`}</button>
                                     </form>
@@ -388,6 +384,18 @@
                     </div>
                 `;
             }
+            const manualGeoSession = Array.isArray(payload.sessions) ? payload.sessions.find(session => !!session.punch_in_path && (session.punch_in_lat || session.punch_in_lng)) : null;
+            const isManualPunchRecord = !!payload.punch_in_path || (Array.isArray(payload.sessions) && payload.sessions.some(session => !!session.punch_in_path));
+            const manualGeoLat = payload.punch_in_lat || (manualGeoSession ? manualGeoSession.punch_in_lat : '');
+            const manualGeoLng = payload.punch_in_lng || (manualGeoSession ? manualGeoSession.punch_in_lng : '');
+            const punchDetailsMarkup = isManualPunchRecord
+                ? ((manualGeoLat || manualGeoLng) ? `Bio: ${escapeHtml(manualGeoLat || '-')}, ${escapeHtml(manualGeoLng || '-')}` : '')
+                : `
+                        <strong>Punch Details</strong><br>
+                        Punch In: ${escapeHtml(payload.biometric_in_time || 'Not submitted')}<br>
+                        Punch Out: ${escapeHtml(payload.biometric_out_time || 'Not submitted')}<br>
+                        ${(payload.biometric_in_time || payload.biometric_out_time) ? 'Source: Imported biometric attendance' : 'Bio: Not available'}
+                    `;
             modalContent.className = `modal-grid attendance-context-${payload.context}`;
             modalContent.innerHTML = `
                 <section class="attendance-modal-hero">
@@ -398,10 +406,7 @@
                     </div>
                     ${payload.view_mode !== 'reimbursement' ? `
                     <div class="attendance-modal-meta">
-                        <strong>Punch Details</strong><br>
-                        Punch In: ${escapeHtml(payload.punch_in_time || payload.biometric_in_time || 'Not submitted')}<br>
-                        Punch Out: ${escapeHtml(payload.biometric_out_time || 'Not submitted')}<br>
-                        ${payload.punch_in_path ? `Bio: ${escapeHtml(payload.punch_in_lat || '-')}, ${escapeHtml(payload.punch_in_lng || '-')}` : ((payload.biometric_in_time || payload.biometric_out_time) ? 'Source: Imported biometric attendance' : 'Bio: Not available')}
+                        ${punchDetailsMarkup}
                     </div>
                     ` : ''}
                 </section>
@@ -465,11 +470,6 @@
                 setValue('[data-project-session]', String(project.project_name || ''));
                 setValue('[data-project-location]', String(project.location || ''));
 
-                const dayPortionField = form.querySelector('[data-project-day-portion]');
-                const dayPortionValue = projectDayPortion(String(project.session_type || ''));
-                if (dayPortionField && dayPortionValue !== '' && (force || String(dayPortionField.value || '').trim() === '')) {
-                    dayPortionField.value = dayPortionValue;
-                }
             };
 
             const closeManualPunchPopup = panel => {

@@ -321,6 +321,9 @@ function initialize_database(): void
         session_name VARCHAR(191) NULL,
         day_portion VARCHAR(100) NULL,
         session_duration DECIMAL(10,2) NULL,
+        total_students INT UNSIGNED NULL,
+        present_students INT UNSIGNED NULL,
+        topics_handled TEXT NULL,
         location VARCHAR(191) NULL,
         created_at DATETIME NOT NULL,
         INDEX idx_attendance_sessions_attendance_id (attendance_id),
@@ -445,6 +448,9 @@ function initialize_database(): void
         'punch_in_lng' => 'VARCHAR(100) NULL AFTER punch_in_lat',
         'punch_in_time' => 'DATETIME NULL AFTER punch_in_lng',
         'punch_out_time' => 'DATETIME NULL AFTER punch_in_time',
+        'total_students' => 'INT UNSIGNED NULL AFTER session_duration',
+        'present_students' => 'INT UNSIGNED NULL AFTER total_students',
+        'topics_handled' => 'TEXT NULL AFTER present_students',
     ];
     foreach ($sessionColumns as $column => $definition) {
         if (!table_has_column($pdo, 'attendance_sessions', $column)) {

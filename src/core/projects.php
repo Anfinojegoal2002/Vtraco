@@ -324,8 +324,8 @@ function normalize_project_payload(array $source): array
         'project_name' => trim((string) ($source['project_name'] ?? '')),
         'college_name' => trim((string) ($source['college_name'] ?? '')),
         'location' => trim((string) ($source['location'] ?? '')),
-        'total_days' => (int) ($source['total_days'] ?? 0),
-        'session_type' => trim((string) ($source['session_type'] ?? '')),
+        'total_days' => max(1, (int) ($source['total_days'] ?? 1)),
+        'session_type' => trim((string) ($source['session_type'] ?? 'FULL_DAY')),
         'is_active' => !empty($source['is_active']) ? 1 : 0,
     ];
 
@@ -338,11 +338,8 @@ function normalize_project_payload(array $source): array
     if ($payload['location'] === '') {
         throw new RuntimeException('Location is required.');
     }
-    if ($payload['total_days'] <= 0) {
-        throw new RuntimeException('Total days must be greater than zero.');
-    }
     if (!in_array($payload['session_type'], project_session_types(), true)) {
-        throw new RuntimeException('Choose a valid session type.');
+        $payload['session_type'] = 'FULL_DAY';
     }
 
     return $payload;

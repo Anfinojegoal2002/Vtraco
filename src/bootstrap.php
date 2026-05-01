@@ -47,6 +47,7 @@ define('DB_NAME', (string) ($databaseConfig['name'] ?? 'vtraco'));
 define('DB_USERNAME', (string) ($databaseConfig['username'] ?? 'root'));
 define('DB_PASSWORD', (string) ($databaseConfig['password'] ?? ''));
 define('DB_CHARSET', (string) ($databaseConfig['charset'] ?? 'utf8mb4'));
+
 define('DB_COLLATION', (string) ($databaseConfig['collation'] ?? 'utf8mb4_unicode_ci'));
 define('SQLITE_MIGRATION_SOURCE', (string) (($appConfig['paths']['sqlite_migration_source'] ?? __DIR__ . '/../storage/data/app.sqlite')));
 define('MAIL_LOG_PATH', (string) (($appConfig['paths']['mail_log'] ?? __DIR__ . '/../storage/emails')));

@@ -826,8 +826,6 @@ function handle_post_action(string $action): void
                 'project_name' => trim((string) ($_POST['project_name'] ?? '')),
                 'college_name' => trim((string) ($_POST['college_name'] ?? '')),
                 'location' => trim((string) ($_POST['location'] ?? '')),
-                'total_days' => trim((string) ($_POST['total_days'] ?? '')),
-                'session_type' => trim((string) ($_POST['session_type'] ?? 'FULL_DAY')),
                 'is_active' => !empty($_POST['is_active']) ? 1 : 0,
             ]);
 
@@ -945,6 +943,16 @@ function handle_post_action(string $action): void
                 }
                 $currentRules = $rules;
                 if ($allocationType === 'time' || $allocationType === 'all') {
+                    $resolvedShift = resolve_shift_selection_from_input($_POST, (string) ($employee['shift'] ?? ''), true);
+                    if ($resolvedShift !== '') {
+                        db()->prepare('UPDATE users SET shift = :shift WHERE id = :id AND admin_id = :admin_id')
+                            ->execute([
+                                'shift' => $resolvedShift,
+                                'id' => (int) $employee['id'],
+                                'admin_id' => current_admin_id(),
+                            ]);
+                        $employee['shift'] = $resolvedShift;
+                    }
                     save_employee_rules((int) $employee['id'], $rules);
                     $currentRules = $rules;
                 }
@@ -954,7 +962,7 @@ function handle_post_action(string $action): void
                         $currentRules = employee_rules((int) $employee['id']);
                     }
                 }
-                send_rules_updated_email($employee, $currentRules);
+                send_rules_updated_email($employee, $currentRules, $allocationType !== 'time');
                 $updated++;
             }
             audit_log('employee_rules_updated_bulk', [
@@ -969,9 +977,40 @@ function handle_post_action(string $action): void
 
         case 'admin_attendance_csv_upload':
             require_role('admin');
+            $returnPage = in_array((string) ($_POST['return_page'] ?? ''), ['admin_attendance', 'admin_employee_log'], true)
+                ? (string) $_POST['return_page']
+                : 'admin_employee_log';
+            $returnType = in_array((string) ($_POST['return_type'] ?? 'regular'), ['regular', 'vendor', 'corporate'], true)
+                ? (string) $_POST['return_type']
+                : 'regular';
+            $returnView = in_array((string) ($_POST['return_view'] ?? 'attendance'), ['attendance', 'reimbursement'], true)
+                ? (string) $_POST['return_view']
+                : 'attendance';
+            $returnArgs = [
+                'type' => $returnType,
+                'view' => $returnView,
+            ];
+            $returnEmployeeId = (int) ($_POST['return_employee_id'] ?? 0);
+            if ($returnEmployeeId > 0) {
+                $returnArgs['employee_id'] = $returnEmployeeId;
+            }
+            $returnMonth = preg_match('/^\d{4}-\d{2}$/', (string) ($_POST['return_month'] ?? '')) ? (string) $_POST['return_month'] : '';
+            if ($returnMonth !== '') {
+                $returnArgs['month'] = $returnMonth;
+            }
+            $returnVendorId = (int) ($_POST['return_vendor_id'] ?? 0);
+            if ($returnType === 'vendor' && $returnVendorId > 0) {
+                $returnArgs['vendor_id'] = $returnVendorId;
+            }
             try {
                 validate_attendance_report_upload($_FILES['attendance_csv'] ?? []);
                 $result = import_attendance_report_csv((string) ($_FILES['attendance_csv']['tmp_name'] ?? ''), trim((string) ($_POST['attendance_date'] ?? '')), (string) ($_FILES['attendance_csv']['name'] ?? ''));
+                $importDates = array_values(array_filter((array) ($result['dates'] ?? []), static fn ($date): bool => is_string($date) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1));
+                if ($returnMonth === '' && $importDates !== []) {
+                    $returnArgs['month'] = substr((string) $importDates[0], 0, 7);
+                } elseif ($returnMonth === '' && !empty($result['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $result['date'])) {
+                    $returnArgs['month'] = substr((string) $result['date'], 0, 7);
+                }
                 $message = 'Attendance import completed. Imported: ' . (int) $result['imported'];
                 if (!empty($result['date'])) {
                     $message .= ' | Date: ' . date('d M Y', strtotime((string) $result['date']));
@@ -1000,7 +1039,7 @@ function handle_post_action(string $action): void
                 ]);
                 flash('error', $exception->getMessage());
             }
-            redirect_to('admin_attendance');
+            redirect_to($returnPage, $returnArgs);
             break;
 
         case 'admin_set_status':
@@ -1307,7 +1346,10 @@ function handle_post_action(string $action): void
                 } else {
                     add_attendance_session((int) $record['id'], $sessionPayload);
                 }
-                $recordFields = ['status' => 'Pending'];
+                $recordFields = [
+                    'status' => 'Half Day',
+                    'admin_override_status' => null,
+                ];
                 if ($slotIndex === 1 || empty($record['punch_in_path'])) {
                     $recordFields['punch_in_path'] = $sessionPayload['punch_in_path'];
                     $recordFields['punch_in_lat'] = $sessionPayload['punch_in_lat'];
@@ -1359,8 +1401,11 @@ function handle_post_action(string $action): void
             $session = attendance_session_by_slot((int) $record['id'], $slotName);
             $collegeName = trim((string) ($_POST['college_name'] ?? ''));
             $sessionName = trim((string) ($_POST['session_name'] ?? ''));
-            $dayPortion = trim((string) ($_POST['day_portion'] ?? 'Full Day'));
+            $dayPortion = project_session_label((string) ($selectedProject['session_type'] ?? 'FULL_DAY'));
             $sessionDuration = (float) ($_POST['session_duration'] ?? 0);
+            $totalStudents = (int) ($_POST['total_students'] ?? 0);
+            $presentStudents = (int) ($_POST['present_students'] ?? 0);
+            $topicsHandled = trim((string) ($_POST['topics_handled'] ?? ''));
             $location = trim((string) ($_POST['location'] ?? ''));
 
             if (empty($rules['manual_punch_out']) && $dateProjects === []) {
@@ -1394,8 +1439,12 @@ function handle_post_action(string $action): void
                 flash('error', 'Select an assigned project available for this date.');
                 redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
             }
-            if ($collegeName === '' || $sessionName === '' || $location === '' || $sessionDuration <= 0) {
-                flash('error', 'Manual Punch Out ' . $slotIndex . ' requires Project, College Name, Session Name, Session Duration, and Location.');
+            if ($collegeName === '' || $sessionName === '' || $location === '' || $sessionDuration <= 0 || $totalStudents <= 0 || $presentStudents < 0 || $topicsHandled === '') {
+                flash('error', 'Manual Punch Out ' . $slotIndex . ' requires Project, College Name, Session Name, Session Duration, Total Students, Present Students, Topics Handled, and Location.');
+                redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
+            }
+            if ($presentStudents > $totalStudents) {
+                flash('error', 'Present students cannot be more than total students.');
                 redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
             }
 
@@ -1406,12 +1455,15 @@ function handle_post_action(string $action): void
                 'session_name' => $sessionName,
                 'day_portion' => $dayPortion,
                 'session_duration' => $sessionDuration,
+                'total_students' => $totalStudents,
+                'present_students' => $presentStudents,
+                'topics_handled' => $topicsHandled,
                 'location' => $location,
                 'punch_out_time' => now(),
             ]);
             update_attendance_record((int) $employee['id'], $date, [
-                'status' => 'Pending',
-                'admin_override_status' => 'Pending',
+                'status' => 'Present',
+                'admin_override_status' => null,
             ]);
             audit_log('employee_manual_punch_out_submitted', [
                 'attend_date' => $date,

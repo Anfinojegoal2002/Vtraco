@@ -28,7 +28,7 @@ function render_employee_attendance(): void
                 <span class="eyebrow employee-workspace-badge">Employee Workspace</span>
                 <h1><?= h($employee['name']) ?></h1>
                 <p>Employee ID: <strong><?= h($employee['emp_id']) ?></strong></p>
-                <p>Shift: <strong><?= h((string) (($employee['shift'] ?? '') ?: 'Not assigned')) ?></strong></p>
+                <p>Shift: <strong><?= h(employee_shift_display($employee)) ?></strong></p>
             </div>
 
         </div>
@@ -105,11 +105,8 @@ function render_employee_reimbursements(): void
             <div class="hint">Previous months are disabled for employee reimbursement submissions.</div>
         </div>
         <div class="spacer"></div>
-        <div
-            class="reimbursement-calendar-scroll"
-            style="border-radius:18px; border:1px solid rgba(36,52,109,0.1); background:rgba(255,255,255,0.55);"
-        >
-            <div class="calendar-grid reimbursement-calendar-grid" style="height:auto; min-height:0; overflow:visible; padding:6px 6px 6px 0; align-content:start;">
+        <div class="reimbursement-calendar-scroll">
+            <div class="calendar-grid reimbursement-calendar-grid">
                 <?php foreach ($dayLabels as $label): ?>
                     <div class="weekday"><?= h($label) ?></div>
                 <?php endforeach; ?>
@@ -210,30 +207,6 @@ function render_employee_reimbursements(): void
             </form>
         </div>
     </div>
-
-    <style>
-        .reimbursement-calendar-block { overflow: hidden; }
-        /* Keep a stable visible calendar area. */
-        .reimbursement-calendar-grid {
-            display: grid !important;
-            overflow: visible;
-            align-content: start;
-        }
-        .reimbursement-calendar-scroll { margin: 0; }
-        .reimbursement-modal-card { max-width: 760px; }
-        .reimbursement-existing-list { max-height: 220px; overflow: auto; }
-        .reimbursement-radio-group { display: flex; gap: 12px; flex-wrap: wrap; }
-        .reimbursement-radio { display: inline-flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid rgba(36, 52, 109, 0.12); border-radius: 16px; cursor: pointer; background: rgba(248, 250, 255, 0.9); }
-        .reimbursement-radio input { width: auto; min-height: auto; margin: 0; }
-        .reimbursement-status.pending { background: #e5e7eb; color: #374151; }
-        .reimbursement-status.approved { background: #fef3c7; color: #92400e; }
-        .reimbursement-status.denied { background: #fee2e2; color: #b91c1c; }
-        .reimbursement-status.partially-paid { background: #e0f2fe; color: #0369a1; }
-        .reimbursement-status.paid { background: #dcfce7; color: #166534; }
-        @media (max-width: 900px) {
-            .reimbursement-calendar-grid { grid-template-columns: repeat(7, minmax(38px, 1fr)); }
-        }
-    </style>
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {

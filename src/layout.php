@@ -532,7 +532,7 @@ function render_employee_profile_settings_modal(array $employee, string $employe
                 </div>
                 <div class="list-item">
                     <strong>Shift</strong>
-                    <span><?= h((string) (($employee['shift'] ?? '') ?: 'Not assigned')) ?></span>
+                    <span><?= h(employee_shift_display($employee)) ?></span>
                 </div>
             </div>
             <label class="profile-settings-field">

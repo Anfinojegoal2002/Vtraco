@@ -117,7 +117,7 @@ function update_attendance_session(int $sessionId, array $fields): void
 
 function add_attendance_session(int $attendanceId, array $payload): void
 {
-    db()->prepare('INSERT INTO attendance_sessions (attendance_id, project_id, session_mode, slot_name, punch_in_path, punch_in_lat, punch_in_lng, punch_in_time, punch_out_time, college_name, session_name, day_portion, session_duration, location, created_at) VALUES (:attendance_id, :project_id, :session_mode, :slot_name, :punch_in_path, :punch_in_lat, :punch_in_lng, :punch_in_time, :punch_out_time, :college_name, :session_name, :day_portion, :session_duration, :location, :created_at)')
+    db()->prepare('INSERT INTO attendance_sessions (attendance_id, project_id, session_mode, slot_name, punch_in_path, punch_in_lat, punch_in_lng, punch_in_time, punch_out_time, college_name, session_name, day_portion, session_duration, total_students, present_students, topics_handled, location, created_at) VALUES (:attendance_id, :project_id, :session_mode, :slot_name, :punch_in_path, :punch_in_lat, :punch_in_lng, :punch_in_time, :punch_out_time, :college_name, :session_name, :day_portion, :session_duration, :total_students, :present_students, :topics_handled, :location, :created_at)')
         ->execute([
             'attendance_id' => $attendanceId,
             'project_id' => $payload['project_id'] ?? null,
@@ -132,6 +132,9 @@ function add_attendance_session(int $attendanceId, array $payload): void
             'session_name' => $payload['session_name'] ?? null,
             'day_portion' => $payload['day_portion'] ?? null,
             'session_duration' => $payload['session_duration'] ?? null,
+            'total_students' => $payload['total_students'] ?? null,
+            'present_students' => $payload['present_students'] ?? null,
+            'topics_handled' => $payload['topics_handled'] ?? null,
             'location' => $payload['location'] ?? null,
             'created_at' => now(),
         ]);
@@ -148,6 +151,9 @@ function session_has_manual_out(array $session): bool
     return trim((string) ($session['college_name'] ?? '')) !== ''
         || trim((string) ($session['session_name'] ?? '')) !== ''
         || trim((string) ($session['location'] ?? '')) !== ''
+        || trim((string) ($session['topics_handled'] ?? '')) !== ''
+        || (int) ($session['total_students'] ?? 0) > 0
+        || (int) ($session['present_students'] ?? 0) > 0
         || (float) ($session['session_duration'] ?? 0) > 0;
 }
 
@@ -274,7 +280,6 @@ function manual_attendance_status(array $record, array $sessions): ?string
 {
     $hasIncompleteManual = false;
     $hasCompletedManual = false;
-    $hasFullDayManual = false;
 
     foreach ($sessions as $session) {
         if (($session['session_mode'] ?? '') !== 'manual_pair') {
@@ -290,9 +295,6 @@ function manual_attendance_status(array $record, array $sessions): ?string
 
         if ($hasManualIn && $hasManualOut) {
             $hasCompletedManual = true;
-            if (($session['day_portion'] ?? 'Full Day') !== 'Half Day') {
-                $hasFullDayManual = true;
-            }
         }
     }
 
@@ -301,16 +303,11 @@ function manual_attendance_status(array $record, array $sessions): ?string
     }
 
     if ($hasIncompleteManual) {
-        return attendance_date_is_closed((string) ($record['attend_date'] ?? '')) ? 'Absent' : 'Pending';
+        return 'Half Day';
     }
 
     if ($hasCompletedManual) {
-        $shiftStatus = shift_based_attendance_status($record, $sessions);
-        if ($shiftStatus !== null) {
-            return $shiftStatus;
-        }
-
-        return $hasFullDayManual ? 'Present' : 'Half Day';
+        return 'Present';
     }
 
     return null;
@@ -319,7 +316,7 @@ function manual_attendance_status(array $record, array $sessions): ?string
 function resolved_attendance_status(array $record, array $sessions): string
 {
     $overrideStatus = trim((string) ($record['admin_override_status'] ?? ''));
-    if ($overrideStatus !== '') {
+    if ($overrideStatus !== '' && $overrideStatus !== 'Pending') {
         return $overrideStatus;
     }
 
@@ -393,6 +390,7 @@ function month_attendance_for_user(int $userId, string $month): array
             'biometric_in_time' => null,
             'biometric_out_time' => null,
             'leave_reason' => null,
+            'admin_override_status' => null,
         ];
         $sessions = $record['id'] ? attendance_sessions((int) $record['id']) : [];
         $record['status'] = resolved_attendance_status($record, $sessions);
@@ -691,11 +689,10 @@ function incentive_breakdown_for_month(array $monthAttendance): array
             $projectIncentive = employee_project_incentive_for_date($userId, (int) ($session['project_id'] ?? 0), $attendDate);
             if (($session['day_portion'] ?? 'Full Day') === 'Half Day') {
                 $halfDayCount++;
-                $amount += $projectIncentive > 0 ? ($projectIncentive / 2) : 50;
             } else {
                 $fullDayCount++;
-                $amount += $projectIncentive > 0 ? $projectIncentive : 100;
             }
+            $amount += $projectIncentive;
         }
     }
 
@@ -2140,15 +2137,22 @@ function import_attendance_report_csv(string $path, ?string $overrideDate = null
             $entry['biometric_out_time'] ?? null
         );
 
-        update_attendance_record((int) $employee['id'], (string) $entry['date'], [
-            'status' => $resolvedStatus,
-            'admin_override_status' => null,
+        $existingRecord = attendance_record((int) $employee['id'], (string) $entry['date']);
+        $hasAdminOverride = trim((string) ($existingRecord['admin_override_status'] ?? '')) !== '';
+        $recordFields = [
             'biometric_in_time' => $entry['biometric_in_time'],
             'biometric_out_time' => $entry['biometric_out_time'],
             'shift_start_time' => $shiftWindow['start_time'] ?? null,
             'shift_end_time' => $shiftWindow['end_time'] ?? null,
-            'leave_reason' => in_array($resolvedStatus, ['Leave', 'Half Day'], true) ? $entry['leave_reason'] : null,
-        ]);
+        ];
+
+        if (!$hasAdminOverride) {
+            $recordFields['status'] = $resolvedStatus;
+            $recordFields['admin_override_status'] = null;
+            $recordFields['leave_reason'] = in_array($resolvedStatus, ['Leave', 'Half Day'], true) ? $entry['leave_reason'] : null;
+        }
+
+        update_attendance_record((int) $employee['id'], (string) $entry['date'], $recordFields);
         $imported++;
     }
 
