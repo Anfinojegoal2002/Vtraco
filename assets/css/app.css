@@ -184,8 +184,8 @@
             /* Make the main area the scroll container so sections (like reimbursement calendar) don't collapse. */
             .admin-main .content, .employee-main .content { flex: 1; overflow: auto; }
             .employee-main .content { display: flex; flex-direction: column; min-height: 0; }
-            .employee-attendance-panel { flex: 1; min-height: 0; display: flex; }
-            .employee-attendance-panel .calendar-shell { flex: 1; }
+            .employee-attendance-panel { flex: 0 0 auto; min-height: 0; display: block; }
+            .employee-attendance-panel .calendar-shell { flex: 0 0 auto; overflow: visible; }
             .employee-main { padding-bottom: 0; }
             .employee-main .content { padding-bottom: 0; }
             .employee-attendance-panel .calendar-shell { padding-bottom: 0; }
@@ -256,6 +256,7 @@
             .legend-present { background: var(--present); }
             .legend-absent { background: var(--absent); }
             .legend-leave { background: var(--leave); }
+            .legend-week-off { background: var(--weekoff); }
             .legend-pending { background: var(--pending); }
             .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; padding-right: 0; align-content: start; }
             .weekday { text-align: center; color: var(--muted); font-weight: 700; font-size: 0.75rem; padding-bottom: 2px; }
@@ -307,15 +308,25 @@
             .calendar-shell-compact .summary-card strong { font-size: 1rem; }
             .rules-box { display: grid; gap: 14px; }
             .rules-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.admin-rules-top-actions {
+    justify-content: flex-end;
+}
 .admin-rules-footer {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 12px;
     padding-top: 8px;
     margin-top: 8px;
     border-top: 1px solid rgba(30,41,59,0.08);
 }
 .admin-rules-footer label {
-    min-width: min(320px, 100%);
+    flex: 1 1 180px;
+    min-width: min(180px, 100%);
 }
 .admin-rules-footer .inline-actions {
+    flex: 0 1 auto;
+    margin-left: auto;
     justify-content: flex-end;
 }
 .admin-rules-footer .button:last-child {
@@ -563,6 +574,12 @@
             .employee-options { display: grid; gap: 8px; max-height: 220px; overflow: auto; }
             .employee-option { display: flex; gap: 10px; align-items: center; padding: 12px 14px; border-radius: 16px; background: rgba(67,56,202,0.03); }
             .employee-option input { width: auto; }
+            .project-option-card { display: grid; grid-template-columns: minmax(210px, 1fr) minmax(360px, 1.35fr); align-items: start; gap: 16px; padding: 16px 18px; border-radius: 16px; background: rgba(67,56,202,0.03); }
+            .project-option-card .employee-option { padding: 0; border-radius: 0; background: transparent; min-width: 0; align-items: flex-start; }
+            .project-option-card .employee-option span { min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
+            .project-date-range { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(130px, 1fr) minmax(110px, 0.75fr); gap: 12px; min-width: 0; width: 100%; }
+            .project-date-range label { min-width: 0; font-size: 0.9rem; }
+            .project-date-range input { width: 100%; min-width: 0; }
             .banner { padding: 22px; border-radius: 26px; background: linear-gradient(135deg, rgba(67,56,202,0.95), rgba(37,99,235,0.9)); color: #fff; box-shadow: var(--shadow); }
             .banner p, .banner .hint { color: rgba(255,255,255,0.78); }
             .employee-banner { padding: 12px 20px; }
@@ -589,7 +606,7 @@
             .employee-profile-form { display: grid; gap: 12px; }
             .employee-profile-form label { font-size: 0.94rem; }
             .employee-main .calendar-legend { order: 1; margin-bottom: 0; }
-            .employee-main .calendar-grid { order: 2; flex: 1; height: auto; min-height: 0; }
+            .employee-main .calendar-grid { order: 2; flex: 0 0 auto; height: auto; min-height: 0; grid-auto-rows: minmax(70px, auto); }
             .employee-main .calendar-summary { order: 3; flex-shrink: 0; margin-top: 14px; margin-bottom: 0; }
             .employee-main .summary-card { min-height: 82px; padding: 14px; }
             .employee-main .summary-card strong { font-size: 1.3rem; }
@@ -1204,6 +1221,7 @@
             .admin-rules-page { overflow-y: auto; overflow-x: hidden; padding-right: 6px; padding-bottom: 120px; }
             .admin-rules-page .scroll-panel { max-height: 620px; overflow: auto; }
             .admin-rules-page .rules-workspace-grid { display: grid; grid-template-columns: minmax(320px, 0.92fr) minmax(0, 1.35fr); gap: 18px; align-items: start; }
+            .admin-rules-page .rules-side-stack { display: grid; gap: 18px; min-width: 0; }
             .admin-rules-page .rules-shift-panel,
             .admin-rules-page .rules-assignment-panel { height: 100%; }
             .admin-rules-page .rules-quick-actions { display: flex; gap: 12px; flex-wrap: wrap; margin: 14px 0 18px; }
@@ -1262,6 +1280,11 @@
             @media (max-width: 1100px) {
                 .admin-rules-page .rules-workspace-grid { grid-template-columns: 1fr; }
                 .calendar-top-actions { justify-content: stretch; }
+                .project-option-card { grid-template-columns: 1fr; }
+                .project-date-range { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            }
+            @media (max-width: 680px) {
+                .project-date-range { grid-template-columns: 1fr; }
             }
             /* Super Admin Login Modal UI */
             .super-admin-login-page {

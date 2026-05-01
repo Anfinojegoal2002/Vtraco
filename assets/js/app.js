@@ -24,14 +24,41 @@
             return sessionType === 'FULL_DAY' ? 'Full Day' : 'Half Day';
         }
 
-        function projectOptionsMarkup(selectedProjectId) {
+        function projectIsAvailableForDate(project, dateValue) {
+            const date = String(dateValue || '').trim();
+            if (!date) {
+                return true;
+            }
+            const from = String(project.project_from || '').trim().slice(0, 10);
+            const to = String(project.project_to || '').trim().slice(0, 10);
+            if (from && date < from) {
+                return false;
+            }
+            if (to && date > to) {
+                return false;
+            }
+            return true;
+        }
+
+        function availableProjectsForDate(dateValue) {
+            return availableProjects.filter(project => projectIsAvailableForDate(project, dateValue));
+        }
+
+        function projectOptionsMarkup(selectedProjectId, dateValue) {
             const numericSelectedId = Number(selectedProjectId || 0);
-            const placeholder = `<option value="">${availableProjects.length ? 'Select project' : 'No projects assigned'}</option>`;
-            const options = availableProjects.map(project => `
+            const dateProjects = availableProjectsForDate(dateValue);
+            const placeholder = `<option value="">${dateProjects.length ? 'Select project' : 'No projects assigned for this date'}</option>`;
+            const options = dateProjects.map(project => `
                 <option value="${escapeHtml(project.id)}" ${Number(project.id || 0) === numericSelectedId ? 'selected' : ''}>${escapeHtml(project.project_name || '')}</option>
             `).join('');
 
             return placeholder + options;
+        }
+
+        function projectManualSlotName(project) {
+            const projectId = Number(project && project.id ? project.id : 0);
+            const projectName = String(project && project.project_name ? project.project_name : 'Project').trim() || 'Project';
+            return `Project #${projectId}: ${projectName}`;
         }
 
         function detailValue(value, fallback = '-') {
@@ -142,7 +169,7 @@
                             <label>Update Status
                                 <select name="status">
                                     <option value="" disabled ${payload.status ? '' : 'selected'}>Select status</option>
-                                    ${['Present','Absent','Half Day','Leave'].map(status => `<option value="${status}" ${status === payload.status ? 'selected' : ''}>${status}</option>`).join('')}
+                                    ${['Present','Absent','Half Day','Leave','Week Off'].map(status => `<option value="${status}" ${status === payload.status ? 'selected' : ''}>${status}</option>`).join('')}
                                 </select>
                             </label>
                             <button class="button solid" type="submit">Save Status</button>
@@ -153,21 +180,26 @@
 
             let employeeCards = '';
             if (payload.context === 'employee') {
-                const manualPairSlotCount = Math.max(payload.manual_out_count || 0, payload.rule_manual_in ? 1 : 0, 1);
-                const manualPairSlots = Array.from({ length: manualPairSlotCount }, (_, index) => (
-                    payload.manual_out_slots && payload.manual_out_slots[index]
-                        ? payload.manual_out_slots[index]
-                        : `Manual Punch Slot ${index + 1}`
-                ));
-                const sessionForSlot = (slot, index) => payload.sessions.find(session => (session.slot_name || '') === slot) || payload.sessions[index] || null;
+                const dateProjects = availableProjectsForDate(payload.date);
+                const hasDateProjects = dateProjects.length > 0;
+                const manualInEnabled = payload.rule_manual_in || hasDateProjects;
+                const manualOutEnabled = payload.rule_manual_out || hasDateProjects;
+                const sessionForProject = (project, index) => {
+                    const projectId = Number(project.id || 0);
+                    const slot = projectManualSlotName(project);
+                    return payload.sessions.find(session => Number(session.project_id || 0) === projectId)
+                        || payload.sessions.find(session => (session.slot_name || '') === slot)
+                        || null;
+                };
                 const showAddManualPunchButton = false;
                 const isWeekOff = payload.status === 'Week Off';
                 const isFuture = !!payload.future;
-                const manualPunchPairs = manualPairSlots.map((slot, index) => {
+                const manualPunchPairs = dateProjects.map((project, index) => {
                     const pairNumber = index + 1;
-                    const pairSession = sessionForSlot(slot, index);
-                    const selectedProjectId = pairSession && pairSession.project_id ? Number(pairSession.project_id) : 0;
-                    const selectedProject = findProjectById(selectedProjectId);
+                    const pairSession = sessionForProject(project, index);
+                    const selectedProjectId = Number(project.id || 0);
+                    const selectedProject = project;
+                    const slot = projectManualSlotName(project);
                     const pairPunchInPath = pairSession && pairSession.punch_in_path
                         ? pairSession.punch_in_path
                         : (pairNumber === 1 ? (payload.punch_in_path || '') : '');
@@ -183,21 +215,23 @@
                     const pairPunchInDone = !!pairPunchInPath;
                     const pairPunchOutDone = !!(pairSession && (pairSession.college_name || pairSession.session_name || pairSession.location || Number(pairSession.session_duration || 0) > 0));
                     const pairHiddenClass = '';
-                    const manualInSectionDisabled = !payload.rule_manual_in ? 'disabled' : '';
-                    const manualInFormDisabled = (!payload.rule_manual_in || pairPunchInDone) ? 'disabled' : '';
+                    const manualInSectionDisabled = (!manualInEnabled || !hasDateProjects) ? 'disabled' : '';
+                    const manualInFormDisabled = (!manualInEnabled || !hasDateProjects || pairPunchInDone) ? 'disabled' : '';
                     const manualInRequired = manualInFormDisabled ? '' : 'required';
-                    const manualOutSectionDisabled = (!payload.rule_manual_out || !pairPunchInDone) ? 'disabled' : '';
-                    const manualOutFormDisabled = (!payload.rule_manual_out || !pairPunchInDone || pairPunchOutDone) ? 'disabled' : '';
+                    const manualOutSectionDisabled = (!manualOutEnabled || !hasDateProjects || !pairPunchInDone) ? 'disabled' : '';
+                    const manualOutFormDisabled = (!manualOutEnabled || !hasDateProjects || !pairPunchInDone || pairPunchOutDone) ? 'disabled' : '';
                     const manualInNote = pairPunchInDone
                         ? `Submitted at ${escapeHtml(pairPunchInTime || 'Saved')}. Bio: ${escapeHtml(pairPunchInLat || '-')}, ${escapeHtml(pairPunchInLng || '-')}`
-                        : 'Location will be captured when this popup opens.';
-                    const manualOutNote = !payload.rule_manual_out
+                        : (!hasDateProjects ? 'No assigned project is active for this date.' : 'Location will be captured when this popup opens.');
+                    const manualOutNote = !hasDateProjects
+                        ? 'No assigned project is active for this date.'
+                        : (!manualOutEnabled
                         ? 'Manual Punch Out is not enabled for this employee.'
                         : (!pairPunchInDone
                             ? `Submit Manual Punch In ${pairNumber} first.`
                             : (pairPunchOutDone
                                 ? `Manual Punch Out ${pairNumber} is already submitted.`
-                                : `Fill the required fields for Manual Punch Out ${pairNumber}.`));
+                                : `Fill the required fields for Manual Punch Out ${pairNumber}.`)));
                     const pairStatus = pairPunchOutDone ? 'Completed' : (pairPunchInDone ? 'Punch In Submitted' : 'Pending');
                     const selectedDayPortion = pairSession && pairSession.day_portion
                         ? pairSession.day_portion
@@ -219,7 +253,7 @@
                             <div class="split manual-punch-pair-head">
                                 <div>
                                     <h3>Manual Punch Pair ${pairNumber}</h3>
-                                    <p>${escapeHtml(slot)}</p>
+                                    <p>${escapeHtml(selectedProject.project_name || slot)}</p>
                                 </div>
                                 <span class="badge">${escapeHtml(pairStatus)}</span>
                             </div>
@@ -233,7 +267,9 @@
                                         <input type="hidden" name="attend_date" value="${payload.date}">
                                         <input type="hidden" name="slot_index" value="${pairNumber}">
                                         <input type="hidden" name="slot_name" value="${escapeHtml(slot)}">
+                                        <input type="hidden" name="project_id" value="${escapeHtml(selectedProjectId)}">
                                         ${sessionIdField}
+                                        <div class="list-item"><strong>Project</strong><br><span>${escapeHtml(selectedProject.project_name || '')}</span></div>
                                         <label>Punch In Photo *<input type="file" name="punch_photo" accept="image/*" ${manualInFormDisabled} ${manualInRequired}></label>
                                         <div class="list-item hidden file-preview-box"></div>
                                         <input type="hidden" name="latitude" class="geo-lat">
@@ -251,12 +287,9 @@
                                         <input type="hidden" name="attend_date" value="${payload.date}">
                                         <input type="hidden" name="slot_index" value="${pairNumber}">
                                         <input type="hidden" name="slot_name" value="${escapeHtml(slot)}">
+                                        <input type="hidden" name="project_id" value="${escapeHtml(selectedProjectId)}">
                                         ${sessionIdField}
-                                        <label>Project
-                                            <select name="project_id" data-project-select ${manualOutFormDisabled}>
-                                                ${projectOptionsMarkup(selectedProjectId)}
-                                            </select>
-                                        </label>
+                                        <label>Project<input type="text" value="${escapeHtml(selectedProject.project_name || '')}" ${manualOutFormDisabled} readonly></label>
                                         <label>College Name *<input type="text" name="college_name" data-project-college value="${escapeHtml(collegeNameValue)}" ${manualOutFormDisabled} required></label>
                                         <label>Session Name *<input type="text" name="session_name" data-project-session value="${escapeHtml(sessionNameValue)}" ${manualOutFormDisabled} required></label>
                                         <label>Half Day / Full Day
@@ -274,23 +307,12 @@
                     `;
                 }).join('');
 
-                employeeCards = isFuture ? `
-                    <div class="section-block">
-                        <h3>Future Date Locked</h3>
-                        <p>Attendance cannot be marked for future dates.</p>
-                    </div>
-                ` : isWeekOff ? `
-                    <div class="section-block">
-                        <h3>Week Off</h3>
-                        <p>Attendance is not required for this date.</p>
-                    </div>
-                ` : `
-                    <div class="cards-2">
+                const manualPunchCard = hasDateProjects ? `
                         <div class="action-card manual-punch-card">
                             <button class="manual-punch-toggle" type="button" data-toggle-manual-punch aria-expanded="false">
                                 <span class="manual-punch-toggle-copy">
                                     <strong>Manual Punch</strong>
-                                    <span>Open all configured manual punch pairs for this date, including slots 2 and 3.</span>
+                                    <span>Open all configured manual punch pairs for this assigned project date.</span>
                                 </span>
                                 <span class="manual-punch-toggle-state">Open</span>
                             </button>
@@ -312,6 +334,26 @@
                                 </div>
                             </div>
                         </div>
+                ` : `
+                        <div class="action-card disabled">
+                            <h3>Manual Punch</h3>
+                            <p>Manual Punch In and Punch Out are shown only for dates with an active assigned project.</p>
+                        </div>
+                `;
+
+                employeeCards = isFuture ? `
+                    <div class="section-block">
+                        <h3>Future Date Locked</h3>
+                        <p>Attendance cannot be marked for future dates.</p>
+                    </div>
+                ` : isWeekOff ? `
+                    <div class="section-block">
+                        <h3>Week Off</h3>
+                        <p>Attendance is not required for this date.</p>
+                    </div>
+                ` : `
+                    <div class="cards-2">
+                        ${manualPunchCard}
                         <div class="action-card ${(!payload.rule_bio_in && !payload.rule_bio_out) ? 'disabled' : ''}">
                             <h3>Biometric Options</h3>
                             <p>Use biometric actions only if they are enabled by the admin.</p>
@@ -600,6 +642,26 @@
             form.querySelectorAll('input[required], textarea[required], select[required]').forEach(input => input.addEventListener('input', update));
             update();
         });
+        document.querySelectorAll('[data-employee-type-select]').forEach(select => {
+            const form = select.closest('form');
+            const empIdField = form ? form.querySelector('[data-contractual-emp-id-field]') : null;
+            const empIdInput = empIdField ? empIdField.querySelector('input[name="emp_id"]') : null;
+            const sync = () => {
+                const isContractual = select.value === 'corporate';
+                if (empIdField) {
+                    empIdField.classList.toggle('hidden', isContractual);
+                }
+                if (empIdInput) {
+                    empIdInput.required = !isContractual;
+                    empIdInput.disabled = isContractual;
+                    if (isContractual) {
+                        empIdInput.value = '';
+                    }
+                }
+            };
+            select.addEventListener('change', sync);
+            sync();
+        });
         document.querySelectorAll('.rule-card input').forEach(input => {
             const sync = () => input.closest('.rule-card').classList.toggle('active', input.checked);
             input.addEventListener('change', sync);
@@ -670,7 +732,7 @@
             }
             const ruleCount = form.querySelectorAll('.rule-card input:checked').length;
             const employeeCount = form.matches('[data-employee-form]') ? form.querySelectorAll('input[name="employee_ids[]"]:checked').length : 1;
-            const valid = ruleCount > 0 && employeeCount > 0;
+            const valid = form.matches('[data-project-allocation-form]') ? employeeCount > 0 : (ruleCount > 0 && employeeCount > 0);
             submits.forEach(submit => submit.classList.toggle('ghost', !valid));
         }
         document.querySelectorAll('form[data-rule-form]').forEach(form => {
@@ -678,6 +740,18 @@
                 input.addEventListener('change', () => updateRuleSubmit(form));
             });
             updateRuleSubmit(form);
+        });
+        document.querySelectorAll('[data-project-date-toggle]').forEach(input => {
+            const sync = () => {
+                const card = input.closest('.project-option-card');
+                const fields = card ? card.querySelector('[data-project-date-fields]') : null;
+                if (!fields) {
+                    return;
+                }
+                fields.classList.toggle('hidden', !input.checked);
+            };
+            input.addEventListener('change', sync);
+            sync();
         });
         document.querySelectorAll('[data-confirm-delete]').forEach(button => {
             button.addEventListener('click', () => {

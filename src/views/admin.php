@@ -131,7 +131,7 @@ function render_vendor_dashboard(): void
     render_footer();
 }
 
-function render_rules_editor(array $existing = [], ?string $submitLabel = null, bool $allowBlankShift = false): void
+function render_rules_editor(array $existing = [], ?string $submitLabel = null, bool $allowBlankShift = false, bool $includeProjectPicker = true, bool $includeRuleDetails = true, bool $includeEmployeeDateRange = false, bool $includeManualPunch = true): void
 {
     $postedShiftOptions = array_map(
         static function (array $timing): string {
@@ -146,6 +146,10 @@ function render_rules_editor(array $existing = [], ?string $submitLabel = null, 
         'manual_out_count' => 0,
         'biometric_punch_in' => false,
         'biometric_punch_out' => false,
+        'project_session_from' => '',
+        'project_session_to' => '',
+        'employee_from' => '',
+        'employee_to' => '',
         'shift' => $shiftOptions[0] ?? '',
     ], $existing);
     $selectedShift = normalize_shift_selection((string) ($defaults['shift'] ?? ''));
@@ -168,12 +172,14 @@ function render_rules_editor(array $existing = [], ?string $submitLabel = null, 
             </div>
         </div>
         <div class="rules-grid">
-            <label class="rule-card <?= ($defaults['manual_punch_in'] || $defaults['manual_punch_out']) ? 'active' : '' ?>">
-                <input type="checkbox" name="manual_punch" value="1" <?= ($defaults['manual_punch_in'] || $defaults['manual_punch_out']) ? 'checked' : '' ?>>
-                <span class="rule-icon">MP</span>
-                <strong>Manual Punch</strong>
-                <span class="hint">Allow employees to submit punch-in photos and complete punch-out details.</span>
-            </label>
+            <?php if ($includeManualPunch): ?>
+                <label class="rule-card <?= ($defaults['manual_punch_in'] || $defaults['manual_punch_out']) ? 'active' : '' ?>">
+                    <input type="checkbox" name="manual_punch" value="1" <?= ($defaults['manual_punch_in'] || $defaults['manual_punch_out']) ? 'checked' : '' ?>>
+                    <span class="rule-icon">MP</span>
+                    <strong>Manual Punch</strong>
+                    <span class="hint">Allow employees to submit punch-in photos and complete punch-out details.</span>
+                </label>
+            <?php endif; ?>
             <label class="rule-card <?= ($defaults['biometric_punch_in'] || $defaults['biometric_punch_out']) ? 'active' : '' ?>">
                 <input type="checkbox" name="biometric_punch" value="1" <?= ($defaults['biometric_punch_in'] || $defaults['biometric_punch_out']) ? 'checked' : '' ?>>
                 <span class="rule-icon">BP</span>
@@ -181,22 +187,68 @@ function render_rules_editor(array $existing = [], ?string $submitLabel = null, 
                 <span class="hint">Enable biometric punch-in and punch-out time capture.</span>
             </label>
         </div>
-        <div class="split align-end admin-rules-footer">
-            <label>Manual punch slots<input id="manual-out-count" type="number" min="0" name="manual_out_count" value="<?= h((string) $defaults['manual_out_count']) ?>"></label>
-            <div class="inline-actions">
+        <?php if ($includeRuleDetails): ?>
+            <div class="inline-actions admin-rules-top-actions">
                 <button class="button outline small" type="button" data-add-manual-slot data-target="#manual-out-count">+ Add Manual Punch</button>
+            </div>
+            <div class="split align-end admin-rules-footer">
+                <label>Manual punch slots<input id="manual-out-count" type="number" min="0" name="manual_out_count" value="<?= h((string) $defaults['manual_out_count']) ?>"></label>
+                <label>Project Session From<input type="date" name="project_session_from" value="<?= h((string) ($defaults['project_session_from'] ?? '')) ?>"></label>
+                <label>Project Session To<input type="date" name="project_session_to" value="<?= h((string) ($defaults['project_session_to'] ?? '')) ?>"></label>
+                <label>Employee From<input type="date" name="employee_from" value="<?= h((string) ($defaults['employee_from'] ?? '')) ?>"></label>
+                <label>Employee To<input type="date" name="employee_to" value="<?= h((string) ($defaults['employee_to'] ?? '')) ?>"></label>
                 <?php if ($submitLabel !== null): ?>
-                    <button class="button solid" type="submit" data-rule-submit><?= h($submitLabel) ?></button>
+                    <div class="inline-actions">
+                        <button class="button solid" type="submit" data-rule-submit><?= h($submitLabel) ?></button>
+                    </div>
                 <?php endif; ?>
             </div>
-        </div>
+        <?php elseif ($includeEmployeeDateRange): ?>
+            <div class="split align-end admin-rules-footer">
+                <label>Employee From<input type="date" name="employee_from" value="<?= h((string) ($defaults['employee_from'] ?? '')) ?>"></label>
+                <label>Employee To<input type="date" name="employee_to" value="<?= h((string) ($defaults['employee_to'] ?? '')) ?>"></label>
+                <?php if ($submitLabel !== null): ?>
+                    <div class="inline-actions">
+                        <button class="button solid" type="submit" data-rule-submit><?= h($submitLabel) ?></button>
+                    </div>
+                <?php endif; ?>
+            </div>
+        <?php elseif ($submitLabel !== null): ?>
+            <div class="inline-actions">
+                <button class="button solid" type="submit" data-rule-submit><?= h($submitLabel) ?></button>
+            </div>
+        <?php endif; ?>
         <div class="spacer"></div>
-        <?php render_project_assignment_picker(); ?>
+        <?php if ($includeProjectPicker): ?>
+            <?php render_project_assignment_picker(); ?>
+        <?php endif; ?>
     </div>
     <?php
 }
 
-function render_project_assignment_picker(array $selectedProjectIds = [], string $filterId = 'project-assignment-options'): void
+function render_employee_assignment_picker(array $employees, string $optionsId, string $tagsId, string $heading = 'Select Employees'): void
+{
+    ?>
+    <div class="employee-picker">
+        <div class="split">
+            <strong><?= h($heading) ?></strong>
+            <span class="hint">Search and pick one or more employees</span>
+        </div>
+        <input type="text" placeholder="Search employees..." data-employee-filter="<?= h($optionsId) ?>">
+        <div class="tag-list" id="<?= h($tagsId) ?>"></div>
+        <div class="employee-options" id="<?= h($optionsId) ?>" data-tag-source="<?= h($tagsId) ?>">
+            <?php foreach ($employees as $employee): ?>
+                <label class="employee-option">
+                    <input type="checkbox" name="employee_ids[]" value="<?= (int) $employee['id'] ?>" data-label="<?= h($employee['name']) ?>">
+                    <span><?= h($employee['name']) ?> (<?= h($employee['emp_id']) ?>)</span>
+                </label>
+            <?php endforeach; ?>
+        </div>
+    </div>
+    <?php
+}
+
+function render_project_assignment_picker(array $selectedProjectIds = [], string $filterId = 'project-assignment-options', array $assignmentRanges = []): void
 {
     $allProjects = projects();
     $selectedLookup = array_fill_keys(array_map('intval', $selectedProjectIds), true);
@@ -218,14 +270,26 @@ function render_project_assignment_picker(array $selectedProjectIds = [], string
                         trim((string) ($project['location'] ?? '')),
                         $statusLabel,
                     ]));
+                    $range = $assignmentRanges[$projectId] ?? [];
+                    $dateFrom = (string) ($range['from'] ?? '');
+                    $dateTo = (string) ($range['to'] ?? '');
+                    $projectIncentive = number_format((float) ($range['incentive'] ?? 0), 2, '.', '');
+                    $isChecked = isset($selectedLookup[$projectId]);
                     ?>
-                    <label class="employee-option">
-                        <input type="checkbox" name="project_ids[]" value="<?= $projectId ?>" <?= isset($selectedLookup[$projectId]) ? 'checked' : '' ?>>
-                        <span>
-                            <?= h((string) ($project['project_name'] ?? '')) ?><br>
-                            <small class="hint"><?= h(implode(' | ', $detailParts)) ?></small>
-                        </span>
-                    </label>
+                    <div class="project-option-card">
+                        <label class="employee-option">
+                            <input type="checkbox" name="project_ids[]" value="<?= $projectId ?>" data-label="<?= h((string) ($project['project_name'] ?? '')) ?>" data-project-date-toggle <?= $isChecked ? 'checked' : '' ?>>
+                            <span>
+                                <?= h((string) ($project['project_name'] ?? '')) ?><br>
+                                <small class="hint"><?= h(implode(' | ', $detailParts)) ?></small>
+                            </span>
+                        </label>
+                        <div class="project-date-range<?= $isChecked ? '' : ' hidden' ?>" data-project-date-fields>
+                            <label>From<input type="date" name="project_from[<?= $projectId ?>]" value="<?= h($dateFrom) ?>"></label>
+                            <label>To<input type="date" name="project_to[<?= $projectId ?>]" value="<?= h($dateTo) ?>"></label>
+                            <label>Incentive<input type="number" min="0" step="0.01" name="project_incentive[<?= $projectId ?>]" value="<?= h($projectIncentive) ?>" placeholder="0.00"></label>
+                        </div>
+                    </div>
                 <?php endforeach; ?>
             </div>
         <?php else: ?>
@@ -567,7 +631,7 @@ function render_admin_employees(): void
                         <input type="hidden" name="vendor_id" value="<?= (int) $_GET['vendor_id'] ?>">
                     <?php endif; ?>
                     <div class="reports-filter-grid">
-                        <div class="field"><label>Emp ID</label><div class="field-row"><input type="text" name="emp_id" required></div><small class="field-error"><span>!</span>Emp ID is required.</small></div>
+                        <div class="field<?= ($employeeType === 'corporate' || $isFreelancer) ? ' hidden' : '' ?>" data-contractual-emp-id-field><label>Emp ID</label><div class="field-row"><input type="text" name="emp_id" <?= ($employeeType === 'corporate' || $isFreelancer) ? 'disabled' : 'required' ?>></div><small class="field-error"><span>!</span>Emp ID is required.</small></div>
                         <div class="field"><label>Name</label><div class="field-row"><input type="text" name="name" required></div><small class="field-error"><span>!</span>Name is required.</small></div>
                         <div class="field"><label>Email</label><div class="field-row"><input type="email" name="email" required></div><small class="field-error"><span>!</span>Valid email required.</small></div>
                         <div class="field"><label>Phone Number</label><div class="field-row"><input type="text" name="phone" required></div><small class="field-error"><span>!</span>Phone number required.</small></div>
@@ -577,7 +641,7 @@ function render_admin_employees(): void
                         <?php elseif ($isVendor): ?>
                             <input type="hidden" name="employee_type" value="vendor">
                         <?php else: ?>
-                            <div class="field"><label>Employee Type</label><div class="field-row"><select name="employee_type" required><option value="regular" <?= $employeeType === 'regular' ? 'selected' : '' ?>>Regular Employee</option><option value="corporate" <?= $employeeType === 'corporate' ? 'selected' : '' ?>>Contractual Employee</option></select></div><small class="field-error"><span>!</span>Employee type is required.</small></div>
+                            <div class="field"><label>Employee Type</label><div class="field-row"><select name="employee_type" required data-employee-type-select><option value="regular" <?= $employeeType === 'regular' ? 'selected' : '' ?>>Regular Employee</option><option value="corporate" <?= $employeeType === 'corporate' ? 'selected' : '' ?>>Contractual Employee</option></select></div><small class="field-error"><span>!</span>Employee type is required.</small></div>
                         <?php endif; ?>
                     </div>
                     <button class="button solid" type="submit" data-required-submit>Next</button>
@@ -905,39 +969,46 @@ function render_admin_rules(): void
                 <?php endif; ?>
             </div>
         </section>
-        <section class="section-block scroll-panel rules-assignment-panel">
-            <div class="split rules-section-head">
-                <div>
-                    <span class="eyebrow">Rule Assignment</span>
-                    <h2>Assign Employee Rules</h2>
-                </div>
-                <span class="hint">Choose employees, shift timing, punch type, and projects in one save.</span>
-            </div>
-            <form method="post" class="stack-form" data-rule-form data-employee-form>
-                <?= csrf_field() ?>
-                <input type="hidden" name="action" value="apply_rules">
-                <div class="employee-picker">
-                    <div class="split">
-                        <strong>Select Employees</strong>
-                        <span class="hint">Search and pick one or more employees</span>
+        <div class="rules-side-stack">
+            <section class="section-block scroll-panel rules-assignment-panel">
+                <div class="split rules-section-head">
+                    <div>
+                        <span class="eyebrow">Time Allocation</span>
+                        <h2>Time Allocation</h2>
                     </div>
-                    <input type="text" placeholder="Search employees..." data-employee-filter="employee-options">
-                    <div class="tag-list" id="selected-employee-tags"></div>
-                    <div class="employee-options" id="employee-options" data-tag-source="selected-employee-tags">
-                        <?php foreach ($allEmployees as $employee): ?>
-                            <label class="employee-option">
-                                <input type="checkbox" name="employee_ids[]" value="<?= (int) $employee['id'] ?>" data-label="<?= h($employee['name']) ?>">
-                                <span><?= h($employee['name']) ?> (<?= h($employee['emp_id']) ?>)</span>
-                            </label>
-                        <?php endforeach; ?>
+                    <span class="hint">Assign shift timing, punch type, and date ranges to selected employees.</span>
+                </div>
+                <form method="post" class="stack-form" data-rule-form data-employee-form>
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="action" value="apply_rules">
+                    <input type="hidden" name="allocation_type" value="time">
+                    <?php render_employee_assignment_picker($allEmployees, 'time-employee-options', 'time-selected-employee-tags'); ?>
+                    <?php render_rules_editor([], null, true, false, false, true, true); ?>
+                    <div class="inline-actions">
+                        <button class="button solid" type="submit" data-rule-submit>Save Time Allocation</button>
                     </div>
+                </form>
+            </section>
+            <section class="section-block scroll-panel rules-assignment-panel">
+                <div class="split rules-section-head">
+                    <div>
+                        <span class="eyebrow">Project Allocation</span>
+                        <h2>Project Allocation</h2>
+                    </div>
+                    <span class="hint">Assign project access for selected employees.</span>
                 </div>
-                <?php render_rules_editor([], null, true); ?>
-                <div class="inline-actions">
-                    <button class="button solid" type="submit" data-rule-submit>Save</button>
-                </div>
-            </form>
-        </section>
+                <form method="post" class="stack-form" data-rule-form data-employee-form data-project-allocation-form>
+                    <?= csrf_field() ?>
+                    <input type="hidden" name="action" value="apply_rules">
+                    <input type="hidden" name="allocation_type" value="project">
+                    <?php render_employee_assignment_picker($allEmployees, 'project-employee-options', 'project-selected-employee-tags'); ?>
+                    <?php render_project_assignment_picker([], 'project-allocation-options'); ?>
+                    <div class="inline-actions">
+                        <button class="button solid" type="submit" data-rule-submit>Save Project Allocation</button>
+                    </div>
+                </form>
+            </section>
+        </div>
     </section>
     <?php
     render_footer();
@@ -1010,6 +1081,7 @@ function render_calendar(string $context, array $employee, string $month, array 
     $attendanceCounts = attendance_counts($monthAttendance);
     $salaryBreakdown = employee_salary_breakdown_for_month($employee, $monthAttendance);
     $incentiveBreakdown = incentive_breakdown_for_month($monthAttendance);
+    $summaryIncentiveAmount = (float) (($incentiveBreakdown['amount'] ?? 0) > 0 ? $incentiveBreakdown['amount'] : ($incentiveBreakdown['assigned_amount'] ?? 0));
     ?>
     <div class="calendar-shell<?= $compact ? ' calendar-shell-compact' : '' ?>">
         <?php if ($calendarActionsHtml !== ''): ?>
@@ -1027,6 +1099,7 @@ function render_calendar(string $context, array $employee, string $month, array 
                 <span class="legend-chip"><span class="legend-swatch legend-present"></span>Present</span>
                 <span class="legend-chip"><span class="legend-swatch legend-absent"></span>Absent</span>
                 <span class="legend-chip"><span class="legend-swatch legend-leave"></span>Leave</span>
+                <span class="legend-chip"><span class="legend-swatch legend-week-off"></span>Week Off</span>
                 <span class="legend-chip"><span class="legend-swatch legend-pending"></span>Pending</span>
             <?php endif; ?>
         </div>
@@ -1118,7 +1191,7 @@ function render_calendar(string $context, array $employee, string $month, array 
                 <?php else: ?>
                     <div class="summary-card"><strong><?= (int) ($attendanceCounts['present'] ?? 0) ?></strong><span>Total Present Days</span></div>
                     <div class="summary-card"><strong><?= (int) ($attendanceCounts['half_day'] ?? 0) ?></strong><span>Half Days</span></div>
-                    <div class="summary-card"><strong>Rs <?= number_format((float) ($incentiveBreakdown['amount'] ?? 0), 2) ?></strong><span>Incentive</span></div>
+                    <div class="summary-card"><strong>Rs <?= number_format($summaryIncentiveAmount, 2) ?></strong><span>Incentive</span></div>
                     <div class="summary-card summary-highlight"><strong>Rs <?= number_format((float) ($salaryBreakdown['calculated_salary'] ?? 0), 2) ?></strong><span>Calculated Salary</span></div>
                 <?php endif; ?>
             </div>

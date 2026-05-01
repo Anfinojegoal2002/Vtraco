@@ -117,9 +117,10 @@ function update_attendance_session(int $sessionId, array $fields): void
 
 function add_attendance_session(int $attendanceId, array $payload): void
 {
-    db()->prepare('INSERT INTO attendance_sessions (attendance_id, session_mode, slot_name, punch_in_path, punch_in_lat, punch_in_lng, punch_in_time, punch_out_time, college_name, session_name, day_portion, session_duration, location, created_at) VALUES (:attendance_id, :session_mode, :slot_name, :punch_in_path, :punch_in_lat, :punch_in_lng, :punch_in_time, :punch_out_time, :college_name, :session_name, :day_portion, :session_duration, :location, :created_at)')
+    db()->prepare('INSERT INTO attendance_sessions (attendance_id, project_id, session_mode, slot_name, punch_in_path, punch_in_lat, punch_in_lng, punch_in_time, punch_out_time, college_name, session_name, day_portion, session_duration, location, created_at) VALUES (:attendance_id, :project_id, :session_mode, :slot_name, :punch_in_path, :punch_in_lat, :punch_in_lng, :punch_in_time, :punch_out_time, :college_name, :session_name, :day_portion, :session_duration, :location, :created_at)')
         ->execute([
             'attendance_id' => $attendanceId,
+            'project_id' => $payload['project_id'] ?? null,
             'session_mode' => $payload['session_mode'],
             'slot_name' => $payload['slot_name'] ?? null,
             'punch_in_path' => $payload['punch_in_path'] ?? null,
@@ -398,6 +399,27 @@ function month_attendance_for_user(int $userId, string $month): array
         $out[$key] = ['record' => $record, 'sessions' => $sessions];
     }
 
+    $dates = array_keys($out);
+    $totalDates = count($dates);
+    for ($index = 0; $index < $totalDates; $index++) {
+        $date = $dates[$index];
+        $status = strtoupper(trim((string) ($out[$date]['record']['status'] ?? '')));
+        if ($status !== 'ABSENT' || date('w', strtotime($date)) !== '0') {
+            continue;
+        }
+
+        $previousStatus = $index > 0
+            ? (string) ($out[$dates[$index - 1]]['record']['status'] ?? '')
+            : '';
+        $nextStatus = ($index + 1) < $totalDates
+            ? (string) ($out[$dates[$index + 1]]['record']['status'] ?? '')
+            : '';
+
+        if (week_off_counts_as_present($previousStatus) && week_off_counts_as_present($nextStatus)) {
+            $out[$date]['record']['status'] = 'Week Off';
+        }
+    }
+
     foreach (sandwich_week_off_absent_dates($out) as $absentDate) {
         if (!isset($out[$absentDate]['record'])) {
             continue;
@@ -647,11 +669,16 @@ function incentive_breakdown_for_month(array $monthAttendance): array
 {
     $fullDayCount = 0;
     $halfDayCount = 0;
+    $amount = 0.0;
+    $firstRecord = is_array(reset($monthAttendance)) ? (reset($monthAttendance)['record'] ?? []) : [];
+    $userIdForMonth = (int) ($firstRecord['user_id'] ?? 0);
+    $monthForIncentive = substr((string) ($firstRecord['attend_date'] ?? ''), 0, 7);
 
     foreach ($monthAttendance as $entry) {
         $sessions = is_array($entry['sessions'] ?? null) ? $entry['sessions'] : [];
-        $hasCompletedManual = false;
-        $hasFullDayManual = false;
+        $record = is_array($entry['record'] ?? null) ? $entry['record'] : [];
+        $userId = (int) ($record['user_id'] ?? 0);
+        $attendDate = (string) ($record['attend_date'] ?? '');
 
         foreach ($sessions as $session) {
             if (($session['session_mode'] ?? '') !== 'manual_pair') {
@@ -661,27 +688,22 @@ function incentive_breakdown_for_month(array $monthAttendance): array
                 continue;
             }
 
-            $hasCompletedManual = true;
-            if (($session['day_portion'] ?? 'Full Day') !== 'Half Day') {
-                $hasFullDayManual = true;
+            $projectIncentive = employee_project_incentive_for_date($userId, (int) ($session['project_id'] ?? 0), $attendDate);
+            if (($session['day_portion'] ?? 'Full Day') === 'Half Day') {
+                $halfDayCount++;
+                $amount += $projectIncentive > 0 ? ($projectIncentive / 2) : 50;
+            } else {
+                $fullDayCount++;
+                $amount += $projectIncentive > 0 ? $projectIncentive : 100;
             }
-        }
-
-        if (!$hasCompletedManual) {
-            continue;
-        }
-
-        if ($hasFullDayManual) {
-            $fullDayCount++;
-        } else {
-            $halfDayCount++;
         }
     }
 
     return [
         'full_day_count' => $fullDayCount,
         'half_day_count' => $halfDayCount,
-        'amount' => ($fullDayCount * 100) + ($halfDayCount * 50),
+        'amount' => round($amount, 2),
+        'assigned_amount' => assigned_project_incentive_total_for_month($userIdForMonth, $monthForIncentive),
     ];
 }
 
@@ -810,6 +832,9 @@ function attendance_report_cell_date(string $value, ?string $fallbackDate = null
     if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1) {
         return $value;
     }
+    if (preg_match('/^(\d{4}-\d{2}-\d{2})\s+\d{1,2}:\d{2}(?::\d{2})?$/', $value, $matches) === 1) {
+        return $matches[1];
+    }
 
     if ($fallbackDate !== null && preg_match('/^(\d{2})[\/\-](\d{2})[\/\-](\d{3})$/', $value, $matches) === 1) {
         $fallbackYear = (int) substr($fallbackDate, 0, 4);
@@ -852,11 +877,27 @@ function attendance_report_time(?string $date, string $value): ?string
         return null;
     }
 
-    if (preg_match('/^\d{1,2}:\d$/', $value) === 1) {
-        $value .= '0';
+    if (preg_match('/^\d{4}-\d{2}-\d{2}\s+(\d{1,2}:\d{2}(?::\d{2})?)$/', $value, $matches) === 1) {
+        $value = $matches[1];
     }
-    if (preg_match('/^\d{1,2}:\d{2}:\d$/', $value) === 1) {
-        $value .= '0';
+
+    if (preg_match('/^(\d{1,2})[:.](\d{1,2})(?:[:.](\d{1,2}))?\s*(AM|PM)?$/i', $value, $matches) === 1) {
+        $hour = (int) $matches[1];
+        $minute = (int) $matches[2];
+        $second = isset($matches[3]) && $matches[3] !== '' ? (int) $matches[3] : 0;
+        $meridiem = strtoupper((string) ($matches[4] ?? ''));
+        $validHour = $meridiem !== '' ? ($hour >= 1 && $hour <= 12) : ($hour >= 0 && $hour <= 23);
+        if ($validHour && $minute >= 0 && $minute <= 59 && $second >= 0 && $second <= 59) {
+            if ($meridiem !== '') {
+                if ($meridiem === 'PM' && $hour < 12) {
+                    $hour += 12;
+                } elseif ($meridiem === 'AM' && $hour === 12) {
+                    $hour = 0;
+                }
+            }
+
+            return sprintf('%s %02d:%02d:%02d', $date, $hour, $minute, $second);
+        }
     }
 
     if (is_numeric($value)) {
@@ -871,14 +912,6 @@ function attendance_report_time(?string $date, string $value): ?string
                 return sprintf('%s %02d:%02d:%02d', $date, $hours, $minutes, $remainingSeconds);
             }
         }
-    }
-
-    if (preg_match('/^\d{4}-\d{2}-\d{2}\s+(\d{1,2}:\d{2}(?::\d{2})?)$/', $value, $matches) === 1) {
-        $value = $matches[1];
-    }
-
-    if (preg_match('/^([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?\s*(AM|PM)$/i', $value, $matches) === 1) {
-        $value = sprintf('%02d:%02d:%02d', (int) $matches[1], (int) $matches[2], (int) ($matches[3] ?? 0));
     }
 
     foreach (['H:i', 'H:i:s', 'g:i A', 'g:iA', 'h:i A', 'h:iA'] as $format) {
@@ -923,7 +956,30 @@ function attendance_import_status(string $rawStatus, ?string $inTime, ?string $o
 
 function attendance_import_status_for_employee(array $employee, string $date, string $rawStatus, ?string $inTime, ?string $outTime): string
 {
-    return attendance_import_status($rawStatus, $inTime, $outTime);
+    $status = attendance_import_status($rawStatus, $inTime, $outTime);
+    if ($status === 'Absent' && $inTime === null && $outTime === null && date('w', strtotime($date)) === '0') {
+        return 'Week Off';
+    }
+
+    $shiftWindow = shift_window_for_employee($employee);
+    if ($shiftWindow !== null && $inTime !== null && $outTime !== null) {
+        $shiftStart = strtotime($date . ' ' . $shiftWindow['start_time']);
+        $shiftEnd = strtotime($date . ' ' . $shiftWindow['end_time']);
+        $actualIn = strtotime($inTime);
+        $actualOut = strtotime($outTime);
+        if ($shiftStart !== false && $shiftEnd !== false && $actualIn !== false && $actualOut !== false) {
+            if ($shiftEnd < $shiftStart) {
+                $shiftEnd += 86400;
+            }
+            if ($actualOut < $actualIn) {
+                $actualOut += 86400;
+            }
+
+            return ($actualIn > $shiftStart || $actualOut < $shiftEnd) ? 'Half Day' : 'Present';
+        }
+    }
+
+    return $status;
 }
 
 function detect_attendance_csv_delimiter(array $rawLines): string
@@ -1241,7 +1297,19 @@ function attendance_extract_binary_xls_rows(string $path): array
         throw new RuntimeException($message !== '' ? $message : 'Unable to read the .xls workbook.');
     }
 
-    return $xls->rows();
+    return array_map(static function (array $row): array {
+        return array_map(static function ($cell): string {
+            if (is_array($cell)) {
+                if (($cell['t'] ?? '') === 'd' && isset($cell['raw']) && is_numeric($cell['raw'])) {
+                    return gmdate('Y-m-d H:i:s', (int) round((float) $cell['raw']));
+                }
+
+                return (string) ($cell['value'] ?? '');
+            }
+
+            return (string) $cell;
+        }, $row);
+    }, $xls->rowsEx());
 }
 
 function attendance_binary_xls_full_emp_codes(string $path): array
@@ -1358,6 +1426,42 @@ function attendance_first_non_empty_column_value(array $row, array $columns): st
     }
 
     return '';
+}
+
+function attendance_first_time_from_columns(string $date, array $row, array $columns): ?string
+{
+    $times = [];
+    foreach ($columns as $columnIndex) {
+        $time = attendance_report_time($date, trim((string) ($row[$columnIndex] ?? '')));
+        if ($time !== null) {
+            $times[] = $time;
+        }
+    }
+
+    if ($times === []) {
+        return null;
+    }
+
+    sort($times);
+    return $times[0];
+}
+
+function attendance_last_time_from_columns(string $date, array $row, array $columns): ?string
+{
+    $times = [];
+    foreach ($columns as $columnIndex) {
+        $time = attendance_report_time($date, trim((string) ($row[$columnIndex] ?? '')));
+        if ($time !== null) {
+            $times[] = $time;
+        }
+    }
+
+    if ($times === []) {
+        return null;
+    }
+
+    sort($times);
+    return $times[count($times) - 1];
 }
 
 function attendance_month_year_from_title(array $rows): ?array
@@ -2038,6 +2142,7 @@ function import_attendance_report_csv(string $path, ?string $overrideDate = null
 
         update_attendance_record((int) $employee['id'], (string) $entry['date'], [
             'status' => $resolvedStatus,
+            'admin_override_status' => null,
             'biometric_in_time' => $entry['biometric_in_time'],
             'biometric_out_time' => $entry['biometric_out_time'],
             'shift_start_time' => $shiftWindow['start_time'] ?? null,

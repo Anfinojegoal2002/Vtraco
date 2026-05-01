@@ -137,7 +137,7 @@ function assigned_projects_for_employee(int $userId): array
 {
     $adminId = project_scope_admin_id();
     $adminSql = $adminId !== null ? ' AND p.admin_id = :admin_id' : '';
-    $stmt = db()->prepare('SELECT p.*
+    $stmt = db()->prepare('SELECT p.*, a.project_from, a.project_to, a.project_incentive
         FROM employee_project_assignments a
         INNER JOIN projects p ON p.id = a.project_id
         WHERE a.user_id = :user_id' . $adminSql . '
@@ -153,25 +153,124 @@ function assigned_projects_for_employee(int $userId): array
 
 function employee_available_projects(array $employee): array
 {
-    if (!empty($employee['use_assigned_projects'])) {
-        $assignedProjects = assigned_projects_for_employee((int) ($employee['id'] ?? 0));
-        if ($assignedProjects !== []) {
-            return $assignedProjects;
-        }
+    $assignedProjects = assigned_projects_for_employee((int) ($employee['id'] ?? 0));
+
+    return array_values(array_filter(
+        $assignedProjects,
+        static fn (array $project): bool => !empty($project['is_active'])
+    ));
+}
+
+function project_is_available_for_date(array $project, string $date): bool
+{
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return false;
     }
 
-    return active_projects(project_scope_admin_id($employee));
+    $from = substr(trim((string) ($project['project_from'] ?? '')), 0, 10);
+    $to = substr(trim((string) ($project['project_to'] ?? '')), 0, 10);
+
+    if ($from !== '' && $date < $from) {
+        return false;
+    }
+    if ($to !== '' && $date > $to) {
+        return false;
+    }
+
+    return true;
+}
+
+function employee_available_projects_for_date(array $employee, string $date): array
+{
+    return array_values(array_filter(
+        employee_available_projects($employee),
+        static fn (array $project): bool => project_is_available_for_date($project, $date)
+    ));
 }
 
 function employee_available_project_ids(array $employee): array
 {
     return array_values(array_filter(array_map(
         static fn (array $project): int => (int) ($project['id'] ?? 0),
-        employee_available_projects($employee)
+        assigned_projects_for_employee((int) ($employee['id'] ?? 0))
     )));
 }
 
-function save_employee_project_assignments(int $userId, array $projectIds): array
+function employee_project_incentive_for_date(int $userId, int $projectId, string $date): float
+{
+    if ($userId <= 0 || $projectId <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return 0.0;
+    }
+
+    $stmt = db()->prepare('SELECT project_incentive FROM employee_project_assignments
+        WHERE user_id = :user_id
+          AND project_id = :project_id
+          AND (project_from IS NULL OR project_from <= :attend_date)
+          AND (project_to IS NULL OR project_to >= :attend_date)
+        LIMIT 1');
+    $stmt->execute([
+        'user_id' => $userId,
+        'project_id' => $projectId,
+        'attend_date' => $date,
+    ]);
+
+    return round((float) ($stmt->fetchColumn() ?: 0), 2);
+}
+
+function assigned_project_incentive_total_for_month(int $userId, string $month): float
+{
+    if ($userId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) {
+        return 0.0;
+    }
+
+    [$start, $end] = month_bounds($month);
+    $startDate = $start->format('Y-m-d');
+    $endDate = $end->format('Y-m-d');
+    $stmt = db()->prepare('SELECT project_from, project_to, project_incentive
+        FROM employee_project_assignments
+        WHERE user_id = :user_id
+          AND project_incentive > 0
+          AND (project_from IS NULL OR project_from <= :end_date)
+          AND (project_to IS NULL OR project_to >= :start_date)');
+    $stmt->execute([
+        'user_id' => $userId,
+        'start_date' => $startDate,
+        'end_date' => $endDate,
+    ]);
+
+    $total = 0.0;
+    foreach ($stmt->fetchAll() as $row) {
+        $total += (float) ($row['project_incentive'] ?? 0);
+    }
+
+    return round($total, 2);
+}
+
+function normalize_project_assignment_ranges(array $fromValues, array $toValues, array $projectIds, array $incentiveValues = []): array
+{
+    $normalizedProjectIds = normalize_project_assignment_ids($projectIds);
+    $ranges = [];
+
+    foreach ($normalizedProjectIds as $projectId) {
+        $from = trim((string) ($fromValues[$projectId] ?? ''));
+        $to = trim((string) ($toValues[$projectId] ?? ''));
+        $incentive = max(0.0, round((float) ($incentiveValues[$projectId] ?? 0), 2));
+        $from = preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) ? $from : '';
+        $to = preg_match('/^\d{4}-\d{2}-\d{2}$/', $to) ? $to : '';
+        if ($from !== '' && $to !== '' && $from > $to) {
+            [$from, $to] = [$to, $from];
+        }
+        $ranges[$projectId] = [
+            'from' => $from,
+            'to' => $to,
+            'incentive' => $incentive,
+        ];
+    }
+
+    return $ranges;
+}
+
+function save_employee_project_assignments(int $userId, array $projectIds, array $projectRanges = []): array
 {
     $normalizedProjectIds = normalize_project_assignment_ids($projectIds);
     $pdo = db();
@@ -186,13 +285,17 @@ function save_employee_project_assignments(int $userId, array $projectIds): arra
             ->execute(['user_id' => $userId]);
 
         if ($normalizedProjectIds !== []) {
-            $insert = $pdo->prepare('INSERT INTO employee_project_assignments (user_id, project_id, created_at)
-                VALUES (:user_id, :project_id, :created_at)');
+            $insert = $pdo->prepare('INSERT INTO employee_project_assignments (user_id, project_id, project_from, project_to, project_incentive, created_at)
+                VALUES (:user_id, :project_id, :project_from, :project_to, :project_incentive, :created_at)');
 
             foreach ($normalizedProjectIds as $projectId) {
+                $range = $projectRanges[$projectId] ?? ['from' => '', 'to' => ''];
                 $insert->execute([
                     'user_id' => $userId,
                     'project_id' => $projectId,
+                    'project_from' => ($range['from'] ?? '') !== '' ? $range['from'] : null,
+                    'project_to' => ($range['to'] ?? '') !== '' ? $range['to'] : null,
+                    'project_incentive' => max(0.0, round((float) ($range['incentive'] ?? 0), 2)),
                     'created_at' => now(),
                 ]);
             }

@@ -929,28 +929,41 @@ function handle_post_action(string $action): void
         case 'apply_rules':
             require_role('admin');
             $ids = array_map('intval', $_POST['employee_ids'] ?? []);
+            $allocationType = (string) ($_POST['allocation_type'] ?? 'all');
             $rules = normalize_rules_from_input($_POST);
             if (!$ids) {
                 flash('error', 'Select at least one employee.');
                 redirect_to('admin_rules');
             }
+            $projectIds = array_map('intval', $_POST['project_ids'] ?? []);
+            $projectRanges = normalize_project_assignment_ranges($_POST['project_from'] ?? [], $_POST['project_to'] ?? [], $projectIds, $_POST['project_incentive'] ?? []);
             $updated = 0;
             foreach ($ids as $id) {
                 $employee = employee_by_id($id);
                 if (!$employee) {
                     continue;
                 }
-                save_employee_rules((int) $employee['id'], $rules);
-                $projectIds = array_map('intval', $_POST['project_ids'] ?? []);
-                save_employee_project_assignments((int) $employee['id'], $projectIds);
-                send_rules_updated_email($employee, $rules);
+                $currentRules = $rules;
+                if ($allocationType === 'time' || $allocationType === 'all') {
+                    save_employee_rules((int) $employee['id'], $rules);
+                    $currentRules = $rules;
+                }
+                if ($allocationType === 'project' || $allocationType === 'all') {
+                    save_employee_project_assignments((int) $employee['id'], $projectIds, $projectRanges);
+                    if ($allocationType === 'project') {
+                        $currentRules = employee_rules((int) $employee['id']);
+                    }
+                }
+                send_rules_updated_email($employee, $currentRules);
                 $updated++;
             }
             audit_log('employee_rules_updated_bulk', [
                 'employee_count' => $updated,
+                'allocation_type' => $allocationType,
                 'rules' => $rules,
             ]);
-            flash($updated > 0 ? 'success' : 'error', $updated > 0 ? 'Rules applied successfully.' : 'No employees were available for this administrator.');
+            $successMessage = $allocationType === 'project' ? 'Project allocation saved successfully.' : 'Time allocation saved successfully.';
+            flash($updated > 0 ? 'success' : 'error', $updated > 0 ? $successMessage : 'No employees were available for this administrator.');
             redirect_to('admin_rules');
             break;
 
@@ -999,6 +1012,9 @@ function handle_post_action(string $action): void
                 redirect_to('admin_attendance');
             }
             $status = (string) ($_POST['status'] ?? 'Absent');
+            if (!in_array($status, ['Present', 'Absent', 'Half Day', 'Leave', 'Week Off'], true)) {
+                $status = 'Absent';
+            }
             update_attendance_record((int) $employee['id'], (string) ($_POST['attend_date'] ?? ''), [
                 'status' => $status,
                 'admin_override_status' => $status,
@@ -1238,10 +1254,23 @@ function handle_post_action(string $action): void
                 if (is_week_off_for_user_date((int) $employee['id'], $date)) {
                     throw new RuntimeException('Week Off dates do not require attendance.');
                 }
+                $dateProjects = employee_available_projects_for_date($employee, $date);
+                if ($dateProjects === []) {
+                    throw new RuntimeException('Manual Punch In is available only on assigned project dates.');
+                }
                 $rules = employee_rules((int) $employee['id']);
+                $allowedProjects = [];
+                foreach ($dateProjects as $project) {
+                    $allowedProjects[(int) ($project['id'] ?? 0)] = $project;
+                }
+                $projectId = (int) ($_POST['project_id'] ?? 0);
+                $selectedProject = $allowedProjects[$projectId] ?? null;
+                if (!$selectedProject) {
+                    throw new RuntimeException('Select an assigned project available for this date.');
+                }
                 $slotIndex = max(1, (int) ($_POST['slot_index'] ?? 1));
-                $slotLimit = max(1, manual_slot_limit($rules));
-                if (empty($rules['manual_punch_in'])) {
+                $slotLimit = max(1, manual_slot_limit($rules), count($dateProjects));
+                if (empty($rules['manual_punch_in']) && $dateProjects === []) {
                     throw new RuntimeException('Manual Punch In is not enabled for this employee.');
                 }
                 if ($slotIndex > $slotLimit) {
@@ -1251,7 +1280,8 @@ function handle_post_action(string $action): void
                     throw new RuntimeException('Manual Punch In ' . $slotIndex . ' requires a photo upload.');
                 }
 
-                $slotName = trim((string) ($_POST['slot_name'] ?? '')) ?: manual_slot_name($rules, $slotIndex);
+                $projectSlotLabel = trim((string) ($selectedProject['project_name'] ?? '')) ?: 'Project';
+                $slotName = 'Project #' . $projectId . ': ' . $projectSlotLabel;
                 $record = ensure_attendance_record((int) $employee['id'], $date);
                 $existingSession = attendance_session_by_slot((int) $record['id'], $slotName);
                 if (!$existingSession && $slotIndex === 1 && !empty($record['punch_in_path'])) {
@@ -1263,6 +1293,7 @@ function handle_post_action(string $action): void
 
                 $path = handle_upload($_FILES['punch_photo'] ?? []);
                 $sessionPayload = [
+                    'project_id' => $projectId,
                     'session_mode' => 'manual_pair',
                     'slot_name' => $slotName,
                     'punch_in_path' => $path,
@@ -1307,9 +1338,23 @@ function handle_post_action(string $action): void
                 redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
             }
             $rules = employee_rules((int) $employee['id']);
+            $dateProjects = employee_available_projects_for_date($employee, $date);
+            if ($dateProjects === []) {
+                flash('error', 'Manual Punch Out is available only on assigned project dates.');
+                redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
+            }
+            $allowedProjects = [];
+            foreach ($dateProjects as $project) {
+                $allowedProjects[(int) ($project['id'] ?? 0)] = $project;
+            }
             $slotIndex = max(1, (int) ($_POST['slot_index'] ?? 1));
-            $slotLimit = max(1, manual_slot_limit($rules));
-            $slotName = trim((string) ($_POST['slot_name'] ?? '')) ?: manual_slot_name($rules, $slotIndex);
+            $slotLimit = max(1, manual_slot_limit($rules), count($dateProjects));
+            $projectId = (int) ($_POST['project_id'] ?? 0);
+            $selectedProject = $allowedProjects[$projectId] ?? null;
+            $projectSlotLabel = $selectedProject ? (trim((string) ($selectedProject['project_name'] ?? '')) ?: 'Project') : '';
+            $slotName = $selectedProject
+                ? 'Project #' . $projectId . ': ' . $projectSlotLabel
+                : (trim((string) ($_POST['slot_name'] ?? '')) ?: manual_slot_name($rules, $slotIndex));
             $record = ensure_attendance_record((int) $employee['id'], $date);
             $session = attendance_session_by_slot((int) $record['id'], $slotName);
             $collegeName = trim((string) ($_POST['college_name'] ?? ''));
@@ -1318,7 +1363,7 @@ function handle_post_action(string $action): void
             $sessionDuration = (float) ($_POST['session_duration'] ?? 0);
             $location = trim((string) ($_POST['location'] ?? ''));
 
-            if (empty($rules['manual_punch_out'])) {
+            if (empty($rules['manual_punch_out']) && $dateProjects === []) {
                 flash('error', 'Manual Punch Out is not enabled for this employee.');
                 redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
             }
@@ -1345,12 +1390,17 @@ function handle_post_action(string $action): void
                 flash('error', 'Manual Punch Out ' . $slotIndex . ' is already submitted for this date.');
                 redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
             }
+            if (!$selectedProject) {
+                flash('error', 'Select an assigned project available for this date.');
+                redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
+            }
             if ($collegeName === '' || $sessionName === '' || $location === '' || $sessionDuration <= 0) {
-                flash('error', 'Manual Punch Out ' . $slotIndex . ' requires College Name, Session Name, Session Duration, and Location.');
+                flash('error', 'Manual Punch Out ' . $slotIndex . ' requires Project, College Name, Session Name, Session Duration, and Location.');
                 redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
             }
 
             update_attendance_session((int) $session['id'], [
+                'project_id' => $projectId,
                 'session_mode' => 'manual_pair',
                 'college_name' => $collegeName,
                 'session_name' => $sessionName,
@@ -1359,11 +1409,9 @@ function handle_post_action(string $action): void
                 'location' => $location,
                 'punch_out_time' => now(),
             ]);
-            $updatedRecord = $record;
-            $updatedRecord['status'] = ($dayPortion === 'Half Day') ? 'Half Day' : 'Present';
-            $updatedSessions = attendance_sessions((int) $record['id']);
             update_attendance_record((int) $employee['id'], $date, [
-                'status' => resolved_attendance_status($updatedRecord, $updatedSessions),
+                'status' => 'Pending',
+                'admin_override_status' => 'Pending',
             ]);
             audit_log('employee_manual_punch_out_submitted', [
                 'attend_date' => $date,

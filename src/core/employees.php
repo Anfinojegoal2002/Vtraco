@@ -372,6 +372,12 @@ function normalize_rules_from_input(array $source): array
     $manualEnabled = !empty($source['manual_punch']) || !empty($source['manual_punch_in']) || !empty($source['manual_punch_out']);
     $biometricEnabled = !empty($source['biometric_punch']) || !empty($source['biometric_punch_in']) || !empty($source['biometric_punch_out']);
     $count = max(1, (int) ($source['manual_out_count'] ?? 1));
+    $projectSessionFrom = normalize_rule_date_value($source['project_session_from'] ?? '');
+    $projectSessionTo = normalize_rule_date_value($source['project_session_to'] ?? '');
+    $employeeFrom = normalize_rule_date_value($source['employee_from'] ?? '');
+    $employeeTo = normalize_rule_date_value($source['employee_to'] ?? '');
+    [$projectSessionFrom, $projectSessionTo] = ordered_rule_date_range($projectSessionFrom, $projectSessionTo);
+    [$employeeFrom, $employeeTo] = ordered_rule_date_range($employeeFrom, $employeeTo);
 
     return [
         'manual_punch_in' => $manualEnabled,
@@ -379,7 +385,26 @@ function normalize_rules_from_input(array $source): array
         'manual_out_count' => $manualEnabled ? $count : 0,
         'biometric_punch_in' => $biometricEnabled,
         'biometric_punch_out' => $biometricEnabled,
+        'project_session_from' => $projectSessionFrom,
+        'project_session_to' => $projectSessionTo,
+        'employee_from' => $employeeFrom,
+        'employee_to' => $employeeTo,
     ];
+}
+
+function normalize_rule_date_value(mixed $value): string
+{
+    $date = trim((string) $value);
+    return preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) ? $date : '';
+}
+
+function ordered_rule_date_range(string $from, string $to): array
+{
+    if ($from !== '' && $to !== '' && $from > $to) {
+        return [$to, $from];
+    }
+
+    return [$from, $to];
 }
 
 function save_employee_rules(int $userId, array $rules): void
@@ -394,7 +419,7 @@ function save_employee_rules(int $userId, array $rules): void
     try {
         $pdo->prepare('DELETE FROM employee_rules WHERE user_id = :user_id')->execute(['user_id' => $userId]);
 
-        $insert = $pdo->prepare('INSERT INTO employee_rules (user_id, rule_type, slot_name, sort_order, created_at) VALUES (:user_id, :rule_type, :slot_name, :sort_order, :created_at)');
+        $insert = $pdo->prepare('INSERT INTO employee_rules (user_id, rule_type, slot_name, project_session_from, project_session_to, employee_from, employee_to, sort_order, created_at) VALUES (:user_id, :rule_type, :slot_name, :project_session_from, :project_session_to, :employee_from, :employee_to, :sort_order, :created_at)');
         $order = 0;
 
         foreach (['manual_punch_in', 'biometric_punch_in', 'biometric_punch_out'] as $type) {
@@ -403,10 +428,28 @@ function save_employee_rules(int $userId, array $rules): void
                     'user_id' => $userId,
                     'rule_type' => $type,
                     'slot_name' => null,
+                    'project_session_from' => null,
+                    'project_session_to' => null,
+                    'employee_from' => null,
+                    'employee_to' => null,
                     'sort_order' => $order++,
                     'created_at' => now(),
                 ]);
             }
+        }
+
+        if (!empty($rules['project_session_from']) || !empty($rules['project_session_to']) || !empty($rules['employee_from']) || !empty($rules['employee_to'])) {
+            $insert->execute([
+                'user_id' => $userId,
+                'rule_type' => 'rule_dates',
+                'slot_name' => null,
+                'project_session_from' => $rules['project_session_from'] ?: null,
+                'project_session_to' => $rules['project_session_to'] ?: null,
+                'employee_from' => $rules['employee_from'] ?: null,
+                'employee_to' => $rules['employee_to'] ?: null,
+                'sort_order' => $order++,
+                'created_at' => now(),
+            ]);
         }
 
         if (!empty($rules['manual_punch_out'])) {
@@ -415,6 +458,10 @@ function save_employee_rules(int $userId, array $rules): void
                     'user_id' => $userId,
                     'rule_type' => 'manual_punch_out',
                     'slot_name' => 'Manual Punch Slot ' . $i,
+                    'project_session_from' => null,
+                    'project_session_to' => null,
+                    'employee_from' => null,
+                    'employee_to' => null,
                     'sort_order' => $order++,
                     'created_at' => now(),
                 ]);
@@ -435,7 +482,7 @@ function save_employee_rules(int $userId, array $rules): void
 
 function employee_rules(int $userId): array
 {
-    $stmt = db()->prepare('SELECT rule_type, slot_name FROM employee_rules WHERE user_id = :user_id ORDER BY sort_order, id');
+    $stmt = db()->prepare('SELECT rule_type, slot_name, project_session_date, employee_date, project_session_from, project_session_to, employee_from, employee_to FROM employee_rules WHERE user_id = :user_id ORDER BY sort_order, id');
     $stmt->execute(['user_id' => $userId]);
     $rules = [
         'manual_punch_in' => false,
@@ -444,6 +491,10 @@ function employee_rules(int $userId): array
         'manual_out_slots' => [],
         'biometric_punch_in' => false,
         'biometric_punch_out' => false,
+        'project_session_from' => '',
+        'project_session_to' => '',
+        'employee_from' => '',
+        'employee_to' => '',
     ];
 
     foreach ($stmt->fetchAll() as $row) {
@@ -451,6 +502,11 @@ function employee_rules(int $userId): array
             $rules['manual_punch_out'] = true;
             $rules['manual_out_count']++;
             $rules['manual_out_slots'][] = $row['slot_name'] ?: 'Manual Punch Slot';
+        } elseif ($row['rule_type'] === 'rule_dates') {
+            $rules['project_session_from'] = substr((string) (($row['project_session_from'] ?? '') ?: ($row['project_session_date'] ?? '')), 0, 10);
+            $rules['project_session_to'] = substr((string) ($row['project_session_to'] ?? ''), 0, 10);
+            $rules['employee_from'] = substr((string) (($row['employee_from'] ?? '') ?: ($row['employee_date'] ?? '')), 0, 10);
+            $rules['employee_to'] = substr((string) ($row['employee_to'] ?? ''), 0, 10);
         } else {
             $rules[$row['rule_type']] = true;
         }
@@ -474,7 +530,22 @@ function rules_summary(array $rules): string
     if (!empty($rules['biometric_punch_out'])) {
         $parts[] = 'Biometric Punch Out';
     }
+    if (!empty($rules['project_session_from']) || !empty($rules['project_session_to'])) {
+        $parts[] = 'Project Session: ' . rule_date_range_label((string) $rules['project_session_from'], (string) $rules['project_session_to']);
+    }
+    if (!empty($rules['employee_from']) || !empty($rules['employee_to'])) {
+        $parts[] = 'Employee: ' . rule_date_range_label((string) $rules['employee_from'], (string) $rules['employee_to']);
+    }
     return $parts ? implode('<br>', array_map('h', $parts)) : '<span class="muted">No rules assigned</span>';
+}
+
+function rule_date_range_label(string $from, string $to): string
+{
+    if ($from !== '' && $to !== '') {
+        return $from . ' - ' . $to;
+    }
+
+    return $from !== '' ? ('from ' . $from) : ('to ' . $to);
 }
 
 function rules_explanation_html(array $rules): string
@@ -491,6 +562,12 @@ function rules_explanation_html(array $rules): string
     }
     if (!empty($rules['biometric_punch_out'])) {
         $parts[] = 'Biometric Punch Out: record a biometric punch-out time.';
+    }
+    if (!empty($rules['project_session_from']) || !empty($rules['project_session_to'])) {
+        $parts[] = 'Project Session: ' . rule_date_range_label((string) $rules['project_session_from'], (string) $rules['project_session_to']) . '.';
+    }
+    if (!empty($rules['employee_from']) || !empty($rules['employee_to'])) {
+        $parts[] = 'Employee: ' . rule_date_range_label((string) $rules['employee_from'], (string) $rules['employee_to']) . '.';
     }
     return implode('<br>', array_map('h', $parts));
 }

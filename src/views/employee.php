@@ -14,6 +14,9 @@ function render_employee_attendance(): void
             'college_name' => (string) ($project['college_name'] ?? ''),
             'location' => (string) ($project['location'] ?? ''),
             'session_type' => (string) ($project['session_type'] ?? ''),
+            'project_from' => (string) ($project['project_from'] ?? ''),
+            'project_to' => (string) ($project['project_to'] ?? ''),
+            'project_incentive' => number_format((float) ($project['project_incentive'] ?? 0), 2, '.', ''),
         ];
     }, employee_available_projects($employee));
 

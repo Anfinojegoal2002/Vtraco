@@ -195,11 +195,58 @@ function initialize_database(): void
         user_id INT UNSIGNED NOT NULL,
         rule_type VARCHAR(100) NOT NULL,
         slot_name VARCHAR(191) NULL,
+        project_session_date DATE NULL,
+        employee_date DATE NULL,
+        project_session_from DATE NULL,
+        project_session_to DATE NULL,
+        employee_from DATE NULL,
+        employee_to DATE NULL,
         sort_order INT NOT NULL DEFAULT 0,
         created_at DATETIME NOT NULL,
         INDEX idx_employee_rules_user_id (user_id),
         CONSTRAINT fk_employee_rules_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    if (!table_has_column($pdo, 'employee_rules', 'project_session_date')) {
+        $pdo->exec('ALTER TABLE employee_rules ADD COLUMN project_session_date DATE NULL AFTER slot_name');
+    }
+    if (!table_has_column($pdo, 'employee_rules', 'employee_date')) {
+        $pdo->exec('ALTER TABLE employee_rules ADD COLUMN employee_date DATE NULL AFTER project_session_date');
+    }
+    if (!table_has_column($pdo, 'employee_rules', 'project_session_from')) {
+        $pdo->exec('ALTER TABLE employee_rules ADD COLUMN project_session_from DATE NULL AFTER employee_date');
+    }
+    if (!table_has_column($pdo, 'employee_rules', 'project_session_to')) {
+        $pdo->exec('ALTER TABLE employee_rules ADD COLUMN project_session_to DATE NULL AFTER project_session_from');
+    }
+    if (!table_has_column($pdo, 'employee_rules', 'employee_from')) {
+        $pdo->exec('ALTER TABLE employee_rules ADD COLUMN employee_from DATE NULL AFTER project_session_to');
+    }
+    if (!table_has_column($pdo, 'employee_rules', 'employee_to')) {
+        $pdo->exec('ALTER TABLE employee_rules ADD COLUMN employee_to DATE NULL AFTER employee_from');
+    }
+    $pdo->exec("CREATE TABLE IF NOT EXISTS employee_project_assignments (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        user_id INT UNSIGNED NOT NULL,
+        project_id INT UNSIGNED NOT NULL,
+        project_from DATE NULL,
+        project_to DATE NULL,
+        project_incentive DECIMAL(12,2) NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL,
+        UNIQUE KEY uniq_employee_project_assignment (user_id, project_id),
+        INDEX idx_employee_project_assignments_user_id (user_id),
+        INDEX idx_employee_project_assignments_project_id (project_id),
+        CONSTRAINT fk_employee_project_assignments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_employee_project_assignments_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    if (!table_has_column($pdo, 'employee_project_assignments', 'project_from')) {
+        $pdo->exec('ALTER TABLE employee_project_assignments ADD COLUMN project_from DATE NULL AFTER project_id');
+    }
+    if (!table_has_column($pdo, 'employee_project_assignments', 'project_to')) {
+        $pdo->exec('ALTER TABLE employee_project_assignments ADD COLUMN project_to DATE NULL AFTER project_from');
+    }
+    if (!table_has_column($pdo, 'employee_project_assignments', 'project_incentive')) {
+        $pdo->exec('ALTER TABLE employee_project_assignments ADD COLUMN project_incentive DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER project_to');
+    }
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS shift_timings (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

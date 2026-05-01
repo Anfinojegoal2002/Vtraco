@@ -914,20 +914,7 @@ function paid_amount_for_employee_month(int $employeeId, string $paymentType, st
 
 function incentive_total_for_employee_month(int $employeeId, string $month): float
 {
-    [$start, $end] = payment_month_bounds($month);
-    $stmt = db()->prepare('SELECT COALESCE(SUM(r.incentive_earned), 0)
-        FROM attendance_records ar
-        JOIN attendance_sessions s ON s.attendance_id = ar.id
-        LEFT JOIN reimbursements r ON r.attendance_session_id = s.id
-        WHERE ar.user_id = :user_id
-          AND ar.attend_date BETWEEN :start_date AND :end_date');
-    $stmt->execute([
-        'user_id' => $employeeId,
-        'start_date' => $start,
-        'end_date' => $end,
-    ]);
-
-    return round((float) $stmt->fetchColumn(), 2);
+    return round((float) (incentive_breakdown_for_month(month_attendance_for_user($employeeId, $month))['amount'] ?? 0), 2);
 }
 
 function payment_request_rows(string $month): array

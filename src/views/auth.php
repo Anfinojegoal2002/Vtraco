@@ -234,7 +234,7 @@ function render_register(): void
             </div>
             <div class="field">
                 <label>Phone Number</label>
-                <div class="field-row"><input type="text" name="phone" placeholder="Phone number" required></div>
+                <div class="field-row"><input type="text" name="phone" placeholder="+91" required></div>
                 <small class="field-error"><span>!</span>Phone number is required.</small>
             </div>
             <div class="field">

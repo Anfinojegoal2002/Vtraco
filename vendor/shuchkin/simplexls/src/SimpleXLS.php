@@ -1181,11 +1181,13 @@ class SimpleXLS
                 case self::TYPE_LABEL:
                     $row    = $this->getInt2d($spos);
                     $column = $this->getInt2d($spos + 2);
-                    $string = substr(
-                        $this->data,
-                        $spos + 8,
-                        ord($this->data[ $spos + 6 ]) | ord($this->data[ $spos + 7 ]) << 8
-                    );
+                    $stringLength = ord($this->data[ $spos + 6 ]) | ord($this->data[ $spos + 7 ]) << 8;
+                    $stringOption = ord($this->data[ $spos + 8 ]);
+                    if (($stringOption & 0x01) === 0x01) {
+                        $string = $this->UTF16toDef(substr($this->data, $spos + 9, $stringLength * 2));
+                    } else {
+                        $string = $this->latin1toDef(substr($this->data, $spos + 9, $stringLength));
+                    }
                     $this->addCell($row, $column, $string, '', $t_code, 'inlineStr');
 
                     // $this->addcell(LabelRecord($r));

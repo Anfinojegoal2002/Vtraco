@@ -103,7 +103,7 @@ function render_header(string $title, string $pageClass = ''): void
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Merriweather:wght@300;400;700;900&display=swap" rel="stylesheet">
         <link rel="icon" type="image/svg+xml" href="<?= h(asset_url('assets/images/vtraco-logo.svg')) ?>">
-        <link rel="stylesheet" href="<?= h(asset_url('assets/css/app.css')) ?>">
+        <link rel="stylesheet" href="<?= h(asset_url('assets/css/app.css') . '?v=' . (string) filemtime(__DIR__ . '/../assets/css/app.css')) ?>">
         <!-- Alpine.js -->
         <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.x.x/dist/cdn.min.js"></script>
         <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
@@ -345,7 +345,7 @@ function render_landing_register_form_modal(string $role): void
                         </div>
                         <div class="field">
                             <label>Phone Number</label>
-                            <div class="field-row"><input type="text" name="phone" placeholder="+1..." required></div>
+                            <div class="field-row"><input type="text" name="phone" placeholder="+91" required></div>
                         </div>
                         <div class="field">
                             <label>Password</label>
@@ -898,7 +898,7 @@ function render_footer(): void
         </div>
     </div>
     <script>window.VTRACO_CSRF_TOKEN = <?= json_encode(csrf_token(), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;</script>
-    <script src="<?= h(asset_url('assets/js/app.js')) ?>"></script>
+    <script src="<?= h(asset_url('assets/js/app.js') . '?v=' . (string) filemtime(__DIR__ . '/../assets/js/app.js')) ?>"></script>
     </body>
     </html>
     <?php

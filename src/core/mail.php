@@ -154,19 +154,69 @@ function send_html_mail(string $to, string $subject, string $html, array $attach
 
 function send_employee_credentials_email(array $employee, string $password, array $rules): array
 {
+    $assignedProjectsHtml = assigned_projects_mail_html((int) ($employee['id'] ?? 0));
     $html = '<p>Hello ' . h($employee['name']) . ',</p>'
         . '<p>Your V Traco account has been created.</p>'
         . '<p><strong>Password:</strong> ' . h($password) . '</p>'
-        . '<p><strong>Assigned Rules</strong><br>' . rules_explanation_html($rules) . '</p>';
+        . '<p><strong>Assigned Rules</strong><br>' . rules_explanation_html($rules) . '</p>'
+        . $assignedProjectsHtml;
     return send_html_mail((string) $employee['email'], 'Your V Traco Login Credentials', $html);
 }
 
 function send_rules_updated_email(array $employee, array $rules): array
 {
+    $assignedProjectsHtml = assigned_projects_mail_html((int) ($employee['id'] ?? 0));
     $html = '<p>Hello ' . h($employee['name']) . ',</p>'
         . '<p>Your attendance rules have been updated in V Traco.</p>'
-        . '<p><strong>Applied Rules</strong><br>' . rules_explanation_html($rules) . '</p>';
+        . '<p><strong>Applied Rules</strong><br>' . rules_explanation_html($rules) . '</p>'
+        . $assignedProjectsHtml;
     return send_html_mail((string) $employee['email'], 'V Traco Rules Updated', $html);
+}
+
+function assigned_projects_mail_html(int $userId): string
+{
+    if ($userId <= 0) {
+        return '';
+    }
+
+    $projects = assigned_projects_for_employee($userId);
+    if ($projects === []) {
+        return '';
+    }
+
+    $items = [];
+    foreach ($projects as $project) {
+        $label = trim((string) ($project['project_name'] ?? ''));
+        if ($label === '') {
+            continue;
+        }
+
+        $range = project_assignment_mail_range((string) ($project['project_from'] ?? ''), (string) ($project['project_to'] ?? ''));
+        $items[] = '<li>' . h($label) . ($range !== '' ? ' (' . h($range) . ')' : '') . '</li>';
+    }
+
+    if ($items === []) {
+        return '';
+    }
+
+    return '<p><strong>Assigned Projects</strong></p><ul>' . implode('', $items) . '</ul>';
+}
+
+function project_assignment_mail_range(string $from, string $to): string
+{
+    $from = substr(trim($from), 0, 10);
+    $to = substr(trim($to), 0, 10);
+    if ($from !== '' && $to !== '') {
+        return $from . ' to ' . $to;
+    }
+    if ($from !== '') {
+        return 'from ' . $from;
+    }
+    if ($to !== '') {
+        return 'to ' . $to;
+    }
+
+    return '';
 }
 
 function employee_credentials_delivery_message(array $employee, array $mailResult, string $password, string $context = 'added'): string
