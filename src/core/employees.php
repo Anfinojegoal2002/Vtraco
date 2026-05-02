@@ -374,9 +374,12 @@ function normalize_rules_from_input(array $source): array
     $count = max(1, (int) ($source['manual_out_count'] ?? 1));
     $projectSessionFrom = normalize_rule_date_value($source['project_session_from'] ?? '');
     $projectSessionTo = normalize_rule_date_value($source['project_session_to'] ?? '');
+    $shiftFrom = normalize_rule_date_value($source['shift_from'] ?? '');
+    $shiftTo = normalize_rule_date_value($source['shift_to'] ?? '');
     $employeeFrom = normalize_rule_date_value($source['employee_from'] ?? '');
     $employeeTo = normalize_rule_date_value($source['employee_to'] ?? '');
     [$projectSessionFrom, $projectSessionTo] = ordered_rule_date_range($projectSessionFrom, $projectSessionTo);
+    [$shiftFrom, $shiftTo] = ordered_rule_date_range($shiftFrom, $shiftTo);
     [$employeeFrom, $employeeTo] = ordered_rule_date_range($employeeFrom, $employeeTo);
 
     return [
@@ -387,6 +390,8 @@ function normalize_rules_from_input(array $source): array
         'biometric_punch_out' => $biometricEnabled,
         'project_session_from' => $projectSessionFrom,
         'project_session_to' => $projectSessionTo,
+        'shift_from' => $shiftFrom,
+        'shift_to' => $shiftTo,
         'employee_from' => $employeeFrom,
         'employee_to' => $employeeTo,
     ];
@@ -419,7 +424,7 @@ function save_employee_rules(int $userId, array $rules): void
     try {
         $pdo->prepare('DELETE FROM employee_rules WHERE user_id = :user_id')->execute(['user_id' => $userId]);
 
-        $insert = $pdo->prepare('INSERT INTO employee_rules (user_id, rule_type, slot_name, project_session_from, project_session_to, employee_from, employee_to, sort_order, created_at) VALUES (:user_id, :rule_type, :slot_name, :project_session_from, :project_session_to, :employee_from, :employee_to, :sort_order, :created_at)');
+        $insert = $pdo->prepare('INSERT INTO employee_rules (user_id, rule_type, slot_name, project_session_from, project_session_to, shift_from, shift_to, employee_from, employee_to, sort_order, created_at) VALUES (:user_id, :rule_type, :slot_name, :project_session_from, :project_session_to, :shift_from, :shift_to, :employee_from, :employee_to, :sort_order, :created_at)');
         $order = 0;
 
         foreach (['manual_punch_in', 'biometric_punch_in', 'biometric_punch_out'] as $type) {
@@ -430,6 +435,8 @@ function save_employee_rules(int $userId, array $rules): void
                     'slot_name' => null,
                     'project_session_from' => null,
                     'project_session_to' => null,
+                    'shift_from' => null,
+                    'shift_to' => null,
                     'employee_from' => null,
                     'employee_to' => null,
                     'sort_order' => $order++,
@@ -438,13 +445,15 @@ function save_employee_rules(int $userId, array $rules): void
             }
         }
 
-        if (!empty($rules['project_session_from']) || !empty($rules['project_session_to']) || !empty($rules['employee_from']) || !empty($rules['employee_to'])) {
+        if (!empty($rules['project_session_from']) || !empty($rules['project_session_to']) || !empty($rules['shift_from']) || !empty($rules['shift_to']) || !empty($rules['employee_from']) || !empty($rules['employee_to'])) {
             $insert->execute([
                 'user_id' => $userId,
                 'rule_type' => 'rule_dates',
                 'slot_name' => null,
                 'project_session_from' => $rules['project_session_from'] ?: null,
                 'project_session_to' => $rules['project_session_to'] ?: null,
+                'shift_from' => $rules['shift_from'] ?: null,
+                'shift_to' => $rules['shift_to'] ?: null,
                 'employee_from' => $rules['employee_from'] ?: null,
                 'employee_to' => $rules['employee_to'] ?: null,
                 'sort_order' => $order++,
@@ -460,6 +469,8 @@ function save_employee_rules(int $userId, array $rules): void
                     'slot_name' => 'Manual Punch Slot ' . $i,
                     'project_session_from' => null,
                     'project_session_to' => null,
+                    'shift_from' => null,
+                    'shift_to' => null,
                     'employee_from' => null,
                     'employee_to' => null,
                     'sort_order' => $order++,
@@ -482,7 +493,7 @@ function save_employee_rules(int $userId, array $rules): void
 
 function employee_rules(int $userId): array
 {
-    $stmt = db()->prepare('SELECT rule_type, slot_name, project_session_date, employee_date, project_session_from, project_session_to, employee_from, employee_to FROM employee_rules WHERE user_id = :user_id ORDER BY sort_order, id');
+    $stmt = db()->prepare('SELECT rule_type, slot_name, project_session_date, employee_date, project_session_from, project_session_to, shift_from, shift_to, employee_from, employee_to FROM employee_rules WHERE user_id = :user_id ORDER BY sort_order, id');
     $stmt->execute(['user_id' => $userId]);
     $rules = [
         'manual_punch_in' => false,
@@ -493,6 +504,8 @@ function employee_rules(int $userId): array
         'biometric_punch_out' => false,
         'project_session_from' => '',
         'project_session_to' => '',
+        'shift_from' => '',
+        'shift_to' => '',
         'employee_from' => '',
         'employee_to' => '',
     ];
@@ -505,6 +518,8 @@ function employee_rules(int $userId): array
         } elseif ($row['rule_type'] === 'rule_dates') {
             $rules['project_session_from'] = substr((string) (($row['project_session_from'] ?? '') ?: ($row['project_session_date'] ?? '')), 0, 10);
             $rules['project_session_to'] = substr((string) ($row['project_session_to'] ?? ''), 0, 10);
+            $rules['shift_from'] = substr((string) ($row['shift_from'] ?? ''), 0, 10);
+            $rules['shift_to'] = substr((string) ($row['shift_to'] ?? ''), 0, 10);
             $rules['employee_from'] = substr((string) (($row['employee_from'] ?? '') ?: ($row['employee_date'] ?? '')), 0, 10);
             $rules['employee_to'] = substr((string) ($row['employee_to'] ?? ''), 0, 10);
         } else {
@@ -708,6 +723,30 @@ function shift_window_for_employee(array $employee): ?array
     return null;
 }
 
+function shift_window_for_employee_on_date(array $employee, string $date): ?array
+{
+    $date = normalize_rule_date_value($date);
+    if ($date !== '') {
+        $rules = employee_rules((int) ($employee['id'] ?? 0));
+        $shiftFrom = normalize_rule_date_value($rules['shift_from'] ?? '');
+        $shiftTo = normalize_rule_date_value($rules['shift_to'] ?? '');
+        if ($shiftFrom !== '' || $shiftTo !== '') {
+            if ($shiftFrom === '') {
+                $shiftFrom = $shiftTo;
+            }
+            if ($shiftTo === '') {
+                $shiftTo = $shiftFrom;
+            }
+            [$shiftFrom, $shiftTo] = ordered_rule_date_range($shiftFrom, $shiftTo);
+            if ($date < $shiftFrom || $date > $shiftTo) {
+                return null;
+            }
+        }
+    }
+
+    return shift_window_for_employee($employee);
+}
+
 function shift_timings(): array
 {
     $adminId = current_admin_id();
@@ -724,9 +763,28 @@ function shift_timings_for_admin(int $adminId): array
         return [];
     }
 
-    $stmt = db()->prepare('SELECT * FROM shift_timings WHERE admin_id = :admin_id ORDER BY start_time, shift_name, id');
+    $stmt = db()->prepare('SELECT * FROM shift_timings WHERE admin_id = :admin_id ORDER BY shift_from IS NULL, shift_from DESC, shift_to DESC, start_time, shift_name, id');
     $stmt->execute(['admin_id' => $adminId]);
     return $stmt->fetchAll();
+}
+
+function shift_timing_date_range_label(array $timing): string
+{
+    $from = normalize_rule_date_value($timing['shift_from'] ?? ($timing['shift_date'] ?? ''));
+    $to = normalize_rule_date_value($timing['shift_to'] ?? $from);
+    if ($from === '' && $to === '') {
+        return 'No date range';
+    }
+    if ($to === '') {
+        $to = $from;
+    }
+    if ($from === '') {
+        $from = $to;
+    }
+    [$from, $to] = ordered_rule_date_range($from, $to);
+    $fromLabel = date('d M Y', strtotime($from));
+    $toLabel = date('d M Y', strtotime($to));
+    return $from === $to ? $fromLabel : ($fromLabel . ' - ' . $toLabel);
 }
 
 function employee_shift_display(array $employee): string
@@ -755,16 +813,21 @@ function employee_shift_display(array $employee): string
     return $labels ? implode(', ', array_values(array_unique($labels))) : 'Not assigned';
 }
 
-function shift_timing_exists(string $startTime, string $endTime): bool
+function shift_timing_exists(string $startTime, string $endTime, ?string $shiftFrom = null, ?string $shiftTo = null): bool
 {
     $adminId = current_admin_id();
     if ($adminId === null) {
         return false;
     }
 
-    $stmt = db()->prepare('SELECT COUNT(*) FROM shift_timings WHERE admin_id = :admin_id AND start_time = :start_time AND end_time = :end_time');
+    $shiftFrom = normalize_rule_date_value($shiftFrom ?? date('Y-m-d'));
+    $shiftTo = normalize_rule_date_value($shiftTo ?? $shiftFrom);
+    [$shiftFrom, $shiftTo] = ordered_rule_date_range($shiftFrom, $shiftTo);
+    $stmt = db()->prepare('SELECT COUNT(*) FROM shift_timings WHERE admin_id = :admin_id AND shift_from <=> :shift_from AND shift_to <=> :shift_to AND start_time = :start_time AND end_time = :end_time');
     $stmt->execute([
         'admin_id' => $adminId,
+        'shift_from' => $shiftFrom !== '' ? $shiftFrom : null,
+        'shift_to' => $shiftTo !== '' ? $shiftTo : null,
         'start_time' => $startTime,
         'end_time' => $endTime,
     ]);
@@ -781,14 +844,26 @@ function add_shift_timing(array $data): void
 
     $startTime = (string) ($data['start_time'] ?? '');
     $endTime = (string) ($data['end_time'] ?? '');
-    if (shift_timing_exists($startTime, $endTime)) {
+    $shiftFrom = normalize_rule_date_value($data['shift_from'] ?? ($data['shift_date'] ?? date('Y-m-d')));
+    $shiftTo = normalize_rule_date_value($data['shift_to'] ?? $shiftFrom);
+    [$shiftFrom, $shiftTo] = ordered_rule_date_range($shiftFrom, $shiftTo);
+    if ($shiftFrom === '') {
+        $shiftFrom = date('Y-m-d');
+    }
+    if ($shiftTo === '') {
+        $shiftTo = $shiftFrom;
+    }
+    if (shift_timing_exists($startTime, $endTime, $shiftFrom, $shiftTo)) {
         throw new RuntimeException('This shift timing is already posted.');
     }
 
-    db()->prepare('INSERT INTO shift_timings (admin_id, shift_name, start_time, end_time, created_at) VALUES (:admin_id, :shift_name, :start_time, :end_time, :created_at)')
+    db()->prepare('INSERT INTO shift_timings (admin_id, shift_name, shift_date, shift_from, shift_to, start_time, end_time, created_at) VALUES (:admin_id, :shift_name, :shift_date, :shift_from, :shift_to, :start_time, :end_time, :created_at)')
         ->execute([
             'admin_id' => $adminId,
             'shift_name' => trim((string) ($data['shift_name'] ?? '')),
+            'shift_date' => $shiftFrom,
+            'shift_from' => $shiftFrom,
+            'shift_to' => $shiftTo,
             'start_time' => $startTime,
             'end_time' => $endTime,
             'created_at' => now(),
@@ -819,8 +894,10 @@ function resolve_shift_selection_from_input(array $source, ?string $fallbackShif
     $resolvedShift = format_shift_selection_from_times($customStartTime, $customEndTime);
 
     $currentUser = current_user();
-    if (($currentUser['role'] ?? '') === 'admin' && !shift_timing_exists($customStartTime, $customEndTime)) {
+    if (($currentUser['role'] ?? '') === 'admin' && !shift_timing_exists($customStartTime, $customEndTime, date('Y-m-d'), date('Y-m-d'))) {
         add_shift_timing([
+            'shift_from' => date('Y-m-d'),
+            'shift_to' => date('Y-m-d'),
             'start_time' => $customStartTime,
             'end_time' => $customEndTime,
         ]);

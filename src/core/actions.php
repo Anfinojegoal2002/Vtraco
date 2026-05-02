@@ -606,7 +606,7 @@ function handle_post_action(string $action): void
                 'name' => trim((string) ($_POST['name'] ?? '')),
                 'email' => trim((string) ($_POST['email'] ?? '')),
                 'phone' => trim((string) ($_POST['phone'] ?? '')),
-                'shift' => trim((string) ($_POST['shift'] ?? '')),
+                'shift' => normalize_shift_selection((string) ($_POST['shift'] ?? standard_shift_options()[0])),
                 'salary' => (float) ($_POST['salary'] ?? 0),
                 'employee_type' => trim((string) ($_POST['employee_type'] ?? 'regular')),
             ];
@@ -641,14 +641,22 @@ function handle_post_action(string $action): void
         case 'employee_csv_upload':
             require_roles(['admin', 'freelancer', 'external_vendor']);
             try {
-                validate_employee_csv_upload($_FILES['csv_file'] ?? []);
+                $uploadedEmployeeFile = $_FILES['csv_file'] ?? [];
+                validate_employee_csv_upload($uploadedEmployeeFile);
                 $employeeType = trim((string) ($_POST['employee_type'] ?? 'regular'));
                 $_SESSION['pending_csv_import'] = array_map(
                     static fn (array $row): array => array_merge($row, ['employee_type' => $employeeType]),
-                    parse_employee_csv((string) $_FILES['csv_file']['tmp_name'])
+                    parse_employee_csv(
+                        (string) ($uploadedEmployeeFile['tmp_name'] ?? ''),
+                        (string) ($uploadedEmployeeFile['name'] ?? '')
+                    )
                 );
                 flash('success', 'CSV uploaded. Assign rules to continue.');
-                redirect_to('admin_employees', ['stage' => 'csv_rules']);
+                $redirectArgs = ['stage' => 'csv_rules'];
+                if (in_array($employeeType, ['regular', 'corporate'], true)) {
+                    $redirectArgs['type'] = $employeeType;
+                }
+                redirect_to('admin_employees', $redirectArgs);
             } catch (Throwable $exception) {
                 report_exception($exception, 'Employee CSV upload failed.', [
                     'filename' => (string) (($_FILES['csv_file']['name'] ?? '') ?: ''),
@@ -656,6 +664,13 @@ function handle_post_action(string $action): void
                 flash('error', $exception->getMessage());
                 redirect_to('admin_employees');
             }
+            break;
+
+        case 'employee_csv_cancel':
+            require_roles(['admin', 'freelancer', 'external_vendor']);
+            unset($_SESSION['pending_csv_import']);
+            flash('info', 'Bulk import cancelled.');
+            redirect_to('admin_employees');
             break;
 
         case 'employee_csv_submit':
@@ -668,18 +683,19 @@ function handle_post_action(string $action): void
             }
             $rules = normalize_rules_from_input($_POST);
             $projectIds = array_map('intval', $_POST['project_ids'] ?? []);
-            if (!$rules['manual_punch_in'] && !$rules['manual_punch_out'] && !$rules['biometric_punch_in'] && !$rules['biometric_punch_out']) {
-                flash('error', 'Select at least one rule before submitting the CSV import.');
-                redirect_to('admin_employees', ['stage' => 'csv_rules']);
-            }
             $created = 0;
+            $updated = 0;
             $skipped = 0;
             $emailsSent = 0;
             $emailsLogged = 0;
             foreach ($rows as $row) {
                 try {
-                    $createdEmployee = insert_employee($row, $rules, $projectIds);
-                    $created++;
+                    $createdEmployee = import_employee_row($row, $rules, $projectIds);
+                    if (($createdEmployee['result'] ?? 'created') === 'updated') {
+                        $updated++;
+                    } else {
+                        $created++;
+                    }
                     if (!empty($createdEmployee['mail_result']['sent'])) {
                         $emailsSent++;
                     } else {
@@ -687,10 +703,17 @@ function handle_post_action(string $action): void
                     }
                 } catch (Throwable $exception) {
                     $skipped++;
+                    report_exception($exception, 'Employee CSV row import failed.', [
+                        'emp_id' => (string) ($row['emp_id'] ?? ''),
+                        'email' => (string) ($row['email'] ?? ''),
+                    ]);
                 }
             }
             unset($_SESSION['pending_csv_import']);
             $message = 'CSV import completed. Created: ' . $created;
+            if ($updated) {
+                $message .= ' | Updated: ' . $updated;
+            }
             if ($emailsSent) {
                 $message .= ' | Emails sent: ' . $emailsSent;
             }
@@ -702,6 +725,7 @@ function handle_post_action(string $action): void
             }
             audit_log('employee_csv_import_completed', [
                 'created' => $created,
+                'updated' => $updated,
                 'skipped' => $skipped,
                 'emails_sent' => $emailsSent,
                 'emails_logged' => $emailsLogged,
@@ -893,9 +917,18 @@ function handle_post_action(string $action): void
             try {
                 $startTime = trim((string) ($_POST['start_time'] ?? ''));
                 $endTime = trim((string) ($_POST['end_time'] ?? ''));
+                $shiftFrom = normalize_rule_date_value($_POST['shift_from'] ?? ($_POST['shift_date'] ?? date('Y-m-d')));
+                $shiftTo = normalize_rule_date_value($_POST['shift_to'] ?? $shiftFrom);
+                [$shiftFrom, $shiftTo] = ordered_rule_date_range($shiftFrom, $shiftTo);
 
                 if ($startTime === '' || $endTime === '') {
                     throw new RuntimeException('Start time and end time are required.');
+                }
+                if ($shiftFrom === '') {
+                    $shiftFrom = date('Y-m-d');
+                }
+                if ($shiftTo === '') {
+                    $shiftTo = $shiftFrom;
                 }
 
                 if ($startTime === $endTime) {
@@ -903,6 +936,8 @@ function handle_post_action(string $action): void
                 }
 
                 add_shift_timing([
+                    'shift_from' => $shiftFrom,
+                    'shift_to' => $shiftTo,
                     'start_time' => $startTime,
                     'end_time' => $endTime,
                 ]);

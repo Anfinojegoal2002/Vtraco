@@ -194,7 +194,7 @@ function render_rules_editor(array $existing = [], ?string $submitLabel = null, 
         },
         shift_timings()
     );
-    $shiftOptions = $postedShiftOptions ?: standard_shift_options();
+    $shiftOptions = array_values(array_unique(array_merge(standard_shift_options(), $postedShiftOptions)));
     $defaults = array_merge([
         'manual_punch_in' => false,
         'manual_punch_out' => false,
@@ -203,6 +203,8 @@ function render_rules_editor(array $existing = [], ?string $submitLabel = null, 
         'biometric_punch_out' => false,
         'project_session_from' => '',
         'project_session_to' => '',
+        'shift_from' => '',
+        'shift_to' => '',
         'employee_from' => '',
         'employee_to' => '',
         'shift' => $shiftOptions[0] ?? '',
@@ -226,25 +228,11 @@ function render_rules_editor(array $existing = [], ?string $submitLabel = null, 
                 </select>
             </div>
         </div>
-        <?php if ($includeManualPunch || $includeBiometricPunch): ?>
-        <div class="rules-grid">
-            <?php if ($includeManualPunch): ?>
-                <label class="rule-card <?= ($defaults['manual_punch_in'] || $defaults['manual_punch_out']) ? 'active' : '' ?>">
-                    <input type="checkbox" name="manual_punch" value="1" <?= ($defaults['manual_punch_in'] || $defaults['manual_punch_out']) ? 'checked' : '' ?>>
-                    <span class="rule-icon">MP</span>
-                    <strong>Manual Punch</strong>
-                    <span class="hint">Allow employees to submit punch-in photos and complete punch-out details.</span>
-                </label>
-            <?php endif; ?>
-            <?php if ($includeBiometricPunch): ?>
-                <label class="rule-card <?= ($defaults['biometric_punch_in'] || $defaults['biometric_punch_out']) ? 'active' : '' ?>">
-                    <input type="checkbox" name="biometric_punch" value="1" <?= ($defaults['biometric_punch_in'] || $defaults['biometric_punch_out']) ? 'checked' : '' ?>>
-                    <span class="rule-icon">BP</span>
-                    <strong>Biometric Punch</strong>
-                    <span class="hint">Enable biometric punch-in and punch-out time capture.</span>
-                </label>
-            <?php endif; ?>
-        </div>
+        <?php if ($includeManualPunch && ($defaults['manual_punch_in'] || $defaults['manual_punch_out'])): ?>
+            <input type="hidden" name="manual_punch" value="1">
+        <?php endif; ?>
+        <?php if ($includeBiometricPunch && ($defaults['biometric_punch_in'] || $defaults['biometric_punch_out'])): ?>
+            <input type="hidden" name="biometric_punch" value="1">
         <?php endif; ?>
         <?php if ($includeRuleDetails): ?>
             <div class="inline-actions admin-rules-top-actions">
@@ -264,6 +252,9 @@ function render_rules_editor(array $existing = [], ?string $submitLabel = null, 
             </div>
         <?php elseif ($includeEmployeeDateRange): ?>
             <div class="split align-end admin-rules-footer">
+                <label>Shift Timing From<input type="date" name="shift_from" value="<?= h((string) ($defaults['shift_from'] ?? '')) ?>"></label>
+                <label>Shift Timing To<input type="date" name="shift_to" value="<?= h((string) ($defaults['shift_to'] ?? '')) ?>"></label>
+                <span class="admin-rules-footer-break" aria-hidden="true"></span>
                 <label>Employee From<input type="date" name="employee_from" value="<?= h((string) ($defaults['employee_from'] ?? '')) ?>"></label>
                 <label>Employee To<input type="date" name="employee_to" value="<?= h((string) ($defaults['employee_to'] ?? '')) ?>"></label>
                 <?php if ($submitLabel !== null): ?>
@@ -691,7 +682,7 @@ function render_admin_employees(): void
                         'manual_punch_in' => true,
                         'manual_punch_out' => true,
                         'manual_out_count' => 1,
-                    ]); ?>
+                    ], null, false, false, false); ?>
                     <button class="button solid" type="submit" data-rule-submit>Submit</button>
                 </form>
             <?php else: ?>
@@ -763,13 +754,10 @@ function render_admin_employees(): void
                 <form method="post" class="stack-form" data-rule-form>
                     <?= csrf_field() ?>
                     <input type="hidden" name="action" value="employee_csv_submit">
-                    <h3>Rules Assignment</h3>
+                    <h3>Employee Allocation</h3>
                     <?php render_rules_editor([
                         'shift' => standard_shift_options()[0],
-                        'manual_punch_in' => true,
-                        'manual_punch_out' => true,
-                        'manual_out_count' => 1,
-                    ]); ?>
+                    ], null, false, false, false, false, false, false); ?>
                     <div class="inline-actions">
                         <button class="button outline" type="submit" name="action" value="employee_csv_cancel">Cancel</button>
                         <button class="button solid" type="submit" data-rule-submit>Import <?= h($label) ?></button>
@@ -981,6 +969,8 @@ function render_admin_rules(): void
                     <?= csrf_field() ?>
                     <input type="hidden" name="action" value="admin_add_shift_timing">
                     <input type="hidden" name="redirect_page" value="admin_rules">
+                    <input type="hidden" name="shift_from" value="<?= h(date('Y-m-d')) ?>">
+                    <input type="hidden" name="shift_to" value="<?= h(date('Y-m-d')) ?>">
                     <input type="hidden" name="start_time" value="09:00">
                     <input type="hidden" name="end_time" value="18:00">
                     <button class="button outline" type="submit">Add 9:00 AM - 6:00 PM</button>
@@ -989,6 +979,8 @@ function render_admin_rules(): void
                     <?= csrf_field() ?>
                     <input type="hidden" name="action" value="admin_add_shift_timing">
                     <input type="hidden" name="redirect_page" value="admin_rules">
+                    <input type="hidden" name="shift_from" value="<?= h(date('Y-m-d')) ?>">
+                    <input type="hidden" name="shift_to" value="<?= h(date('Y-m-d')) ?>">
                     <input type="hidden" name="start_time" value="10:30">
                     <input type="hidden" name="end_time" value="20:30">
                     <button class="button outline" type="submit">Add 10:30 AM - 8:30 PM</button>
@@ -1015,7 +1007,7 @@ function render_admin_rules(): void
                             <article class="rules-timing-chip">
                                 <div>
                                     <strong><?= h(date('h:i A', strtotime((string) $timing['start_time']))) ?> - <?= h(date('h:i A', strtotime((string) $timing['end_time']))) ?></strong>
-                                    <span>Posted shift timing</span>
+                                    <span><?= h(shift_timing_date_range_label($timing)) ?></span>
                                 </div>
                                 <form method="post">
                                     <?= csrf_field() ?>
@@ -1293,6 +1285,8 @@ function render_admin_shift(): void
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="admin_add_shift_timing">
                 <input type="hidden" name="redirect_page" value="admin_shift">
+                <input type="hidden" name="shift_from" value="<?= h(date('Y-m-d')) ?>">
+                <input type="hidden" name="shift_to" value="<?= h(date('Y-m-d')) ?>">
                 <input type="hidden" name="start_time" value="09:00">
                 <input type="hidden" name="end_time" value="18:00">
                 <button class="button outline" type="submit">Add 9:00 AM - 6:00 PM</button>
@@ -1301,6 +1295,8 @@ function render_admin_shift(): void
                 <?= csrf_field() ?>
                 <input type="hidden" name="action" value="admin_add_shift_timing">
                 <input type="hidden" name="redirect_page" value="admin_shift">
+                <input type="hidden" name="shift_from" value="<?= h(date('Y-m-d')) ?>">
+                <input type="hidden" name="shift_to" value="<?= h(date('Y-m-d')) ?>">
                 <input type="hidden" name="start_time" value="10:30">
                 <input type="hidden" name="end_time" value="20:30">
                 <button class="button outline" type="submit">Add 10:30 AM - 8:30 PM</button>
@@ -1328,6 +1324,8 @@ function render_admin_shift(): void
         <table>
             <thead>
                 <tr>
+                    <th>Date From</th>
+                    <th>Date To</th>
                     <th>Start Time</th>
                     <th>End Time</th>
                     <th>Posted On</th>
@@ -1337,6 +1335,8 @@ function render_admin_shift(): void
             <tbody>
                 <?php foreach ($timings as $timing): ?>
                     <tr>
+                        <td><?= h(!empty($timing['shift_from']) ? date('d M Y', strtotime((string) $timing['shift_from'])) : '-') ?></td>
+                        <td><?= h(!empty($timing['shift_to']) ? date('d M Y', strtotime((string) $timing['shift_to'])) : '-') ?></td>
                         <td><?= h(date('h:i A', strtotime((string) $timing['start_time']))) ?></td>
                         <td><?= h(date('h:i A', strtotime((string) $timing['end_time']))) ?></td>
                         <td><?= h(date('d M Y h:i A', strtotime((string) $timing['created_at']))) ?></td>

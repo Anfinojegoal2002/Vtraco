@@ -199,6 +199,8 @@ function initialize_database(): void
         employee_date DATE NULL,
         project_session_from DATE NULL,
         project_session_to DATE NULL,
+        shift_from DATE NULL,
+        shift_to DATE NULL,
         employee_from DATE NULL,
         employee_to DATE NULL,
         sort_order INT NOT NULL DEFAULT 0,
@@ -218,8 +220,14 @@ function initialize_database(): void
     if (!table_has_column($pdo, 'employee_rules', 'project_session_to')) {
         $pdo->exec('ALTER TABLE employee_rules ADD COLUMN project_session_to DATE NULL AFTER project_session_from');
     }
+    if (!table_has_column($pdo, 'employee_rules', 'shift_from')) {
+        $pdo->exec('ALTER TABLE employee_rules ADD COLUMN shift_from DATE NULL AFTER project_session_to');
+    }
+    if (!table_has_column($pdo, 'employee_rules', 'shift_to')) {
+        $pdo->exec('ALTER TABLE employee_rules ADD COLUMN shift_to DATE NULL AFTER shift_from');
+    }
     if (!table_has_column($pdo, 'employee_rules', 'employee_from')) {
-        $pdo->exec('ALTER TABLE employee_rules ADD COLUMN employee_from DATE NULL AFTER project_session_to');
+        $pdo->exec('ALTER TABLE employee_rules ADD COLUMN employee_from DATE NULL AFTER shift_to');
     }
     if (!table_has_column($pdo, 'employee_rules', 'employee_to')) {
         $pdo->exec('ALTER TABLE employee_rules ADD COLUMN employee_to DATE NULL AFTER employee_from');
@@ -252,12 +260,25 @@ function initialize_database(): void
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         admin_id INT UNSIGNED NOT NULL,
         shift_name VARCHAR(191) NOT NULL,
+        shift_date DATE NULL,
+        shift_from DATE NULL,
+        shift_to DATE NULL,
         start_time TIME NOT NULL,
         end_time TIME NOT NULL,
         created_at DATETIME NOT NULL,
         INDEX idx_shift_timings_admin_id (admin_id),
         CONSTRAINT fk_shift_timings_admin FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    if (!table_has_column($pdo, 'shift_timings', 'shift_date')) {
+        $pdo->exec('ALTER TABLE shift_timings ADD COLUMN shift_date DATE NULL AFTER shift_name');
+    }
+    if (!table_has_column($pdo, 'shift_timings', 'shift_from')) {
+        $pdo->exec('ALTER TABLE shift_timings ADD COLUMN shift_from DATE NULL AFTER shift_date');
+    }
+    if (!table_has_column($pdo, 'shift_timings', 'shift_to')) {
+        $pdo->exec('ALTER TABLE shift_timings ADD COLUMN shift_to DATE NULL AFTER shift_from');
+    }
+    $pdo->exec('UPDATE shift_timings SET shift_from = COALESCE(shift_from, shift_date), shift_to = COALESCE(shift_to, shift_date) WHERE shift_date IS NOT NULL');
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS projects (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

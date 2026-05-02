@@ -730,13 +730,13 @@
             if (!submits.length) {
                 return;
             }
-            const ruleCount = form.querySelectorAll('.rule-card input:checked').length;
+            const ruleCount = form.querySelectorAll('.rule-card input:checked, input[type="hidden"][name="manual_punch"], input[type="hidden"][name="biometric_punch"]').length;
             const employeeCount = form.matches('[data-employee-form]') ? form.querySelectorAll('input[name="employee_ids[]"]:checked').length : 1;
             const valid = form.matches('[data-project-allocation-form]') ? employeeCount > 0 : (ruleCount > 0 && employeeCount > 0);
             submits.forEach(submit => submit.classList.toggle('ghost', !valid));
         }
         document.querySelectorAll('form[data-rule-form]').forEach(form => {
-            form.querySelectorAll('.rule-card input, input[name="employee_ids[]"]').forEach(input => {
+            form.querySelectorAll('.rule-card input, input[name="employee_ids[]"], input[type="hidden"][name="manual_punch"], input[type="hidden"][name="biometric_punch"]').forEach(input => {
                 input.addEventListener('change', () => updateRuleSubmit(form));
             });
             updateRuleSubmit(form);

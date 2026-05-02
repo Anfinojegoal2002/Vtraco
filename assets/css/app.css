@@ -327,6 +327,10 @@
     flex: 1 1 180px;
     min-width: min(180px, 100%);
 }
+.admin-rules-footer-break {
+    flex-basis: 100%;
+    height: 0;
+}
 .admin-rules-footer .inline-actions {
     flex: 0 1 auto;
     margin-left: auto;

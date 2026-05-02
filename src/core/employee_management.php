@@ -487,14 +487,8 @@ function normalize_import_phone(string $phone): string
 function parse_employee_csv(string $path, string $originalName = ''): array
 {
     $sourceRows = attendance_report_rows($path, $originalName);
-    $header = $sourceRows[0] ?? null;
-    if (!is_array($header) || $header === []) {
+    if ($sourceRows === []) {
         throw new RuntimeException('Employee import file is empty.');
-    }
-
-    $headerMap = [];
-    foreach ($header as $index => $column) {
-        $headerMap[normalize_csv_header((string) $column)] = $index;
     }
 
     $aliases = [
@@ -506,14 +500,54 @@ function parse_employee_csv(string $path, string $originalName = ''): array
         'salary' => ['salary', 'monthlysalary', 'pay', 'amount', 'wage', 'salaryamount', 'monthlypay', 'basicpay'],
     ];
 
+    $headerMap = [];
     $columns = [];
-    foreach ($aliases as $field => $possible) {
-        foreach ($possible as $alias) {
-            if (array_key_exists($alias, $headerMap)) {
-                $columns[$field] = $headerMap[$alias];
-                break;
+    $headerRowIndex = null;
+    $bestRequiredMatches = 0;
+    foreach ($sourceRows as $rowIndex => $candidateHeader) {
+        if (!is_array($candidateHeader) || $candidateHeader === []) {
+            continue;
+        }
+
+        $candidateHeaderMap = [];
+        foreach ($candidateHeader as $index => $column) {
+            $normalizedColumn = normalize_csv_header((string) $column);
+            if ($normalizedColumn !== '') {
+                $candidateHeaderMap[$normalizedColumn] = $index;
             }
         }
+
+        $candidateColumns = [];
+        foreach ($aliases as $field => $possible) {
+            foreach ($possible as $alias) {
+                if (array_key_exists($alias, $candidateHeaderMap)) {
+                    $candidateColumns[$field] = $candidateHeaderMap[$alias];
+                    break;
+                }
+            }
+        }
+
+        $requiredMatches = 0;
+        foreach (['emp_id', 'name', 'email', 'phone', 'salary'] as $required) {
+            if (array_key_exists($required, $candidateColumns)) {
+                $requiredMatches++;
+            }
+        }
+
+        if ($requiredMatches > $bestRequiredMatches) {
+            $bestRequiredMatches = $requiredMatches;
+            $headerRowIndex = $rowIndex;
+            $headerMap = $candidateHeaderMap;
+            $columns = $candidateColumns;
+        }
+
+        if ($requiredMatches === 5) {
+            break;
+        }
+    }
+
+    if ($headerRowIndex === null) {
+        throw new RuntimeException('Could not find the employee header row. Use columns like Emp ID, Name, Email, Phone, and Salary.');
     }
 
     foreach (['emp_id', 'name', 'email', 'phone', 'salary'] as $required) {
@@ -526,9 +560,8 @@ function parse_employee_csv(string $path, string $originalName = ''): array
 
     $rows = [];
     $reservedEmpIds = [];
-    $rowNumber = 1;
-    foreach (array_slice($sourceRows, 1) as $row) {
-        $rowNumber++;
+    foreach (array_slice($sourceRows, $headerRowIndex + 1) as $offset => $row) {
+        $rowNumber = $headerRowIndex + $offset + 2;
         $email = trim((string) (($columns['email'] !== null) ? ($row[$columns['email']] ?? '') : ''));
         $phone = normalize_import_phone((string) ($row[$columns['phone']] ?? ''));
         $salaryText = trim((string) ($row[$columns['salary']] ?? '0'));
@@ -555,7 +588,7 @@ function parse_employee_csv(string $path, string $originalName = ''): array
             throw new RuntimeException('Employee CSV row ' . $rowNumber . ' has an invalid salary value.');
         }
 
-        $name = trim((string) ($row[$columns['name']] ?? ''));
+        $name = guessed_employee_name($row, $columns, $headerMap, $email, $empId);
         if ($name === '') {
             throw new RuntimeException('Employee CSV row ' . $rowNumber . ' is missing a name.');
         }
