@@ -92,6 +92,52 @@ function unique_index_columns(PDO $pdo, string $table): array
 
     return $indexes;
 }
+
+function backfill_punch_photos_from_files(PDO $pdo): void
+{
+    $appRoot = str_replace('\\', '/', dirname(__DIR__, 2));
+    $tables = ['attendance_sessions', 'attendance_records'];
+
+    foreach ($tables as $table) {
+        $select = $pdo->query("SELECT id, punch_in_path FROM {$table} WHERE punch_in_path IS NOT NULL AND punch_in_path <> '' AND punch_in_photo IS NULL LIMIT 100");
+        if (!$select) {
+            continue;
+        }
+
+        $update = $pdo->prepare("UPDATE {$table} SET punch_in_photo = :photo, punch_in_photo_mime = :mime, punch_in_photo_name = :name WHERE id = :id");
+        foreach ($select->fetchAll() as $row) {
+            $relativePath = str_replace('\\', '/', trim((string) ($row['punch_in_path'] ?? '')));
+            $relativePath = preg_replace('#^https?://[^/]+#i', '', $relativePath) ?? '';
+            $relativePath = ltrim($relativePath, '/');
+            if ($relativePath === '' || str_contains($relativePath, '..')) {
+                continue;
+            }
+
+            $fullPath = $appRoot . '/' . $relativePath;
+            if (!is_file($fullPath)) {
+                continue;
+            }
+
+            $mime = mime_content_type($fullPath) ?: '';
+            if (!in_array($mime, ['image/jpeg', 'image/png', 'image/webp'], true)) {
+                continue;
+            }
+
+            $contents = file_get_contents($fullPath);
+            if ($contents === false) {
+                continue;
+            }
+
+            $update->execute([
+                'photo' => $contents,
+                'mime' => $mime,
+                'name' => basename($relativePath),
+                'id' => (int) $row['id'],
+            ]);
+        }
+    }
+}
+
 function initialize_database(): void
 {
     $pdo = db();
@@ -313,6 +359,9 @@ function initialize_database(): void
         attend_date DATE NOT NULL,
         status VARCHAR(50) NOT NULL DEFAULT 'Absent',
         punch_in_path VARCHAR(255) NULL,
+        punch_in_photo LONGBLOB NULL,
+        punch_in_photo_mime VARCHAR(100) NULL,
+        punch_in_photo_name VARCHAR(255) NULL,
         punch_in_lat VARCHAR(100) NULL,
         punch_in_lng VARCHAR(100) NULL,
         punch_in_time DATETIME NULL,
@@ -334,6 +383,9 @@ function initialize_database(): void
         session_mode VARCHAR(100) NOT NULL,
         slot_name VARCHAR(191) NULL,
         punch_in_path VARCHAR(255) NULL,
+        punch_in_photo LONGBLOB NULL,
+        punch_in_photo_mime VARCHAR(100) NULL,
+        punch_in_photo_name VARCHAR(255) NULL,
         punch_in_lat VARCHAR(100) NULL,
         punch_in_lng VARCHAR(100) NULL,
         punch_in_time DATETIME NULL,
@@ -465,7 +517,10 @@ function initialize_database(): void
     $sessionColumns = [
         'project_id' => 'INT UNSIGNED NULL AFTER attendance_id',
         'punch_in_path' => 'VARCHAR(255) NULL AFTER slot_name',
-        'punch_in_lat' => 'VARCHAR(100) NULL AFTER punch_in_path',
+        'punch_in_photo' => 'LONGBLOB NULL AFTER punch_in_path',
+        'punch_in_photo_mime' => 'VARCHAR(100) NULL AFTER punch_in_photo',
+        'punch_in_photo_name' => 'VARCHAR(255) NULL AFTER punch_in_photo_mime',
+        'punch_in_lat' => 'VARCHAR(100) NULL AFTER punch_in_photo_name',
         'punch_in_lng' => 'VARCHAR(100) NULL AFTER punch_in_lat',
         'punch_in_time' => 'DATETIME NULL AFTER punch_in_lng',
         'punch_out_time' => 'DATETIME NULL AFTER punch_in_time',
@@ -499,6 +554,18 @@ function initialize_database(): void
             s.punch_in_lng = COALESCE(s.punch_in_lng, ar.punch_in_lng),
             s.punch_in_time = COALESCE(s.punch_in_time, ar.punch_in_time)
         WHERE ar.punch_in_path IS NOT NULL");
+
+    $recordPhotoColumns = [
+        'punch_in_photo' => 'LONGBLOB NULL AFTER punch_in_path',
+        'punch_in_photo_mime' => 'VARCHAR(100) NULL AFTER punch_in_photo',
+        'punch_in_photo_name' => 'VARCHAR(255) NULL AFTER punch_in_photo_mime',
+    ];
+    foreach ($recordPhotoColumns as $column => $definition) {
+        if (!table_has_column($pdo, 'attendance_records', $column)) {
+            $pdo->exec('ALTER TABLE attendance_records ADD COLUMN ' . $column . ' ' . $definition);
+        }
+    }
+    backfill_punch_photos_from_files($pdo);
 
     if (!index_exists($pdo, 'employee_reimbursements', 'uniq_employee_reimbursements_user_date')) {
         $dupStmt = $pdo->query('SELECT COUNT(*) FROM (

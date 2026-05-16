@@ -1073,7 +1073,13 @@ function calendar_payload(string $context, array $employee, string $date, array 
     $rules = employee_rules((int) $employee['id']);
     $month = $month && preg_match('/^\d{4}-\d{2}$/', $month) ? $month : substr($date, 0, 7);
     $sessions = array_map(static function (array $session): array {
-        $session['punch_in_path'] = public_file_path((string) ($session['punch_in_path'] ?? ''));
+        $sessionPhotoData = report_photo_data_uri_from_row([
+            'manual_punch_in_photo_data' => $session['punch_in_photo'] ?? null,
+            'manual_punch_in_photo_mime' => $session['punch_in_photo_mime'] ?? '',
+            'manual_punch_in_photo' => $session['punch_in_path'] ?? '',
+        ]);
+        $session['punch_in_path'] = $sessionPhotoData !== '' ? $sessionPhotoData : public_file_path((string) ($session['punch_in_path'] ?? ''));
+        unset($session['punch_in_photo'], $session['punch_in_photo_mime']);
         return $session;
     }, $recordBlock['sessions'] ?? []);
     $reimbursementItems = array_map(static function (array $item): array {
@@ -1087,6 +1093,12 @@ function calendar_payload(string $context, array $employee, string $date, array 
         ];
     }, $reimbursementMeta['items'] ?? []);
 
+    $recordPhotoData = report_photo_data_uri_from_row([
+        'manual_punch_in_photo_data' => $recordBlock['record']['punch_in_photo'] ?? null,
+        'manual_punch_in_photo_mime' => $recordBlock['record']['punch_in_photo_mime'] ?? '',
+        'manual_punch_in_photo' => $recordBlock['record']['punch_in_path'] ?? '',
+    ]);
+
     return h(json_encode([
         'context' => $context,
         'employee_id' => (int) $employee['id'],
@@ -1095,7 +1107,7 @@ function calendar_payload(string $context, array $employee, string $date, array 
         'status' => $recordBlock['record']['status'],
         'sessions' => array_values($sessions),
         'punch_in_time' => $recordBlock['record']['punch_in_time'],
-        'punch_in_path' => public_file_path((string) ($recordBlock['record']['punch_in_path'] ?? '')),
+        'punch_in_path' => $recordPhotoData !== '' ? $recordPhotoData : public_file_path((string) ($recordBlock['record']['punch_in_path'] ?? '')),
         'punch_in_lat' => $recordBlock['record']['punch_in_lat'],
         'punch_in_lng' => $recordBlock['record']['punch_in_lng'],
         'leave_reason' => $recordBlock['record']['leave_reason'],
@@ -1671,7 +1683,7 @@ function render_admin_reports(): void
         <div>
             <span class="eyebrow">Admin - Reports</span>
             <h1>Employee Log Reports</h1>
-            <p>Filter by employees, projects, and date range to review attendance logs and manual punch entries.</p>
+            <p>Filter by employees, projects, and date range to review full attendance logs, including manual project entries and biometric punches.</p>
         </div>
     </section>
 
@@ -1699,7 +1711,7 @@ function render_admin_reports(): void
 
                 <!-- Project Multi-Select -->
                 <div class="field">
-                    <label>Project Multi-Select</label>
+                    <label>Project Multi-Select <span class="hint">(optional)</span></label>
                     <div class="multi-select-picker">
                         <input type="text" placeholder="Search projects..." data-multi-filter="project-report-options">
                         <div class="multi-options scroll-panel" id="project-report-options">
@@ -1764,12 +1776,16 @@ function render_admin_reports(): void
                 <tr>
                     <th>Date</th>
                     <th>Employee Name</th>
+                    <th>Source</th>
                     <th>Project Name</th>
                     <th>Slot</th>
                     <th>Session Type</th>
                     <th>Attendance Status</th>
                     <th>Manual Punch In</th>
+                    <th>Manual Punch In Photo</th>
                     <th>Manual Punch Out</th>
+                    <th>Biometric Punch In</th>
+                    <th>Biometric Punch Out</th>
                     <th>Total Students</th>
                     <th>Present Students</th>
                     <th>Topics Handled</th>
@@ -1781,6 +1797,7 @@ function render_admin_reports(): void
                         <tr>
                             <td><?= h(date('d M Y', strtotime((string)$row['date']))) ?></td>
                             <td><?= h((string)$row['employee_name']) ?></td>
+                            <td><?= h((string)(($row['attendance_source'] ?? '') ?: 'Attendance')) ?></td>
                             <td><?= h((string)($row['project_name'] ?: '-')) ?></td>
                             <td><?= h((string)($row['slot_name'] ?: '-')) ?></td>
                             <td><?= h(project_session_label((string)$row['session_type'])) ?></td>
@@ -1789,7 +1806,22 @@ function render_admin_reports(): void
                                 <span class="status-pill status-<?= h($statusClass) ?>"><?= h((string)$row['attendance_status']) ?></span>
                             </td>
                             <td><?= h((string) (($row['manual_punch_in'] ?? '') ?: '-')) ?></td>
+                            <td>
+                                <?php $manualPunchPhoto = report_photo_url($row['manual_punch_in_photo'] ?? ''); ?>
+                                <?php $manualPunchPhotoData = report_photo_data_uri_from_row($row); ?>
+                                <?php if ($manualPunchPhotoData !== ''): ?>
+                                    <img class="report-punch-photo" src="<?= h($manualPunchPhotoData) ?>" alt="Manual punch in photo">
+                                <?php elseif ($manualPunchPhoto !== ''): ?>
+                                    <a href="<?= h($manualPunchPhoto) ?>" target="_blank" rel="noopener">
+                                        <img class="report-punch-photo" src="<?= h($manualPunchPhoto) ?>" alt="Manual punch in photo">
+                                    </a>
+                                <?php else: ?>
+                                    -
+                                <?php endif; ?>
+                            </td>
                             <td><?= h((string) (($row['manual_punch_out'] ?? '') ?: '-')) ?></td>
+                            <td><?= h((string) (($row['biometric_punch_in'] ?? '') ?: '-')) ?></td>
+                            <td><?= h((string) (($row['biometric_punch_out'] ?? '') ?: '-')) ?></td>
                             <td><?= h((string) (($row['total_students'] ?? '') ?: '-')) ?></td>
                             <td><?= h((string) (($row['present_students'] ?? '') ?: '-')) ?></td>
                             <td><?= h((string) (($row['topics_handled'] ?? '') ?: '-')) ?></td>
@@ -1797,7 +1829,7 @@ function render_admin_reports(): void
                     <?php endforeach; ?>
                 <?php else: ?>
                     <tr>
-                        <td colspan="11" class="muted center">No records found for the selected filters.</td>
+                        <td colspan="15" class="muted center">No records found for the selected filters.</td>
                     </tr>
                 <?php endif; ?>
             </tbody>
@@ -1813,6 +1845,7 @@ function render_admin_reports(): void
         .reports-filter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; align-items: start; }
         .reports-date-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 1rem; }
         .reports-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 1rem; }
+        .report-punch-photo { width: 54px; height: 54px; object-fit: cover; border-radius: 8px; border: 1px solid rgba(30,41,59,0.12); background: #eef2ff; display: block; }
         @media print {
             .admin-sidebar, .reports-actions, .eyebrow, .spacer, .flash-stack { display: none !important; }
             .admin-main { margin: 0 !important; padding: 0 !important; width: 100% !important; }

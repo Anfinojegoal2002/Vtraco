@@ -1365,12 +1365,16 @@ function handle_post_action(string $action): void
                     throw new RuntimeException('Manual Punch In ' . $slotIndex . ' is already submitted for this date.');
                 }
 
+                $photoPayload = punch_photo_database_payload($_FILES['punch_photo'] ?? []);
                 $path = handle_upload($_FILES['punch_photo'] ?? []);
                 $sessionPayload = [
                     'project_id' => $projectId,
                     'session_mode' => 'manual_pair',
                     'slot_name' => $slotName,
                     'punch_in_path' => $path,
+                    'punch_in_photo' => $photoPayload['punch_in_photo'],
+                    'punch_in_photo_mime' => $photoPayload['punch_in_photo_mime'],
+                    'punch_in_photo_name' => $photoPayload['punch_in_photo_name'],
                     'punch_in_lat' => trim((string) ($_POST['latitude'] ?? '')),
                     'punch_in_lng' => trim((string) ($_POST['longitude'] ?? '')),
                     'punch_in_time' => now(),
@@ -1387,6 +1391,9 @@ function handle_post_action(string $action): void
                 ];
                 if ($slotIndex === 1 || empty($record['punch_in_path'])) {
                     $recordFields['punch_in_path'] = $sessionPayload['punch_in_path'];
+                    $recordFields['punch_in_photo'] = $sessionPayload['punch_in_photo'];
+                    $recordFields['punch_in_photo_mime'] = $sessionPayload['punch_in_photo_mime'];
+                    $recordFields['punch_in_photo_name'] = $sessionPayload['punch_in_photo_name'];
                     $recordFields['punch_in_lat'] = $sessionPayload['punch_in_lat'];
                     $recordFields['punch_in_lng'] = $sessionPayload['punch_in_lng'];
                     $recordFields['punch_in_time'] = $sessionPayload['punch_in_time'];
@@ -1456,13 +1463,16 @@ function handle_post_action(string $action): void
                     'session_mode' => 'manual_pair',
                     'slot_name' => $slotName,
                     'punch_in_path' => $record['punch_in_path'],
+                    'punch_in_photo' => $record['punch_in_photo'] ?? null,
+                    'punch_in_photo_mime' => $record['punch_in_photo_mime'] ?? null,
+                    'punch_in_photo_name' => $record['punch_in_photo_name'] ?? null,
                     'punch_in_lat' => $record['punch_in_lat'],
                     'punch_in_lng' => $record['punch_in_lng'],
                     'punch_in_time' => $record['punch_in_time'],
                 ]);
                 $session = attendance_session_by_slot((int) $record['id'], $slotName);
             }
-            if (!$session || empty($session['punch_in_path'])) {
+            if (!$session || (empty($session['punch_in_path']) && empty($session['punch_in_photo']))) {
                 flash('error', 'Submit Manual Punch In ' . $slotIndex . ' first.');
                 redirect_to('employee_attendance', ['month' => substr($date, 0, 7)]);
             }

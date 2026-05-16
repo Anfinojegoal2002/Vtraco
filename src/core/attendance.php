@@ -117,13 +117,16 @@ function update_attendance_session(int $sessionId, array $fields): void
 
 function add_attendance_session(int $attendanceId, array $payload): void
 {
-    db()->prepare('INSERT INTO attendance_sessions (attendance_id, project_id, session_mode, slot_name, punch_in_path, punch_in_lat, punch_in_lng, punch_in_time, punch_out_time, college_name, session_name, day_portion, session_duration, total_students, present_students, topics_handled, location, created_at) VALUES (:attendance_id, :project_id, :session_mode, :slot_name, :punch_in_path, :punch_in_lat, :punch_in_lng, :punch_in_time, :punch_out_time, :college_name, :session_name, :day_portion, :session_duration, :total_students, :present_students, :topics_handled, :location, :created_at)')
+    db()->prepare('INSERT INTO attendance_sessions (attendance_id, project_id, session_mode, slot_name, punch_in_path, punch_in_photo, punch_in_photo_mime, punch_in_photo_name, punch_in_lat, punch_in_lng, punch_in_time, punch_out_time, college_name, session_name, day_portion, session_duration, total_students, present_students, topics_handled, location, created_at) VALUES (:attendance_id, :project_id, :session_mode, :slot_name, :punch_in_path, :punch_in_photo, :punch_in_photo_mime, :punch_in_photo_name, :punch_in_lat, :punch_in_lng, :punch_in_time, :punch_out_time, :college_name, :session_name, :day_portion, :session_duration, :total_students, :present_students, :topics_handled, :location, :created_at)')
         ->execute([
             'attendance_id' => $attendanceId,
             'project_id' => $payload['project_id'] ?? null,
             'session_mode' => $payload['session_mode'],
             'slot_name' => $payload['slot_name'] ?? null,
             'punch_in_path' => $payload['punch_in_path'] ?? null,
+            'punch_in_photo' => $payload['punch_in_photo'] ?? null,
+            'punch_in_photo_mime' => $payload['punch_in_photo_mime'] ?? null,
+            'punch_in_photo_name' => $payload['punch_in_photo_name'] ?? null,
             'punch_in_lat' => $payload['punch_in_lat'] ?? null,
             'punch_in_lng' => $payload['punch_in_lng'] ?? null,
             'punch_in_time' => $payload['punch_in_time'] ?? null,
@@ -143,6 +146,7 @@ function add_attendance_session(int $attendanceId, array $payload): void
 function session_has_manual_in(array $session): bool
 {
     return trim((string) ($session['punch_in_path'] ?? '')) !== ''
+        || !empty($session['punch_in_photo'])
         || trim((string) ($session['punch_in_time'] ?? '')) !== '';
 }
 
@@ -2224,6 +2228,86 @@ function handle_upload(array $file): string
     }
 
     return normalize_relative_path($normalizedTarget);
+}
+
+function punch_photo_database_payload(array $file, string $storedPath = ''): array
+{
+    $source = (string) ($file['tmp_name'] ?? '');
+    if ($source === '' || !is_file($source)) {
+        $relativePath = normalize_relative_path($storedPath);
+        $source = $relativePath !== '' ? dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath) : '';
+    }
+
+    if ($source === '' || !is_file($source)) {
+        return [
+            'punch_in_photo' => null,
+            'punch_in_photo_mime' => null,
+            'punch_in_photo_name' => null,
+        ];
+    }
+
+    $contents = optimized_punch_photo_database_contents($source);
+    if ($contents === false) {
+        throw new RuntimeException('Unable to read punch photo for database storage.');
+    }
+
+    return [
+        'punch_in_photo' => $contents['data'],
+        'punch_in_photo_mime' => $contents['mime'],
+        'punch_in_photo_name' => (string) ($file['name'] ?? basename($storedPath)),
+    ];
+}
+
+function optimized_punch_photo_database_contents(string $source): array|false
+{
+    $raw = file_get_contents($source);
+    if ($raw === false) {
+        return false;
+    }
+
+    if (!function_exists('imagecreatefromstring')) {
+        return [
+            'data' => $raw,
+            'mime' => mime_content_type($source) ?: 'image/jpeg',
+        ];
+    }
+
+    $image = @imagecreatefromstring($raw);
+    if (!$image) {
+        return [
+            'data' => $raw,
+            'mime' => mime_content_type($source) ?: 'image/jpeg',
+        ];
+    }
+
+    $width = imagesx($image);
+    $height = imagesy($image);
+    $maxDimension = 1200;
+    $scale = min(1, $maxDimension / max($width, $height));
+    $targetWidth = max(1, (int) round($width * $scale));
+    $targetHeight = max(1, (int) round($height * $scale));
+    $canvas = imagecreatetruecolor($targetWidth, $targetHeight);
+    imagefill($canvas, 0, 0, imagecolorallocate($canvas, 255, 255, 255));
+    imagecopyresampled($canvas, $image, 0, 0, 0, 0, $targetWidth, $targetHeight, $width, $height);
+    imagedestroy($image);
+
+    $encoded = false;
+    foreach ([78, 68, 58] as $quality) {
+        ob_start();
+        imagejpeg($canvas, null, $quality);
+        $candidate = ob_get_clean();
+        if (is_string($candidate) && ($encoded === false || strlen($candidate) < strlen($encoded))) {
+            $encoded = $candidate;
+        }
+        if (is_string($candidate) && strlen($candidate) <= 700 * 1024) {
+            break;
+        }
+    }
+    imagedestroy($canvas);
+
+    return is_string($encoded)
+        ? ['data' => $encoded, 'mime' => 'image/jpeg']
+        : ['data' => $raw, 'mime' => mime_content_type($source) ?: 'image/jpeg'];
 }
 
 
