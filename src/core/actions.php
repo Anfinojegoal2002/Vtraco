@@ -1714,6 +1714,35 @@ function handle_post_action(string $action): void
             redirect_to('admin_reimbursements', $redirectParams);
             break;
 
+        case 'admin_process_accounts_payment':
+            $admin = require_role('admin');
+            $filters = payment_filter_params($_POST);
+
+            try {
+                $payments = create_accounts_payment_batch($_POST, $_FILES['proof_upload'] ?? []);
+                foreach ($payments as $payment) {
+                    audit_log('admin_accounts_payment_processed', [
+                        'payment_id' => (int) ($payment['id'] ?? 0),
+                        'payment_type' => (string) ($payment['payment_type'] ?? ''),
+                        'amount' => (float) ($payment['amount'] ?? 0),
+                        'reimbursement_id' => !empty($payment['reimbursement_id']) ? (int) $payment['reimbursement_id'] : null,
+                    ], (int) ($payment['user_id'] ?? 0), $admin);
+                }
+
+                flash('success', count($payments) === 1
+                    ? 'Payment processed successfully.'
+                    : count($payments) . ' payments processed successfully.');
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Admin accounts payment processing failed.', [
+                    'admin_id' => (int) $admin['id'],
+                    'employee_id' => (int) ($_POST['employee_id'] ?? 0),
+                ]);
+                flash('error', $exception->getMessage() ?: 'Unable to process the payment right now.');
+            }
+
+            redirect_to('admin_accounts', payment_redirect_query($filters));
+            break;
+
         case 'admin_save_payment':
             $admin = require_role('admin');
             $paymentId = max(0, (int) ($_POST['payment_id'] ?? 0));
@@ -1772,6 +1801,47 @@ function handle_post_action(string $action): void
             redirect_to('admin_accounts', payment_redirect_query($filters));
             break;
 
+        case 'admin_approve_reimbursement':
+            $admin = require_role('admin');
+            $reimbursementId = max(0, (int) ($_POST['reimbursement_id'] ?? 0));
+            $filters = payment_filter_params($_POST);
+            try {
+                $updated = approve_reimbursement_request($reimbursementId, $_POST['approved_amount'] ?? []);
+                audit_log('admin_reimbursement_approved', [
+                    'reimbursement_id' => (int) $updated['id'],
+                    'approved_amount' => (float) ($updated['amount_requested'] ?? 0),
+                ], (int) ($updated['user_id'] ?? 0), $admin);
+                flash('success', 'Reimbursement approved successfully.');
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Admin reimbursement approval failed.', [
+                    'admin_id' => (int) $admin['id'],
+                    'reimbursement_id' => $reimbursementId,
+                ]);
+                flash('error', $exception->getMessage() ?: 'Unable to approve the reimbursement.');
+            }
+            redirect_to('admin_accounts', payment_redirect_query($filters));
+            break;
+
+        case 'admin_deny_reimbursement':
+            $admin = require_role('admin');
+            $reimbursementId = max(0, (int) ($_POST['reimbursement_id'] ?? 0));
+            $filters = payment_filter_params($_POST);
+            try {
+                $updated = deny_reimbursement_request($reimbursementId);
+                audit_log('admin_reimbursement_denied', [
+                    'reimbursement_id' => (int) $updated['id'],
+                ], (int) ($updated['user_id'] ?? 0), $admin);
+                flash('success', 'Reimbursement denied successfully.');
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Admin reimbursement denial failed.', [
+                    'admin_id' => (int) $admin['id'],
+                    'reimbursement_id' => $reimbursementId,
+                ]);
+                flash('error', $exception->getMessage() ?: 'Unable to deny the reimbursement.');
+            }
+            redirect_to('admin_accounts', payment_redirect_query($filters));
+            break;
+
         case 'mark_notifications_read':
             $user = require_roles(['admin', 'employee', 'corporate_employee', 'external_vendor', 'freelancer']);
             mark_notifications_read((int) $user['id']);
@@ -1820,6 +1890,11 @@ function handle_post_action(string $action): void
             ];
             $data = get_attendance_report_data($filters);
             export_report_pdf($data);
+            break;
+
+        case 'export_reimbursements_excel':
+            require_role('admin');
+            export_reimbursements_excel(admin_recent_reimbursements(50, null, 24));
             break;
 
         case 'super_admin_get_data':

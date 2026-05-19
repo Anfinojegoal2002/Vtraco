@@ -58,6 +58,23 @@ function reimbursement_relative_path(string $absolutePath): string
     return ltrim(str_replace($projectRoot, '', $normalizedPath), '/');
 }
 
+function reimbursement_attachment_url(array $reimbursement): string
+{
+    $data = $reimbursement['attachment_data'] ?? null;
+    $mime = (string) ($reimbursement['attachment_mime'] ?? '');
+    if ($data !== null && $data !== '' && in_array($mime, ['image/jpeg', 'application/pdf'], true)) {
+        return 'data:' . $mime . ';base64,' . base64_encode((string) $data);
+    }
+
+    $path = trim((string) ($reimbursement['attachment_path'] ?? ''));
+    return $path !== '' ? asset_url($path) : '';
+}
+
+function reimbursement_attachment_is_database_backed(array $reimbursement): bool
+{
+    return !empty($reimbursement['attachment_data']);
+}
+
 function reimbursement_admin_filter_params(array $source): array
 {
     $employeeId = max(0, (int) ($source['filter_employee_id'] ?? $source['employee_id'] ?? 0));
@@ -141,6 +158,14 @@ function validate_reimbursement_attachment_upload(array $file, string $label = '
 function store_reimbursement_upload(array $file, string $folder, string $label = 'reimbursement proof'): array
 {
     validate_reimbursement_attachment_upload($file, $label);
+    $sourcePath = (string) ($file['tmp_name'] ?? '');
+    $sourceMime = uploaded_file_mime_type($file);
+    $databasePayload = str_starts_with($sourceMime, 'image/')
+        ? optimized_database_image_contents($sourcePath)
+        : file_get_contents($sourcePath);
+    if ($databasePayload === false) {
+        throw new RuntimeException('Unable to read the uploaded ' . $label . ' for database storage.');
+    }
 
     $directory = reimbursement_storage_root() . '/' . trim($folder, '/');
     ensure_directory($directory);
@@ -154,7 +179,8 @@ function store_reimbursement_upload(array $file, string $folder, string $label =
     return [
         'path' => reimbursement_relative_path($target),
         'name' => (string) ($file['name'] ?? basename($target)),
-        'mime' => uploaded_file_mime_type(['tmp_name' => $target]) ?: mime_content_type($target) ?: '',
+        'mime' => is_array($databasePayload) ? $databasePayload['mime'] : (uploaded_file_mime_type(['tmp_name' => $target]) ?: mime_content_type($target) ?: ''),
+        'data' => is_array($databasePayload) ? $databasePayload['data'] : $databasePayload,
     ];
 }
 
@@ -189,7 +215,7 @@ function admin_reimbursements(array $filters = []): array
     return $stmt->fetchAll();
 }
 
-function admin_recent_reimbursements(int $limit = 5, ?string $status = null): array
+function admin_recent_reimbursements(int $limit = 5, ?string $status = null, ?int $createdWithinHours = null): array
 {
     $admin = require_role('admin');
     $limit = max(1, min(50, (int) $limit));
@@ -201,6 +227,11 @@ function admin_recent_reimbursements(int $limit = 5, ?string $status = null): ar
         $params['status'] = reimbursement_status_label($status);
     }
 
+    if ($createdWithinHours !== null && $createdWithinHours > 0) {
+        $sql .= ' AND er.created_at >= DATE_SUB(NOW(), INTERVAL :created_within_hours HOUR)';
+        $params['created_within_hours'] = min(168, max(1, (int) $createdWithinHours));
+    }
+
     $sql .= ' ORDER BY er.created_at DESC, er.expense_date DESC, er.id DESC';
     $sql .= ' LIMIT ' . $limit;
 
@@ -208,6 +239,65 @@ function admin_recent_reimbursements(int $limit = 5, ?string $status = null): ar
     $stmt->execute($params);
 
     return $stmt->fetchAll();
+}
+
+function export_reimbursements_excel(array $items): void
+{
+    header('Content-Type: application/vnd.ms-excel; charset=utf-8');
+    header('Content-Disposition: attachment; filename=reimbursement_register_' . date('Ymd_His') . '.xls');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+
+    ?>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            table { border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; font-size: 11pt; }
+            th, td { border: 1px solid #8ea9db; padding: 6px; text-align: left; vertical-align: top; }
+            th { background: #d9eaf7; font-weight: bold; }
+            .number { text-align: right; }
+        </style>
+    </head>
+    <body>
+        <table>
+            <thead>
+                <tr>
+                    <th>S.No</th>
+                    <th>Date</th>
+                    <th>Emp ID</th>
+                    <th>Employee Name</th>
+                    <th>Category</th>
+                    <th>Description</th>
+                    <th>Requested</th>
+                    <th>Paid</th>
+                    <th>Balance</th>
+                    <th>Status</th>
+                    <th>Proof File</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($items as $index => $row): ?>
+                    <tr>
+                        <td><?= $index + 1 ?></td>
+                        <td><?= h(date('d-m-Y', strtotime((string) ($row['expense_date'] ?? 'now')))) ?></td>
+                        <td><?= h((string) ($row['employee_emp_id'] ?? '-')) ?></td>
+                        <td><?= h((string) ($row['employee_name'] ?? '-')) ?></td>
+                        <td><?= h((string) ($row['category'] ?? '-')) ?></td>
+                        <td><?= h((string) ($row['expense_description'] ?? '-')) ?></td>
+                        <td class="number"><?= h(number_format((float) ($row['amount_requested'] ?? 0), 2, '.', '')) ?></td>
+                        <td class="number"><?= h(number_format((float) ($row['amount_paid'] ?? 0), 2, '.', '')) ?></td>
+                        <td class="number"><?= h(number_format((float) ($row['remaining_balance'] ?? 0), 2, '.', '')) ?></td>
+                        <td><?= h(reimbursement_status_label((string) ($row['status'] ?? ''))) ?></td>
+                        <td><?= h((string) ($row['attachment_name'] ?? '')) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </body>
+    </html>
+    <?php
+    exit;
 }
 
 function admin_reimbursement_by_id(int $reimbursementId): ?array
@@ -403,8 +493,8 @@ function create_employee_reimbursement(array $employee, string $date, array $sou
     $attachment = store_reimbursement_upload($file, 'claims', 'reimbursement proof');
 
     try {
-        db()->prepare('INSERT INTO employee_reimbursements (user_id, admin_id, expense_date, category, expense_description, amount_requested, amount_paid, remaining_balance, status, attachment_path, attachment_name, attachment_mime, payment_id, created_at, updated_at)
-            VALUES (:user_id, :admin_id, :expense_date, :category, :expense_description, :amount_requested, 0, :remaining_balance, :status, :attachment_path, :attachment_name, :attachment_mime, NULL, :created_at, :updated_at)')
+        db()->prepare('INSERT INTO employee_reimbursements (user_id, admin_id, expense_date, category, expense_description, amount_requested, amount_paid, remaining_balance, status, attachment_path, attachment_name, attachment_mime, attachment_data, payment_id, created_at, updated_at)
+            VALUES (:user_id, :admin_id, :expense_date, :category, :expense_description, :amount_requested, 0, :remaining_balance, :status, :attachment_path, :attachment_name, :attachment_mime, :attachment_data, NULL, :created_at, :updated_at)')
             ->execute([
                 'user_id' => (int) $employee['id'],
                 'admin_id' => (int) $employee['admin_id'],
@@ -417,6 +507,7 @@ function create_employee_reimbursement(array $employee, string $date, array $sou
                 'attachment_path' => $attachment['path'],
                 'attachment_name' => $attachment['name'],
                 'attachment_mime' => $attachment['mime'],
+                'attachment_data' => $attachment['data'],
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);

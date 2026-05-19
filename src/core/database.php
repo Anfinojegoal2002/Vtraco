@@ -138,6 +138,94 @@ function backfill_punch_photos_from_files(PDO $pdo): void
     }
 }
 
+function backfill_reimbursement_attachments_from_files(PDO $pdo): void
+{
+    $appRoot = str_replace('\\', '/', dirname(__DIR__, 2));
+    $select = $pdo->query("SELECT id, attachment_path, attachment_mime FROM employee_reimbursements WHERE attachment_path IS NOT NULL AND attachment_path <> '' AND attachment_data IS NULL LIMIT 50");
+    if (!$select) {
+        return;
+    }
+
+    $update = $pdo->prepare('UPDATE employee_reimbursements SET attachment_data = :data WHERE id = :id');
+    foreach ($select->fetchAll() as $row) {
+        $relativePath = str_replace('\\', '/', trim((string) ($row['attachment_path'] ?? '')));
+        $relativePath = preg_replace('#^https?://[^/]+#i', '', $relativePath) ?? '';
+        $relativePath = ltrim($relativePath, '/');
+        if ($relativePath === '' || str_contains($relativePath, '..')) {
+            continue;
+        }
+
+        $fullPath = $appRoot . '/' . $relativePath;
+        if (!is_file($fullPath)) {
+            continue;
+        }
+
+        $mime = (string) ($row['attachment_mime'] ?? '');
+        $data = str_starts_with($mime, 'image/')
+            ? optimized_database_image_contents($fullPath)
+            : file_get_contents($fullPath);
+        if ($data === false) {
+            continue;
+        }
+
+        $update->execute([
+            'data' => is_array($data) ? $data['data'] : $data,
+            'id' => (int) $row['id'],
+        ]);
+    }
+}
+
+function optimized_database_image_contents(string $source): array|false
+{
+    $raw = file_get_contents($source);
+    if ($raw === false) {
+        return false;
+    }
+
+    if (!function_exists('imagecreatefromstring')) {
+        return [
+            'data' => $raw,
+            'mime' => mime_content_type($source) ?: 'image/jpeg',
+        ];
+    }
+
+    $image = @imagecreatefromstring($raw);
+    if (!$image) {
+        return [
+            'data' => $raw,
+            'mime' => mime_content_type($source) ?: 'image/jpeg',
+        ];
+    }
+
+    $width = imagesx($image);
+    $height = imagesy($image);
+    $scale = min(1, 1200 / max($width, $height));
+    $targetWidth = max(1, (int) round($width * $scale));
+    $targetHeight = max(1, (int) round($height * $scale));
+    $canvas = imagecreatetruecolor($targetWidth, $targetHeight);
+    imagefill($canvas, 0, 0, imagecolorallocate($canvas, 255, 255, 255));
+    imagecopyresampled($canvas, $image, 0, 0, 0, 0, $targetWidth, $targetHeight, $width, $height);
+    imagedestroy($image);
+
+    $encoded = false;
+    foreach ([78, 68, 58] as $quality) {
+        ob_start();
+        imagejpeg($canvas, null, $quality);
+        $candidate = ob_get_clean();
+        if (is_string($candidate) && ($encoded === false || strlen($candidate) < strlen($encoded))) {
+            $encoded = $candidate;
+        }
+        if (is_string($candidate) && strlen($candidate) <= 700 * 1024) {
+            break;
+        }
+    }
+    imagedestroy($canvas);
+
+    return is_string($encoded)
+        ? ['data' => $encoded, 'mime' => 'image/jpeg']
+        : ['data' => $raw, 'mime' => mime_content_type($source) ?: 'image/jpeg'];
+}
+
 function initialize_database(): void
 {
     $pdo = db();
@@ -426,6 +514,7 @@ function initialize_database(): void
         attachment_path VARCHAR(255) NULL,
         attachment_name VARCHAR(255) NULL,
         attachment_mime VARCHAR(100) NULL,
+        attachment_data LONGBLOB NULL,
         payment_id INT UNSIGNED NULL,
         created_at DATETIME NOT NULL,
         updated_at DATETIME NOT NULL,
@@ -456,6 +545,11 @@ function initialize_database(): void
         CONSTRAINT fk_reimbursement_payments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         CONSTRAINT fk_reimbursement_payments_admin FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    if (!table_has_column($pdo, 'employee_reimbursements', 'attachment_data')) {
+        $pdo->exec('ALTER TABLE employee_reimbursements ADD COLUMN attachment_data LONGBLOB NULL AFTER attachment_mime');
+    }
+    backfill_reimbursement_attachments_from_files($pdo);
+
     $pdo->exec("CREATE TABLE IF NOT EXISTS payments (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         user_id INT UNSIGNED NOT NULL,

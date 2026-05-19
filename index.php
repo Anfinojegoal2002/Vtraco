@@ -39,7 +39,7 @@ if ($action) {
         }
         report_exception($exception, 'Unhandled action failed.', ['action' => $action]);
         flash('error', $exception instanceof RuntimeException ? $exception->getMessage() : 'Unable to complete the request right now.');
-        $user = null;
+        $user = null;   
         try {
             $user = current_user();
         } catch (Throwable) {

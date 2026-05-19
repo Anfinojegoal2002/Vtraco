@@ -405,7 +405,7 @@ function accounts_reimbursement_breakdown_payload(array $reimbursement): array
             'requested_amount' => $requestedAmount,
             'approved_amount' => $approvedAmount,
             'details' => $category === $currentCategory ? (string) ($reimbursement['expense_description'] ?? '') : '',
-            'proof_url' => $category === $currentCategory ? asset_url((string) ($reimbursement['attachment_path'] ?? '')) : '',
+            'proof_url' => $category === $currentCategory ? reimbursement_attachment_url($reimbursement) : '',
             'proof_name' => $category === $currentCategory ? (string) ($reimbursement['attachment_name'] ?? '') : '',
             'proof_mime' => $category === $currentCategory ? (string) ($reimbursement['attachment_mime'] ?? '') : '',
         ];
@@ -598,15 +598,16 @@ function accounts_pay_group_rows(string $month, string $scope, array $selectedTy
                     continue;
                 }
                 $expenseDate = (string) ($reimbursement['expense_date'] ?? '');
+                $status = reimbursement_status_label((string) ($reimbursement['status'] ?? ''));
                 $items[] = [
                     'key' => 'reimbursement:' . (int) ($reimbursement['id'] ?? 0),
                     'payment_type' => 'REIMBURSEMENT',
-                    'label' => 'Reimbursement' . ($expenseDate !== '' ? ' - ' . date('d M Y', strtotime($expenseDate)) : ''),
+                    'label' => 'Reimbursement' . ($expenseDate !== '' ? ' - ' . date('d M Y', strtotime($expenseDate)) : '') . ($status === 'PENDING' ? ' (Pending)' : ''),
                     'actual_amount' => $remaining,
                     'requested_amount' => $remaining,
                     'reference_id' => (int) ($reimbursement['id'] ?? 0),
                     'meta' => [
-                        'status' => (string) ($reimbursement['status'] ?? ''),
+                        'status' => $status,
                         'expense_date' => $expenseDate,
                         'category' => (string) ($reimbursement['category'] ?? ''),
                     ],
@@ -839,7 +840,7 @@ function approved_reimbursement_requests(?int $employeeId = null): array
             FROM employee_reimbursements er
             JOIN users u ON u.id = er.user_id
             WHERE er.admin_id = :admin_id
-              AND er.status IN ("APPROVED", "PARTIALLY PAID")
+              AND er.status IN ("PENDING", "APPROVED", "PARTIALLY PAID")
               AND er.remaining_balance > 0';
     $params = ['admin_id' => (int) $admin['id']];
 
@@ -1226,7 +1227,7 @@ function normalize_payment_payload(array $source, ?array $existingPayment = null
     if ($paymentType === 'REIMBURSEMENT' && $reimbursementId > 0) {
         $reimbursement = payment_related_reimbursement_by_id($reimbursementId, (int) $admin['id']);
         if (!$reimbursement || (int) $reimbursement['user_id'] !== $employeeId) {
-            throw new RuntimeException('Choose a valid approved reimbursement request.');
+            throw new RuntimeException('Choose a valid reimbursement request.');
         }
 
         $existingAmount = $existingPayment && (int) ($existingPayment['reimbursement_id'] ?? 0) === $reimbursementId
@@ -1402,7 +1403,7 @@ function create_accounts_payment_batch(array $source, array $file = []): array
             $reimbursementId = max(0, (int) ($allocation['reference_id'] ?? 0));
             $reimbursement = payment_related_reimbursement_by_id($reimbursementId, (int) $admin['id']);
             if (!$reimbursement || (int) ($reimbursement['user_id'] ?? 0) !== $employeeId) {
-                throw new RuntimeException('Choose a valid approved reimbursement request.');
+                throw new RuntimeException('Choose a valid reimbursement request.');
             }
             $remaining = round((float) ($reimbursement['remaining_balance'] ?? 0), 2);
             if ($amount > $remaining) {

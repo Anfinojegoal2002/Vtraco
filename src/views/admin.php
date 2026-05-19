@@ -13,39 +13,94 @@ function render_admin_dashboard(): void
     $user = current_user();
     $isFreelancer = ($user['role'] ?? '') === 'freelancer';
     $label = 'Employees';
+    $dashboardReimbursements = $isFreelancer ? [] : admin_recent_reimbursements(12, null, 24);
 
     render_header($isFreelancer ? 'Employee Dashboard' : 'Admin Dashboard');
     ?>
-    <section class="page-title">
-        <div>
-            <span class="eyebrow"><?= h($isFreelancer ? 'Employee Dashboard' : 'Admin Dashboard') ?></span>
-            <h1><?= h($isFreelancer ? 'Employee Dashboard' : 'Admin Dashboard') ?></h1>
-            <p>Review today&apos;s employee log totals, <?= h(strtolower($label)) ?> coverage, and half day details for <?= h($displayDate) ?>.</p>
-        </div>
-    </section>
-    <section class="dashboard-grid">
-        <div class="metric-card">
-            <span class="eyebrow">Team</span>
-            <strong><?= employee_count() ?></strong>
-            <span>Total <?= h($label) ?></span>
-        </div>
-        <div class="metric-card">
-            <span class="eyebrow">Today</span>
-            <strong><?= (int) ($counts['Present'] ?? 0) ?></strong>
-            <span>Present</span>
-        </div>
-        <div class="metric-card">
-            <span class="eyebrow">Today</span>
-            <strong><?= (int) ($counts['Absent'] ?? 0) ?></strong>
-            <span>Absent</span>
-        </div>
-        <div class="metric-card">
-            <span class="eyebrow">Today</span>
-            <strong><?= (int) ($counts['Half Day'] ?? 0) ?></strong>
-            <span>Half Day</span>
-        </div>
-    </section>
-    <div class="spacer"></div>
+    <!-- Only reimbursement section is shown. Salary and incentive payment options are removed as requested. -->
+    <?php if (!$isFreelancer): ?>
+        <section class="section-block dashboard-reimbursement-register">
+            <div class="split">
+                <div>
+                    <span class="eyebrow">Reimbursement Register</span>
+                    <h2>Last 24 Hours</h2>
+                    <p class="hint">Requests automatically leave this dashboard view after 24 hours.</p>
+                </div>
+                <div class="action-bar">
+                    <form method="post">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="action" value="export_reimbursements_excel">
+                        <button class="button outline small" type="submit">Download Excel</button>
+                    </form>
+                    <a class="button outline small" href="<?= h(BASE_URL) ?>?page=admin_reimbursements">View All</a>
+                </div>
+            </div>
+            <div class="spacer"></div>
+            <div class="table-wrap dashboard-excel-wrap">
+                <table class="dashboard-excel-table">
+                    <thead>
+                        <tr>
+                            <th>S.No</th>
+                            <th>Date</th>
+                            <th>Emp ID</th>
+                            <th>Employee Name</th>
+                            <th>Category</th>
+                            <th>Description</th>
+                            <th>Requested</th>
+                            <th>Paid</th>
+                            <th>Balance</th>
+                            <th>Status</th>
+                            <th>Proof</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if ($dashboardReimbursements): ?>
+                            <?php foreach ($dashboardReimbursements as $index => $row): ?>
+                                <?php $status = reimbursement_status_label((string) ($row['status'] ?? '')); ?>
+                                <tr>
+                                    <td><?= $index + 1 ?></td>
+                                    <td><?= h(date('d-m-Y', strtotime((string) ($row['expense_date'] ?? 'now')))) ?></td>
+                                    <td><?= h((string) ($row['employee_emp_id'] ?? '-')) ?></td>
+                                    <td><?= h((string) ($row['employee_name'] ?? '-')) ?></td>
+                                    <td><?= h((string) ($row['category'] ?? '-')) ?></td>
+                                    <td><?= h((string) ($row['expense_description'] ?? '-')) ?></td>
+                                    <td>Rs <?= h(number_format((float) ($row['amount_requested'] ?? 0), 2)) ?></td>
+                                    <td>Rs <?= h(number_format((float) ($row['amount_paid'] ?? 0), 2)) ?></td>
+                                    <td>Rs <?= h(number_format((float) ($row['remaining_balance'] ?? 0), 2)) ?></td>
+                                    <td><span class="status-pill reimbursement-status <?= h(reimbursement_status_badge_class($status)) ?>"><?= h($status) ?></span></td>
+                                    <td>
+                                        <?php $proofUrl = reimbursement_attachment_url($row); ?>
+                                        <?php if ($proofUrl !== ''): ?>
+                                            <a class="button ghost small" href="<?= h($proofUrl) ?>" target="_blank" rel="noopener">Open</a>
+                                        <?php else: ?>
+                                            -
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <tr>
+                                <td colspan="11" class="muted center">No reimbursement requests in the last 24 hours.</td>
+                            </tr>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+        <style>
+            .dashboard-reimbursement-register { overflow: hidden; }
+            .dashboard-excel-wrap { overflow-x: auto; border: 1px solid rgba(30,41,59,0.12); border-radius: 8px; background: #ffffff; }
+            .dashboard-excel-table { min-width: 1120px; width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+            .dashboard-excel-table th,
+            .dashboard-excel-table td { border: 1px solid rgba(30,41,59,0.16); padding: 9px 10px; text-align: left; vertical-align: top; background: #ffffff; }
+            .dashboard-excel-table th { background: #eaf1ff; color: #172554; font-weight: 800; white-space: nowrap; }
+            .dashboard-excel-table tbody tr:nth-child(even) td { background: #f8fafc; }
+            .dashboard-excel-table td:nth-child(1),
+            .dashboard-excel-table td:nth-child(7),
+            .dashboard-excel-table td:nth-child(8),
+            .dashboard-excel-table td:nth-child(9) { white-space: nowrap; }
+        </style>
+    <?php endif; ?>
 
     <?php
     render_footer();
@@ -1949,7 +2004,7 @@ function render_admin_reimbursements(): void
                     'amount' => number_format((float) $item['amount_requested'], 2),
                     'description' => (string) $item['expense_description'],
                     'attachmentName' => (string) ($item['attachment_name'] ?? ''),
-                    'attachmentUrl' => asset_url((string) ($item['attachment_path'] ?? '')),
+                    'attachmentUrl' => reimbursement_attachment_url($item),
                     'attachmentMime' => (string) ($item['attachment_mime'] ?? ''),
                 ];
                 ?>
@@ -3029,6 +3084,10 @@ function render_admin_accounts(): void
     $approvalType = 'REIMBURSEMENT';
     $approvalScope = (string) ($filters['approval_scope'] ?? 'employee');
     $payGroup = (string) ($filters['pay_group'] ?? 'employee');
+    $payTypes = ['REIMBURSEMENT'];
+    if ($section === 'pay') {
+        $filters['pay_types'] = $payTypes;
+    }
 
     if (!empty($_GET['download_payslip_id'])) {
         $payment = admin_payment_by_id((int) $_GET['download_payslip_id']);
@@ -3041,7 +3100,7 @@ function render_admin_accounts(): void
     }
 
     $approvalRows = accounts_approval_rows($requestMonth, $approvalType, $approvalScope);
-    $payGroups = accounts_pay_group_rows($requestMonth, $payGroup, $filters['pay_types'] ?? []);
+    $payGroups = accounts_pay_group_rows($requestMonth, $payGroup, $payTypes);
     $historyRows = accounts_payment_history_rows($filters);
     $vendorAccounts = accounts_vendor_accounts();
     $paymentMethods = payment_bank_names();
@@ -3074,7 +3133,7 @@ function render_admin_accounts(): void
     <section class="section-block accounts-tabs-panel">
         <nav class="employee-tabs inline" aria-label="Accounts sections">
             <a class="tab-link <?= $section === 'approval' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?<?= h(http_build_query(array_merge($tabQueryBase, ['section' => 'approval', 'approval_type' => $approvalType]))) ?>">Approval</a>
-            <a class="tab-link <?= $section === 'pay' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?<?= h(http_build_query(array_merge($tabQueryBase, ['section' => 'pay', 'pay_group' => $payGroup, 'pay_types' => $filters['pay_types'] ?? accounts_payable_types()]))) ?>">Pay</a>
+            <a class="tab-link <?= $section === 'pay' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?<?= h(http_build_query(array_merge($tabQueryBase, ['section' => 'pay', 'pay_group' => $payGroup, 'pay_types' => $payTypes]))) ?>">Pay</a>
             <a class="tab-link <?= $section === 'history' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?<?= h(http_build_query(array_merge($tabQueryBase, ['section' => 'history']))) ?>">Pay History</a>
         </nav>
     </section>
@@ -3165,7 +3224,7 @@ function render_admin_accounts(): void
                                                 data-amount-requested="<?= h(number_format((float) ($row['amount_requested'] ?? 0), 2, '.', '')) ?>"
                                                 data-particular="<?= h((string) ($row['category'] ?? '')) ?>"
                                                 data-details="<?= h((string) ($row['expense_description'] ?? '')) ?>"
-                                                data-proof-url="<?= h(asset_url((string) ($row['attachment_path'] ?? ''))) ?>"
+                                                data-proof-url="<?= h(reimbursement_attachment_url($row)) ?>"
                                                 data-proof-mime="<?= h((string) ($row['attachment_mime'] ?? '')) ?>"
                                                 onclick="return window.openAccountsApproval(event, this);"
                                             >Approve</a>
@@ -3220,6 +3279,7 @@ function render_admin_accounts(): void
                 <input type="hidden" name="page" value="admin_accounts">
                 <input type="hidden" name="section" value="pay">
                 <input type="hidden" name="pay_types_submitted" value="1">
+                <input type="hidden" name="pay_types[]" value="REIMBURSEMENT">
                 <div class="accounts-toolbar-grid">
                     <div class="field">
                         <label>Pay Month</label>
@@ -3228,12 +3288,7 @@ function render_admin_accounts(): void
                     <div class="field">
                         <label>Type</label>
                         <div class="accounts-type-grid">
-                            <?php foreach (accounts_payable_types() as $type): ?>
-                                <label class="accounts-type-option">
-                                    <input type="checkbox" name="pay_types[]" value="<?= h($type) ?>" <?= in_array($type, $filters['pay_types'] ?? [], true) ? 'checked' : '' ?>>
-                                    <span><?= h(ucfirst(strtolower($type))) ?></span>
-                                </label>
-                            <?php endforeach; ?>
+                            <span class="accounts-type-option">Reimbursement</span>
                         </div>
                     </div>
                     <div class="accounts-toolbar-actions">
@@ -3243,7 +3298,7 @@ function render_admin_accounts(): void
                 <div class="spacer"></div>
                 <nav class="employee-tabs" aria-label="Pay scopes" data-pay-scope-tabs>
                     <?php foreach (['employee', 'vendor', 'freelancer'] as $scope): ?>
-                        <a class="tab-link <?= $payGroup === $scope ? 'active' : '' ?>" data-pay-scope-link="<?= h($scope) ?>" href="<?= h(BASE_URL) ?>?<?= h(http_build_query(array_merge($tabQueryBase, ['section' => 'pay', 'pay_group' => $scope, 'pay_types' => $filters['pay_types'] ?? accounts_payable_types()]))) ?>"><?= h(accounts_scope_label($scope)) ?></a>
+                        <a class="tab-link <?= $payGroup === $scope ? 'active' : '' ?>" data-pay-scope-link="<?= h($scope) ?>" href="<?= h(BASE_URL) ?>?<?= h(http_build_query(array_merge($tabQueryBase, ['section' => 'pay', 'pay_group' => $scope, 'pay_types' => $payTypes]))) ?>"><?= h(accounts_scope_label($scope)) ?></a>
                     <?php endforeach; ?>
                 </nav>
                 <?php if ($payGroup === 'vendor' && $vendorAccounts): ?>
@@ -3484,9 +3539,16 @@ function render_admin_accounts(): void
             </div>
             <p id="accounts-approval-confirm-copy"></p>
             <div class="payment-action-row">
-                <button class="button solid" type="submit" form="accounts-approval-form">Approve</button>
+                <button class="button solid" type="button" id="accounts-approval-confirm-submit">Approve</button>
                 <button class="button outline" type="button" data-close-modal>Cancel</button>
             </div>
+        </div>
+    </div>
+
+    <div class="modal accounts-proof-viewer-modal" id="accounts-proof-viewer-modal">
+        <div class="accounts-proof-viewer-card">
+            <button class="modal-close accounts-proof-viewer-close" type="button" data-close-modal>&times;</button>
+            <img id="accounts-proof-viewer-image" src="" alt="Reimbursement proof full view">
         </div>
     </div>
 
@@ -3637,9 +3699,15 @@ function render_admin_accounts(): void
         .accounts-breakdown-card { border: 1px solid rgba(36, 52, 109, 0.1); border-radius: 16px; padding: 14px; background: rgba(248, 250, 255, 0.72); }
         .accounts-breakdown-card embed,
         .accounts-breakdown-card img { width: 100%; max-height: 180px; object-fit: cover; border-radius: 12px; margin-top: 10px; }
+        .accounts-approval-proof-wrap img { max-height: 320px; object-fit: contain; background: #fff; cursor: zoom-in; }
+        .accounts-approval-proof-wrap embed { min-height: 420px; }
         .accounts-approval-summary { display: grid; gap: 12px; }
         .accounts-total-bar { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .accounts-proof-thumb { width: 54px; height: 54px; object-fit: cover; border-radius: 10px; display: block; margin-bottom: 8px; }
+        .accounts-proof-viewer-modal { z-index: 220; background: rgba(8, 13, 31, 0.84); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+        .accounts-proof-viewer-card { width: min(1180px, calc(100vw - 32px)); height: min(92vh, 920px); position: relative; display: flex; align-items: center; justify-content: center; }
+        .accounts-proof-viewer-card img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 14px; background: #fff; box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42); }
+        .accounts-proof-viewer-close { right: 0; top: 0; background: rgba(255, 255, 255, 0.92); color: #172554; z-index: 2; }
         @media (max-width: 1100px) {
             .accounts-filter-shell .accounts-toolbar-grid { grid-template-columns: 1fr 1fr; }
             .accounts-history-filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -3675,6 +3743,9 @@ function render_admin_accounts(): void
             const approvalConfirmCopy = document.getElementById('accounts-approval-confirm-copy');
             const approvalConfirmEmployee = document.getElementById('accounts-approval-confirm-employee');
             const approvalConfirmAmount = document.getElementById('accounts-approval-confirm-amount');
+            const approvalConfirmSubmit = document.getElementById('accounts-approval-confirm-submit');
+            const proofViewerModal = document.getElementById('accounts-proof-viewer-modal');
+            const proofViewerImage = document.getElementById('accounts-proof-viewer-image');
             const allocationForm = document.getElementById('accounts-allocation-form');
             const allocationRows = document.getElementById('accounts-allocation-rows');
             const totalActual = document.getElementById('accounts-total-actual');
@@ -3721,6 +3792,22 @@ function render_admin_accounts(): void
                     }
                 });
             });
+
+            if (proofViewerModal) {
+                proofViewerModal.addEventListener('click', event => {
+                    if (event.target === proofViewerModal) {
+                        proofViewerModal.classList.remove('open');
+                    }
+                });
+            }
+
+            const openProofViewer = imageUrl => {
+                if (!proofViewerModal || !proofViewerImage || imageUrl === '') {
+                    return;
+                }
+                proofViewerImage.src = imageUrl;
+                proofViewerModal.classList.add('open');
+            };
 
             const updateTransferModes = preferredValue => {
                 if (!transferModeSelect || !transferModeField || !transactionField || !transactionInput) {
@@ -3809,7 +3896,11 @@ function render_admin_accounts(): void
                 if (proofUrl !== '') {
                     approvalProofWrap.innerHTML = proofMime.indexOf('application/pdf') === 0
                         ? `<embed src="${proofUrl}" type="application/pdf">`
-                        : `<img src="${proofUrl}" alt="Reimbursement proof">`;
+                        : `<img src="${proofUrl}" alt="Reimbursement proof" title="Open full proof" data-proof-full>`;
+                    const proofImage = approvalProofWrap.querySelector('[data-proof-full]');
+                    if (proofImage) {
+                        proofImage.addEventListener('click', () => openProofViewer(proofUrl));
+                    }
                 } else {
                     approvalProofWrap.innerHTML = '<p class="hint">No proof uploaded.</p>';
                 }
@@ -3842,6 +3933,16 @@ function render_admin_accounts(): void
                 closeModal('accounts-approval-modal');
                 openModal('accounts-approval-confirm-modal');
             };
+
+            if (approvalConfirmSubmit && approvalForm) {
+                approvalConfirmSubmit.addEventListener('click', () => {
+                    if (typeof approvalForm.requestSubmit === 'function') {
+                        approvalForm.requestSubmit();
+                    } else {
+                        approvalForm.submit();
+                    }
+                });
+            }
 
             const refreshAllocationTotals = () => {
                 const inputs = Array.from(allocationRows.querySelectorAll('[data-payable-input]'));
