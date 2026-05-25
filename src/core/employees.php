@@ -75,7 +75,7 @@ function employee_by_id(int $id): ?array
 
 function normalize_emp_code_for_match(string $empCode): string
 {
-    $normalized = strtoupper(trim($empCode));
+    $normalized = strtoupper(trim(normalize_numeric_emp_code_text($empCode)));
     $normalized = preg_replace('/[^A-Z0-9]/', '', $normalized) ?? $normalized;
     if (preg_match('/^([A-Z]+)0*([0-9]+)$/', $normalized, $matches) === 1) {
         return $matches[1] . $matches[2];
@@ -84,16 +84,26 @@ function normalize_emp_code_for_match(string $empCode): string
     return $normalized;
 }
 
+function normalize_numeric_emp_code_text(string $empCode): string
+{
+    $trimmed = trim($empCode);
+    if (preg_match('/^([0-9]+)\.0+$/', $trimmed, $matches) === 1) {
+        return $matches[1];
+    }
+
+    return $trimmed;
+}
+
 function emp_code_numeric_key(string $empCode): string
 {
-    $digits = preg_replace('/[^0-9]/', '', strtoupper(trim($empCode))) ?? '';
+    $digits = preg_replace('/[^0-9]/', '', strtoupper(normalize_numeric_emp_code_text($empCode))) ?? '';
     $digits = ltrim($digits, '0');
     return $digits === '' ? '' : $digits;
 }
 
 function emp_code_raw_key(string $empCode): string
 {
-    return preg_replace('/[^A-Z0-9]/', '', strtoupper(trim($empCode))) ?? '';
+    return preg_replace('/[^A-Z0-9]/', '', strtoupper(normalize_numeric_emp_code_text($empCode))) ?? '';
 }
 
 function employee_by_emp_code(string $empCode): ?array

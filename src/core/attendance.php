@@ -448,7 +448,7 @@ function working_days_total(array $monthAttendance): float
         if ($status === 'Present') {
             $total += 1.0;
         } elseif ($status === 'Half Day') {
-            $total += 0.5;
+            $total += 1.0;
         }
     }
     return $total;
@@ -519,7 +519,7 @@ function attendance_counts(array $monthAttendance): array
                 break;
             case 'HALF DAY':
                 $counts['half_day']++;
-                $counts['payable_days'] += 0.5;
+                $counts['payable_days'] += 1.0;
                 break;
             case 'LEAVE':
                 $counts['leave']++;
@@ -1116,6 +1116,55 @@ function attendance_xlsx_shared_strings(ZipArchive $zip): array
     return $strings;
 }
 
+function attendance_xlsx_style_formats(ZipArchive $zip): array
+{
+    $stylesXml = $zip->getFromName('xl/styles.xml');
+    if (!is_string($stylesXml) || trim($stylesXml) === '') {
+        return [];
+    }
+
+    $styles = simplexml_load_string($stylesXml);
+    if (!$styles instanceof SimpleXMLElement) {
+        return [];
+    }
+
+    $styles->registerXPathNamespace('x', 'http://schemas.openxmlformats.org/spreadsheetml/2006/main');
+    $customFormats = [];
+    foreach ($styles->xpath('/x:styleSheet/x:numFmts/x:numFmt') ?: [] as $formatNode) {
+        $attributes = $formatNode->attributes();
+        $formatId = (string) ($attributes['numFmtId'] ?? '');
+        if ($formatId !== '') {
+            $customFormats[$formatId] = (string) ($attributes['formatCode'] ?? '');
+        }
+    }
+
+    $styleFormats = [];
+    $index = 0;
+    foreach ($styles->xpath('/x:styleSheet/x:cellXfs/x:xf') ?: [] as $xfNode) {
+        $attributes = $xfNode->attributes();
+        $formatId = (string) ($attributes['numFmtId'] ?? '');
+        $styleFormats[$index] = $customFormats[$formatId] ?? '';
+        $index++;
+    }
+
+    return $styleFormats;
+}
+
+function attendance_leading_zero_format_width(string $formatCode): int
+{
+    $format = trim($formatCode);
+    if ($format === '') {
+        return 0;
+    }
+
+    $format = preg_replace('/"[^"]*"/', '', $format) ?? $format;
+    $format = preg_replace('/\\\\./', '', $format) ?? $format;
+    $format = preg_replace('/\[[^\]]+\]/', '', $format) ?? $format;
+    $format = trim($format);
+
+    return preg_match('/^0{2,}$/', $format) === 1 ? strlen($format) : 0;
+}
+
 function attendance_xlsx_first_sheet_path(ZipArchive $zip): ?string
 {
     if ($zip->locateName('xl/worksheets/sheet1.xml') !== false) {
@@ -1189,6 +1238,7 @@ function attendance_extract_xlsx_rows(string $path): array
         }
 
         $sharedStrings = attendance_xlsx_shared_strings($zip);
+        $styleFormats = attendance_xlsx_style_formats($zip);
         $sheet = simplexml_load_string($sheetXml);
         if (!$sheet instanceof SimpleXMLElement) {
             throw new RuntimeException('Could not parse the attendance Excel worksheet.');
@@ -1220,6 +1270,11 @@ function attendance_extract_xlsx_rows(string $path): array
                 } else {
                     $rawValue = trim((string) ($cellNode->v ?? ''));
                     $value = $type === 's' ? (string) ($sharedStrings[(int) $rawValue] ?? $rawValue) : $rawValue;
+                    $styleIndex = (int) ((string) ($attributes['s'] ?? '0'));
+                    $zeroWidth = attendance_leading_zero_format_width((string) ($styleFormats[$styleIndex] ?? ''));
+                    if ($type !== 's' && $zeroWidth > 0 && preg_match('/^\d+$/', $rawValue) === 1) {
+                        $value = str_pad($rawValue, $zeroWidth, '0', STR_PAD_LEFT);
+                    }
                 }
 
                 $row[$columnIndex] = $value;
