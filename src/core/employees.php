@@ -44,6 +44,23 @@ function employees(): array
     return $stmt->fetchAll();
 }
 
+function project_assignable_employees(): array
+{
+    $adminId = current_admin_id();
+    $user = current_user();
+    if ($adminId === null) {
+        return [];
+    }
+
+    if (($user['role'] ?? '') === 'admin' || ($user['role'] ?? '') === 'external_vendor') {
+        $stmt = db()->prepare("SELECT * FROM users WHERE role IN ('employee', 'corporate_employee') AND admin_id = :admin_id ORDER BY name");
+        $stmt->execute(['admin_id' => $adminId]);
+        return $stmt->fetchAll();
+    }
+
+    return employees();
+}
+
 function employee_by_id(int $id): ?array
 {
     $user = current_user();
@@ -391,6 +408,13 @@ function normalize_rules_from_input(array $source): array
     [$projectSessionFrom, $projectSessionTo] = ordered_rule_date_range($projectSessionFrom, $projectSessionTo);
     [$shiftFrom, $shiftTo] = ordered_rule_date_range($shiftFrom, $shiftTo);
     [$employeeFrom, $employeeTo] = ordered_rule_date_range($employeeFrom, $employeeTo);
+    $powerScopes = is_array($source['power_attendance_scopes'] ?? null) ? $source['power_attendance_scopes'] : [];
+    $powerScopeLookup = array_fill_keys(array_map('strval', $powerScopes), true);
+    $teamScopes = is_array($source['power_team_scopes'] ?? null) ? $source['power_team_scopes'] : [];
+    $teamScopeLookup = array_fill_keys(array_map('strval', $teamScopes), true);
+    $accountScopes = is_array($source['power_account_scopes'] ?? null) ? $source['power_account_scopes'] : [];
+    $accountScopeLookup = array_fill_keys(array_map('strval', $accountScopes), true);
+    $hasPowerAccess = !empty($source['power_access']) || $powerScopes !== [] || $teamScopes !== [] || $accountScopes !== [] || !empty($source['power_projects']) || !empty($source['power_accounts']);
 
     return [
         'manual_punch_in' => $manualEnabled,
@@ -398,6 +422,20 @@ function normalize_rules_from_input(array $source): array
         'manual_out_count' => $manualEnabled ? $count : 0,
         'biometric_punch_in' => $biometricEnabled,
         'biometric_punch_out' => $biometricEnabled,
+        'power_access' => $hasPowerAccess,
+        'power_attendance_employee' => isset($powerScopeLookup['employee']),
+        'power_attendance_trainer' => isset($powerScopeLookup['trainer']),
+        'power_attendance_freelancer' => isset($powerScopeLookup['freelancer']),
+        'power_attendance_vendor' => isset($powerScopeLookup['vendor']),
+        'power_attendance_vendor_trainer' => isset($powerScopeLookup['vendor_trainer']),
+        'power_team_employee' => isset($teamScopeLookup['employee']),
+        'power_team_freelancer' => isset($teamScopeLookup['freelancer']),
+        'power_team_vendor' => isset($teamScopeLookup['vendor']),
+        'power_projects' => !empty($source['power_projects']),
+        'power_accounts' => !empty($source['power_accounts']) || $accountScopes !== [],
+        'power_accounts_verify' => isset($accountScopeLookup['verify']) || !empty($source['power_accounts_verify']),
+        'power_accounts_pay' => isset($accountScopeLookup['pay']) || !empty($source['power_accounts_pay']),
+        'power_accounts_history' => isset($accountScopeLookup['history']) || !empty($source['power_accounts_history']),
         'project_session_from' => $projectSessionFrom,
         'project_session_to' => $projectSessionTo,
         'shift_from' => $shiftFrom,
@@ -437,7 +475,7 @@ function save_employee_rules(int $userId, array $rules): void
         $insert = $pdo->prepare('INSERT INTO employee_rules (user_id, rule_type, slot_name, project_session_from, project_session_to, shift_from, shift_to, employee_from, employee_to, sort_order, created_at) VALUES (:user_id, :rule_type, :slot_name, :project_session_from, :project_session_to, :shift_from, :shift_to, :employee_from, :employee_to, :sort_order, :created_at)');
         $order = 0;
 
-        foreach (['manual_punch_in', 'biometric_punch_in', 'biometric_punch_out'] as $type) {
+        foreach (['manual_punch_in', 'biometric_punch_in', 'biometric_punch_out', 'power_access', 'power_attendance_employee', 'power_attendance_trainer', 'power_attendance_freelancer', 'power_attendance_vendor', 'power_attendance_vendor_trainer', 'power_team_employee', 'power_team_freelancer', 'power_team_vendor', 'power_projects', 'power_accounts', 'power_accounts_verify', 'power_accounts_pay', 'power_accounts_history'] as $type) {
             if (!empty($rules[$type])) {
                 $insert->execute([
                     'user_id' => $userId,
@@ -512,6 +550,20 @@ function employee_rules(int $userId): array
         'manual_out_slots' => [],
         'biometric_punch_in' => false,
         'biometric_punch_out' => false,
+        'power_access' => false,
+        'power_attendance_employee' => false,
+        'power_attendance_trainer' => false,
+        'power_attendance_freelancer' => false,
+        'power_attendance_vendor' => false,
+        'power_attendance_vendor_trainer' => false,
+        'power_team_employee' => false,
+        'power_team_freelancer' => false,
+        'power_team_vendor' => false,
+        'power_projects' => false,
+        'power_accounts' => false,
+        'power_accounts_verify' => false,
+        'power_accounts_pay' => false,
+        'power_accounts_history' => false,
         'project_session_from' => '',
         'project_session_to' => '',
         'shift_from' => '',
@@ -555,6 +607,27 @@ function rules_summary(array $rules): string
     if (!empty($rules['biometric_punch_out'])) {
         $parts[] = 'Biometric Punch Out';
     }
+    if (!empty($rules['power_access'])) {
+        $powerScopes = power_attendance_scope_labels($rules);
+        $powerParts = [];
+        if ($powerScopes) {
+            $powerParts[] = 'Track Attendance (' . implode(', ', $powerScopes) . ')';
+        }
+        if (!empty($rules['power_projects'])) {
+            $powerParts[] = 'Employee Projects';
+        }
+        $teamScopes = power_team_scope_labels($rules);
+        if ($teamScopes) {
+            $powerParts[] = 'Employee (' . implode(', ', $teamScopes) . ')';
+        }
+        $accountScopes = power_accounts_scope_labels($rules);
+        if ($accountScopes) {
+            $powerParts[] = 'Accounts (' . implode(', ', $accountScopes) . ')';
+        } elseif (!empty($rules['power_accounts'])) {
+            $powerParts[] = 'Accounts';
+        }
+        $parts[] = 'Power: ' . ($powerParts ? implode(', ', $powerParts) : 'Enabled');
+    }
     if (!empty($rules['project_session_from']) || !empty($rules['project_session_to'])) {
         $parts[] = 'Project Session: ' . rule_date_range_label((string) $rules['project_session_from'], (string) $rules['project_session_to']);
     }
@@ -562,6 +635,46 @@ function rules_summary(array $rules): string
         $parts[] = 'Employee: ' . rule_date_range_label((string) $rules['employee_from'], (string) $rules['employee_to']);
     }
     return $parts ? implode('<br>', array_map('h', $parts)) : '<span class="muted">No rules assigned</span>';
+}
+
+function employee_power_summary(array $employee, array $rules): string
+{
+    $parts = [];
+
+    if (!empty($rules['power_access'])) {
+        $powerScopes = power_attendance_scope_labels($rules);
+        $powerParts = [];
+        if ($powerScopes) {
+            $powerParts[] = 'Track Attendance (' . implode(', ', $powerScopes) . ')';
+        }
+        if (!empty($rules['power_projects'])) {
+            $powerParts[] = 'Employee Projects';
+        }
+        $teamScopes = power_team_scope_labels($rules);
+        if ($teamScopes) {
+            $powerParts[] = 'Employee (' . implode(', ', $teamScopes) . ')';
+        }
+        $accountScopes = power_accounts_scope_labels($rules);
+        if ($accountScopes) {
+            $powerParts[] = 'Accounts (' . implode(', ', $accountScopes) . ')';
+        } elseif (!empty($rules['power_accounts'])) {
+            $powerParts[] = 'Accounts';
+        }
+
+        $parts = array_merge($parts, $powerParts ?: ['Power Access']);
+    }
+
+    if (employee_is_hr_reviewer($employee)) {
+        $parts[] = 'HR Reviewer';
+    }
+    if (employee_is_in_house_trainer($employee)) {
+        $parts[] = 'In-house Trainer';
+    }
+    if (employee_is_project_coordinator($employee)) {
+        $parts[] = 'Project Coordinator';
+    }
+
+    return $parts ? implode(', ', array_unique($parts)) : '-';
 }
 
 function rule_date_range_label(string $from, string $to): string
@@ -588,6 +701,27 @@ function rules_explanation_html(array $rules): string
     if (!empty($rules['biometric_punch_out'])) {
         $parts[] = 'Biometric Punch Out: record a biometric punch-out time.';
     }
+    if (!empty($rules['power_access'])) {
+        $powerScopes = power_attendance_scope_labels($rules);
+        $powerParts = [];
+        if ($powerScopes) {
+            $powerParts[] = 'Track Attendance for ' . implode(', ', $powerScopes);
+        }
+        if (!empty($rules['power_projects'])) {
+            $powerParts[] = 'Employee Projects';
+        }
+        $teamScopes = power_team_scope_labels($rules);
+        if ($teamScopes) {
+            $powerParts[] = 'Employee for ' . implode(', ', $teamScopes);
+        }
+        $accountScopes = power_accounts_scope_labels($rules);
+        if ($accountScopes) {
+            $powerParts[] = 'Accounts for ' . implode(', ', $accountScopes);
+        } elseif (!empty($rules['power_accounts'])) {
+            $powerParts[] = 'Accounts';
+        }
+        $parts[] = 'Power: access ' . ($powerParts ? implode(', ', $powerParts) : 'delegated tabs') . '.';
+    }
     if (!empty($rules['project_session_from']) || !empty($rules['project_session_to'])) {
         $parts[] = 'Project Session: ' . rule_date_range_label((string) $rules['project_session_from'], (string) $rules['project_session_to']) . '.';
     }
@@ -595,6 +729,71 @@ function rules_explanation_html(array $rules): string
         $parts[] = 'Employee: ' . rule_date_range_label((string) $rules['employee_from'], (string) $rules['employee_to']) . '.';
     }
     return implode('<br>', array_map('h', $parts));
+}
+
+function power_attendance_scope_options(): array
+{
+    return [
+        'employee' => 'Employee',
+        'trainer' => 'Trainer',
+        'freelancer' => 'Freelancer',
+        'vendor' => 'Vendor',
+        'vendor_trainer' => 'Vendor Trainer',
+    ];
+}
+
+function power_attendance_scope_labels(array $rules): array
+{
+    $labels = [];
+    foreach (power_attendance_scope_options() as $key => $label) {
+        if (!empty($rules['power_attendance_' . $key])) {
+            $labels[] = $label;
+        }
+    }
+
+    return $labels;
+}
+
+function power_team_scope_options(): array
+{
+    return [
+        'employee' => 'Employee',
+        'freelancer' => 'Freelancer',
+        'vendor' => 'Vendor',
+    ];
+}
+
+function power_team_scope_labels(array $rules): array
+{
+    $labels = [];
+    foreach (power_team_scope_options() as $key => $label) {
+        if (!empty($rules['power_team_' . $key])) {
+            $labels[] = $label;
+        }
+    }
+
+    return $labels;
+}
+
+function power_accounts_scope_options(): array
+{
+    return [
+        'verify' => 'Verify',
+        'pay' => 'Pay',
+        'history' => 'Pay History',
+    ];
+}
+
+function power_accounts_scope_labels(array $rules): array
+{
+    $labels = [];
+    foreach (power_accounts_scope_options() as $key => $label) {
+        if (!empty($rules['power_accounts_' . $key])) {
+            $labels[] = $label;
+        }
+    }
+
+    return $labels;
 }
 
 function standard_shift_options(): array

@@ -5,15 +5,17 @@ declare(strict_types=1);
 function render_page(string $page): void
 {
     $user = current_user();
-    if ($user && ($user['role'] ?? '') === 'external_vendor' && !is_vendor_profile_complete($user)) {
-        if ($page !== 'vendor_dashboard') {
-            flash('info', 'Please complete your profile details to access all features.');
-            redirect_to('vendor_dashboard');
-        }
-    }
-
     switch ($page) {
         case 'login':
+            if (($_GET['role'] ?? '') === 'corporate_employee') {
+                $popupParams = ['auth' => 'corporate_employee'];
+                foreach (['reset', 'email'] as $key) {
+                    if (isset($_GET[$key]) && (string) $_GET[$key] !== '') {
+                        $popupParams[$key] = (string) $_GET[$key];
+                    }
+                }
+                redirect_to('landing', $popupParams);
+            }
             render_login();
             break;
         case 'register':
@@ -27,6 +29,9 @@ function render_page(string $page): void
             break;
         case 'vendor_dashboard':
             render_vendor_dashboard();
+            break;
+        case 'vendor_payments':
+            render_vendor_payments();
             break;
         case 'super_admin_dashboard':
             render_super_admin_dashboard();
@@ -71,6 +76,21 @@ function render_page(string $page): void
         case 'employee_reimbursements':
             render_employee_reimbursements();
             break;
+        case 'employee_projects':
+            render_employee_projects();
+            break;
+        case 'employee_payments':
+            render_employee_payments();
+            break;
+        case 'employee_profile':
+            render_employee_profile();
+            break;
+        case 'employee_onboarding_reviews':
+            render_employee_onboarding_reviews();
+            break;
+        case 'employee_profile_completion':
+            render_employee_profile_completion();
+            break;
         case 'member_dashboard':
             render_member_dashboard();
             break;
@@ -87,7 +107,14 @@ function render_header(string $title, string $pageClass = ''): void
     $page = $page ?? ($_GET['page'] ?? 'landing');
     $isAdminShell = $user && in_array($user['role'], ['admin', 'freelancer', 'external_vendor'], true);
     $isEmployeeShell = $user && in_array($user['role'], ['employee', 'corporate_employee'], true);
+    $hasPowerAdminAccess = $isEmployeeShell && employee_has_power_access($user);
+    $hasPowerAttendanceAccess = $isEmployeeShell && employee_has_power_attendance_access($user);
+    $hasPowerTeamAccess = $isEmployeeShell && employee_has_power_team_access($user);
+    $hasPowerProjectsAccess = $isEmployeeShell && employee_has_power_projects_access($user);
+    $hasPowerAccountsAccess = $isEmployeeShell && employee_has_power_accounts_access($user);
     $isSidebarShell = $isAdminShell || $isEmployeeShell;
+    $profileSettingsModalId = $isAdminShell ? 'admin-profile-settings-modal' : ($isEmployeeShell ? 'employee-profile-settings-modal' : '');
+    $profileSettingsActivePage = $isAdminShell ? 'admin_profile_settings' : 'employee_profile';
     $isLandingPage = !$user && $page === 'landing';
     $showLoginChooser = !$user && in_array($page, ['landing', 'register'], true);
     $notifications = $user ? notifications_for_user((int) $user['id'], 3) : [];
@@ -134,7 +161,7 @@ function render_header(string $title, string $pageClass = ''): void
                 <div
                     class="sidebar-profile"
                     <?= ($isAdminShell || $isEmployeeShell)
-                        ? ' data-profile-card data-profile-role="' . h((string) $user['role']) . '" data-profile-id="' . (int) $user['id'] . '" data-modal-target="' . h($isAdminShell ? 'admin-profile-settings-modal' : 'employee-profile-settings-modal') . '" role="button" tabindex="0"'
+                        ? ' data-profile-card data-profile-role="' . h((string) $user['role']) . '" data-profile-id="' . (int) $user['id'] . '" data-modal-target="' . h($profileSettingsModalId) . '" role="button" tabindex="0"'
                         : '' ?>
                 >
                     <div class="sidebar-avatar-wrap">
@@ -158,30 +185,25 @@ function render_header(string $title, string $pageClass = ''): void
                     <?php if ($isAdminShell): ?>
                         <?php if ($user['role'] === 'freelancer'): ?>
                         <a class="sidebar-link <?= $page === 'corporate_dashboard' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=corporate_dashboard"><span class="nav-icon">D</span><span>Dashboard</span></a>
-                        <span class="sidebar-section-title">Employee</span>
-                        <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">E</span><span>Employees</span></a>
-                        <span class="sidebar-section-title">Employee Log</span>
-                        <a class="sidebar-link <?= in_array($page, ['admin_attendance', 'admin_employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employee_log"><span class="nav-icon">L</span><span>Employee Log</span></a>
+                        <span class="sidebar-section-title">Team</span>
+                        <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">T</span><span>Team</span></a>
+                        <span class="sidebar-section-title">Track Attendance</span>
+                        <a class="sidebar-link <?= in_array($page, ['admin_attendance', 'admin_employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employee_log"><span class="nav-icon">L</span><span>Track Attendance</span></a>
                         <a class="sidebar-link <?= $page === 'notifications' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=notifications"><span class="nav-icon">N</span><span>Notifications</span><?php if ($unreadNotifications > 0): ?><span class="sidebar-link-badge"><?= (int) $unreadNotifications ?></span><?php endif; ?></a>
                         <?php elseif ($user['role'] === 'external_vendor'): ?>
-                            <?php $isProfileDone = is_vendor_profile_complete($user); ?>
                             <a class="sidebar-link <?= $page === 'vendor_dashboard' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=vendor_dashboard"><span class="nav-icon">D</span><span>Dashboard</span></a>
-                            <span class="sidebar-section-title">Employee</span>
-                            <?php if ($isProfileDone): ?>
-                                <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">E</span><span>Employees</span></a>
-                                <span class="sidebar-section-title">Employee Log</span>
-                                <a class="sidebar-link <?= in_array($page, ['admin_attendance', 'admin_employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employee_log"><span class="nav-icon">L</span><span>Employee Log</span></a>
-                                <a class="sidebar-link <?= $page === 'notifications' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=notifications"><span class="nav-icon">N</span><span>Notifications</span><?php if ($unreadNotifications > 0): ?><span class="sidebar-link-badge"><?= (int) $unreadNotifications ?></span><?php endif; ?></a>
-                            <?php else: ?>
-                                <div class="sidebar-link disabled" title="Complete profile to access"><span class="nav-icon">E</span><span>Employees</span></div>
-                                <div class="sidebar-link disabled" title="Complete profile to access"><span class="nav-icon">L</span><span>Employee Log</span></div>
-                                <div class="sidebar-link disabled" title="Complete profile to access"><span class="nav-icon">N</span><span>Notifications</span></div>
-                            <?php endif; ?>
+                            <span class="sidebar-section-title">Team</span>
+                            <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">T</span><span>Team</span></a>
+                            <a class="sidebar-link <?= $page === 'admin_projects' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_projects"><span class="nav-icon">P</span><span>Projects</span></a>
+                            <a class="sidebar-link <?= $page === 'vendor_payments' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=vendor_payments"><span class="nav-icon">$</span><span>Payment</span></a>
+                            <span class="sidebar-section-title">Track Attendance</span>
+                            <a class="sidebar-link <?= in_array($page, ['admin_attendance', 'admin_employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employee_log"><span class="nav-icon">L</span><span>Track Attendance</span></a>
+                            <a class="sidebar-link <?= $page === 'notifications' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=notifications"><span class="nav-icon">N</span><span>Notifications</span><?php if ($unreadNotifications > 0): ?><span class="sidebar-link-badge"><?= (int) $unreadNotifications ?></span><?php endif; ?></a>
                         <?php else: ?>
                         <a class="sidebar-link <?= $page === 'admin_dashboard' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_dashboard"><span class="nav-icon">D</span><span>Dashboard</span></a>
-                        <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">E</span><span>Employees</span></a>
+                        <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">T</span><span>Team</span></a>
                         <a class="sidebar-link <?= $page === 'admin_projects' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_projects"><span class="nav-icon">P</span><span>Projects</span></a>
-                        <a class="sidebar-link <?= in_array($page, ['admin_attendance', 'admin_employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employee_log"><span class="nav-icon">L</span><span>Employee Log</span></a>
+                        <a class="sidebar-link <?= in_array($page, ['admin_attendance', 'admin_employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employee_log"><span class="nav-icon">L</span><span>Track Attendance</span></a>
                         <a class="sidebar-link <?= $page === 'admin_accounts' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_accounts"><span class="nav-icon">A</span><span>Accounts</span></a>
                         <a class="sidebar-link <?= $page === 'admin_reports' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_reports"><span class="nav-icon">R</span><span>Reports</span></a>
 
@@ -189,15 +211,45 @@ function render_header(string $title, string $pageClass = ''): void
                         <a class="sidebar-link <?= $page === 'notifications' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=notifications"><span class="nav-icon">N</span><span>Notifications</span><?php if ($unreadNotifications > 0): ?><span class="sidebar-link-badge"><?= (int) $unreadNotifications ?></span><?php endif; ?></a>
                         <?php endif; ?>
                     <?php else: ?>
-                        <span class="sidebar-section-title">Employee Log</span>
-                        <a class="sidebar-link <?= in_array($page, ['employee_attendance', 'employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_log"><span class="nav-icon">L</span><span>Employee Log</span></a>
-                        <a class="sidebar-link <?= $page === 'employee_reimbursements' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_reimbursements"><span class="nav-icon">R</span><span>Reimbursements</span></a>
+                        <?php $isContractualEmployeeShell = ($user['role'] ?? '') === 'corporate_employee'; ?>
+                        <?php $isVendorTrainerShell = employee_is_vendor_trainer($user); ?>
+                        <?php $isProjectCoordinatorShell = employee_is_project_coordinator($user); ?>
+                        <?php if ($isContractualEmployeeShell || $isVendorTrainerShell || $isProjectCoordinatorShell): ?>
+                            <a class="sidebar-link <?= in_array($page, ['employee_attendance', 'employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_attendance"><span class="nav-icon">D</span><span>Dashboard</span></a>
+                            <a class="sidebar-link <?= $page === 'employee_projects' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_projects"><span class="nav-icon">P</span><span>Projects</span></a>
+                            <?php if ($isContractualEmployeeShell): ?>
+                                <a class="sidebar-link <?= $page === 'employee_payments' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_payments"><span class="nav-icon">$</span><span>Payment</span></a>
+                            <?php endif; ?>
+                        <?php endif; ?>
+                        <span class="sidebar-section-title">Track Attendance</span>
+                        <a class="sidebar-link <?= in_array($page, ['employee_attendance', 'employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_log"><span class="nav-icon">L</span><span>Track Attendance</span></a>
+                        <?php if (employee_is_in_house_trainer($user) && !$isContractualEmployeeShell && !$isVendorTrainerShell && !$isProjectCoordinatorShell): ?>
+                            <a class="sidebar-link <?= $page === 'employee_projects' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_projects"><span class="nav-icon">P</span><span>Projects</span></a>
+                        <?php endif; ?>
+                        <?php if ($hasPowerAttendanceAccess || $hasPowerTeamAccess || $hasPowerProjectsAccess || $hasPowerAccountsAccess): ?>
+                            <span class="sidebar-section-title">Power</span>
+                            <?php if ($hasPowerAttendanceAccess): ?>
+                                <a class="sidebar-link <?= in_array($page, ['admin_attendance', 'admin_employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employee_log"><span class="nav-icon">L</span><span>Track Attendance</span></a>
+                            <?php endif; ?>
+                            <?php if ($hasPowerTeamAccess): ?>
+                                <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">T</span><span>Team</span></a>
+                            <?php endif; ?>
+                            <?php if ($hasPowerProjectsAccess): ?>
+                                <a class="sidebar-link <?= $page === 'admin_projects' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_projects"><span class="nav-icon">P</span><span>Team Projects</span></a>
+                            <?php endif; ?>
+                            <?php if ($hasPowerAccountsAccess): ?>
+                                <a class="sidebar-link <?= $page === 'admin_accounts' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_accounts"><span class="nav-icon">A</span><span>Accounts</span></a>
+                            <?php endif; ?>
+                        <?php endif; ?>
                         <a class="sidebar-link <?= $page === 'notifications' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=notifications"><span class="nav-icon">N</span><span>Notifications</span><?php if ($unreadNotifications > 0): ?><span class="sidebar-link-badge"><?= (int) $unreadNotifications ?></span><?php endif; ?></a>
                     <?php endif; ?>
                 </nav>
                 <?php if ($user): ?>
                 <?php endif; ?>
                 <div class="sidebar-actions">
+                    <?php if ($profileSettingsModalId !== ''): ?>
+                        <button class="sidebar-link sidebar-link-button <?= $page === $profileSettingsActivePage ? 'active' : '' ?>" type="button" data-modal-target="<?= h($profileSettingsModalId) ?>"><span class="nav-icon">U</span><span>Profile Settings</span></button>
+                    <?php endif; ?>
                     <form method="post">
                         <?= csrf_field() ?>
                         <input type="hidden" name="action" value="logout">
@@ -210,37 +262,17 @@ function render_header(string $title, string $pageClass = ''): void
                     <div class="flash-stack">
                         <?php foreach ($flashItems as $flash): ?>
                             <div class="flash <?= h($flash['type']) ?>">
-                                <?php if (($flash['type'] ?? '') === 'success'): ?>
-                                    <div class="flash-sweet-icon" aria-hidden="true">&#10003;</div>
-                                    <div class="flash-copy">
-                                        <strong>Success</strong>
-                                        <span><?= h($flash['message']) ?></span>
-                                    </div>
-                                <?php else: ?>
-                                    <?= h($flash['message']) ?>
-                                <?php endif; ?>
+                                <div class="flash-icon" aria-hidden="true"></div>
+                                <strong><?= h(ucfirst((string) ($flash['type'] ?? 'Info'))) ?>!</strong>
+                                <span><?= h($flash['message']) ?></span>
+                                <button class="flash-ok" type="button">OK</button>
                             </div>
                         <?php endforeach; ?>
                     </div>
                 <?php endif; ?>
                 <main class="content <?= h($pageClass) ?>">
-                    <?php if ($user && ($user['role'] ?? '') === 'external_vendor' && !is_vendor_profile_complete($user) && $page === 'vendor_dashboard'): ?>
-                        <script>
-                            document.addEventListener('DOMContentLoaded', function() {
-                                const modal = document.getElementById('admin-profile-settings-modal');
-                                if (modal) {
-                                    modal.classList.add('open');
-                                    // Prevent closing if incomplete?
-                                    // For now just auto-open.
-                                }
-                            });
-                        </script>
-                        <div class="banner info" style="margin-bottom: 24px;">
-                            <div class="banner-copy">
-                                <strong>Incomplete Profile</strong>
-                                <span>Please fill in your representative name, PAN, and bank details to enable employee management.</span>
-                            </div>
-                        </div>
+                    <?php if ($user && employee_profile_requires_completion($user) && function_exists('render_employee_profile_completion_modal')): ?>
+                        <?php render_employee_profile_completion_modal($user); ?>
                     <?php endif; ?>
         <?php elseif ($page !== 'super_admin_dashboard'): ?>
             <header class="topbar <?= $isLandingPage ? 'landing-topbar' : '' ?>">
@@ -511,40 +543,235 @@ function render_employee_profile_settings_modal(array $employee, string $employe
     if ($employerName !== '' && strcasecmp($employerName, (string) $employee['name']) === 0) {
         $employerDisplay .= ' (Admin)';
     }
+    $status = (string) ($employee['profile_status'] ?? 'incomplete');
+    $isContractualEmployee = (string) ($employee['role'] ?? '') === 'corporate_employee'
+        || (string) ($employee['employee_type'] ?? '') === 'corporate';
+    $showOfferLetterForm = false;
+    $statusCopy = [
+        'verified' => 'Verified',
+        'pending' => 'Under Review',
+        'rejected' => 'Needs Update',
+        'incomplete' => 'Incomplete',
+    ];
+    $profilePhoto = !empty($employee['profile_photo_path'])
+        ? public_file_path((string) $employee['profile_photo_path'])
+        : '';
+    $documents = [
+        'aadhaar_card' => 'Aadhaar Card',
+        'pan_card' => 'PAN Card',
+        'profile_photo' => 'Profile Photo',
+        'qualification_certificate' => 'Qualification Certificate',
+        'bank_proof' => 'Bank Proof',
+        'resume' => 'Resume',
+    ];
     ?>
     <div class="modal" id="employee-profile-settings-modal">
-        <div class="modal-card profile-settings-modal-card">
+        <div class="modal-card profile-settings-modal-card employee-profile-settings-modal-card">
             <button class="modal-close" type="button" data-close-modal>&times;</button>
-            <span class="eyebrow">Profile Settings</span>
-            <h2><?= h($employee['name']) ?></h2>
-            <div class="profile-settings-grid">
-                <div class="list-item">
-                    <strong>Employee ID</strong>
-                    <span><?= h((string) ($employee['emp_id'] ?: 'Employee')) ?></span>
+            <div class="employee-profile-card employee-profile-settings-summary">
+                <div class="employee-profile-media">
+                    <?php if ($profilePhoto !== ''): ?>
+                        <img class="employee-profile-photo" src="<?= h($profilePhoto) ?>" alt="<?= h((string) $employee['name']) ?> profile photo" onerror="this.classList.add('hidden');this.nextElementSibling.classList.remove('hidden');">
+                        <div class="employee-profile-fallback hidden"><?= h(user_initials((string) $employee['name'])) ?></div>
+                    <?php else: ?>
+                        <div class="employee-profile-fallback"><?= h(user_initials((string) $employee['name'])) ?></div>
+                    <?php endif; ?>
                 </div>
-                <div class="list-item">
-                    <strong>Employer Name</strong>
-                    <span><?= h($employerDisplay) ?></span>
+                <div class="employee-profile-copy">
+                    <div>
+                        <span class="eyebrow">Profile Settings</span>
+                        <h2><?= h((string) $employee['name']) ?></h2>
+                    </div>
+                    <div class="employee-profile-meta">
+                        <div class="list-item"><strong>Employee ID</strong><span><?= h((string) ($employee['emp_id'] ?: 'Employee')) ?></span></div>
+                        <div class="list-item"><strong>Employer Name</strong><span><?= h($employerDisplay) ?></span></div>
+                        <div class="list-item"><strong>Email</strong><span><?= h((string) $employee['email']) ?></span></div>
+                        <div class="list-item"><strong>Phone</strong><span><?= h((string) (($employee['phone'] ?? '') ?: '-')) ?></span></div>
+                        <div class="list-item"><strong>Designation</strong><span><?= h((string) (($employee['designation'] ?? '') ?: '-')) ?></span></div>
+                        <div class="list-item"><strong>Shift</strong><span><?= h(employee_shift_display($employee)) ?></span></div>
+                    </div>
                 </div>
-                <div class="list-item">
-                    <strong>Email</strong>
-                    <span><?= h($employee['email']) ?></span>
-                </div>
-                <div class="list-item">
-                    <strong>Shift</strong>
-                    <span><?= h(employee_shift_display($employee)) ?></span>
+                <div class="employee-profile-meta">
+                    <div class="list-item"><strong>Status</strong><span><?= h($statusCopy[$status] ?? ucfirst($status)) ?></span></div>
+                    <div class="list-item"><strong>Date of Birth</strong><span><?= !empty($employee['date_of_birth']) ? h(date('d M Y', strtotime((string) $employee['date_of_birth']))) : '-' ?></span></div>
+                    <div class="list-item"><strong>Gender</strong><span><?= h((string) (($employee['gender'] ?? '') ?: '-')) ?></span></div>
+                    <div class="list-item"><strong>Qualification</strong><span><?= h((string) (($employee['highest_qualification'] ?? '') ?: '-')) ?></span></div>
                 </div>
             </div>
-            <label class="profile-settings-field">
-                <span>Choose Profile Photo</span>
-                <input type="file" accept="image/*" data-profile-photo-input>
-            </label>
-            <p class="hint" data-profile-photo-status>Stored only in this browser for this employee.</p>
-            <div class="profile-settings-actions">
-                <button class="button ghost" type="button" data-switch-modal-target="employee-password-modal">Change Password</button>
-            </div>
+            <?php if ($status === 'rejected'): ?>
+                <div class="profile-verification-alert employee-profile-settings-alert">
+                    <strong>Verification Rejected</strong>
+                    <span><?= nl2br(h((string) ($employee['profile_rejection_reason'] ?? 'Please review your details and resubmit.'))) ?></span>
+                </div>
+            <?php elseif ($status === 'pending'): ?>
+                <div class="profile-verification-pending employee-profile-settings-alert">
+                    <strong>Verification Pending</strong>
+                    <span>Your profile details have been submitted. You can still update details if needed.</span>
+                </div>
+            <?php endif; ?>
+
+            <form method="post" enctype="multipart/form-data" class="employee-profile-form employee-profile-settings-form" data-validate>
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="employee_profile_update">
+
+                <div class="profile-verification-section">
+                    <div class="profile-verification-section-head">
+                        <strong>Account Details</strong>
+                    </div>
+                    <div class="profile-verification-grid">
+                        <div class="field"><label>Employee ID</label><div class="field-row"><input type="text" name="emp_id" value="<?= h((string) ($employee['emp_id'] ?? '')) ?>" required></div><small class="field-error"><span>!</span>Employee ID is required.</small></div>
+                        <div class="field"><label>Name</label><div class="field-row"><input type="text" name="name" value="<?= h((string) ($employee['name'] ?? '')) ?>" required></div><small class="field-error"><span>!</span>Name is required.</small></div>
+                        <div class="field"><label>Email</label><div class="field-row"><input type="email" name="email" value="<?= h((string) ($employee['email'] ?? '')) ?>" required></div><small class="field-error"><span>!</span>Valid email is required.</small></div>
+                        <div class="field"><label>Date of Joining</label><div class="field-row"><input type="date" name="date_of_joining" value="<?= h((string) ($employee['date_of_joining'] ?? '')) ?>" required></div><small class="field-error"><span>!</span>Date of joining is required.</small></div>
+                        <div class="field"><label>Designation</label><div class="field-row"><select name="designation" required><option value="">Select designation</option><?php foreach (employee_designation_options() as $value => $label): ?><option value="<?= h($value) ?>" <?= ((string) ($employee['designation'] ?? '')) === $value ? 'selected' : '' ?>><?= h($label) ?></option><?php endforeach; ?></select></div><small class="field-error"><span>!</span>Designation is required.</small></div>
+                        <div class="field"><label>Shift</label><div class="field-row"><input type="text" name="shift" value="<?= h(normalize_shift_selection((string) ($employee['shift'] ?? ''))) ?>" required></div><small class="field-error"><span>!</span>Shift is required.</small></div>
+                    </div>
+                </div>
+
+                <div class="profile-verification-section">
+                    <div class="profile-verification-section-head">
+                        <strong>Personal Details</strong>
+                    </div>
+                    <div class="profile-verification-grid">
+                        <div class="field"><label>Date of Birth</label><div class="field-row"><input type="date" name="date_of_birth" value="<?= h((string) ($employee['date_of_birth'] ?? '')) ?>" required></div><small class="field-error"><span>!</span>Date of birth is required.</small></div>
+                        <div class="field"><label>Gender</label><div class="field-row"><select name="gender" required><option value="">Select gender</option><?php foreach (['Female', 'Male', 'Non-binary', 'Prefer not to say'] as $gender): ?><option value="<?= h($gender) ?>" <?= ((string) ($employee['gender'] ?? '')) === $gender ? 'selected' : '' ?>><?= h($gender) ?></option><?php endforeach; ?></select></div><small class="field-error"><span>!</span>Gender is required.</small></div>
+                        <div class="field"><label>Highest Qualification</label><div class="field-row"><input type="text" name="highest_qualification" value="<?= h((string) ($employee['highest_qualification'] ?? '')) ?>" required></div><small class="field-error"><span>!</span>Qualification is required.</small></div>
+                        <div class="field"><label>Phone Number</label><div class="field-row"><input type="text" name="phone" value="<?= h((string) ($employee['phone'] ?? '')) ?>" required></div><small class="field-error"><span>!</span>Phone number is required.</small></div>
+                    </div>
+                    <label class="profile-verification-wide">Address<textarea name="address" required><?= h((string) ($employee['address'] ?? '')) ?></textarea></label>
+                </div>
+
+                <div class="profile-verification-section">
+                    <div class="profile-verification-section-head">
+                        <strong>Bank Details</strong>
+                    </div>
+                    <div class="profile-verification-grid">
+                        <div class="field"><label>Bank Name</label><div class="field-row"><input type="text" name="bank_name" value="<?= h((string) ($employee['bank_name'] ?? '')) ?>" required></div><small class="field-error"><span>!</span>Bank name is required.</small></div>
+                        <div class="field"><label>Account Number</label><div class="field-row"><input type="text" name="bank_account_no" value="<?= h((string) ($employee['bank_account_no'] ?? '')) ?>" required></div><small class="field-error"><span>!</span>Account number is required.</small></div>
+                        <div class="field"><label>IFSC Code</label><div class="field-row"><input type="text" name="bank_ifsc_code" value="<?= h((string) ($employee['bank_ifsc_code'] ?? '')) ?>" required></div><small class="field-error"><span>!</span>IFSC code is required.</small></div>
+                        <div class="field"><label>Account Holder Name</label><div class="field-row"><input type="text" name="account_holder_name" value="<?= h((string) ($employee['account_holder_name'] ?? '')) ?>" required></div><small class="field-error"><span>!</span>Account holder name is required.</small></div>
+                    </div>
+                </div>
+
+                <div class="profile-verification-section">
+                    <div class="profile-verification-section-head">
+                        <strong>Documents</strong>
+                    </div>
+                    <div class="profile-document-grid">
+                        <?php foreach ($documents as $field => $label): ?>
+                            <?php $hasFile = !empty($employee[$field . '_path']); ?>
+                            <label class="profile-document-upload<?= $hasFile ? ' has-file' : '' ?>">
+                                <span class="profile-document-icon"><?= $hasFile ? 'OK' : '+' ?></span>
+                                <span class="profile-document-copy">
+                                    <strong><?= h($label) ?></strong>
+                                    <small><?= $hasFile ? h((string) $employee[$field . '_name']) : 'JPG, PNG, PDF, DOC, DOCX' ?></small>
+                                </span>
+                                <input type="file" name="<?= h($field) ?>" <?= !$hasFile ? 'required' : '' ?> accept=".jpg,.jpeg,.png,.pdf,.doc,.docx">
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+
+                <label class="profile-settings-field">
+                    <span>Choose Sidebar Photo</span>
+                    <input type="file" accept="image/*" data-profile-photo-input>
+                </label>
+                <p class="hint" data-profile-photo-status>Stored only in this browser for this employee.</p>
+
+                <div class="profile-verification-actions employee-profile-settings-actions">
+                    <button class="button ghost" type="button" data-switch-modal-target="employee-password-modal">Change Password</button>
+                    <button class="button solid" type="submit">Save Profile</button>
+                </div>
+            </form>
+
+            <?php if ($showOfferLetterForm): ?>
+                <?php
+                    $offerName = trim((string) ($employee['offer_letter_name'] ?? '')) ?: (string) ($employee['name'] ?? '');
+                    $offerAddress = trim((string) ($employee['offer_letter_address'] ?? '')) ?: (string) ($employee['address'] ?? '');
+                    $offerDesignation = trim((string) ($employee['offer_letter_designation'] ?? '')) ?: (string) ($employee['designation'] ?? '');
+                    $offerSignature = !empty($employee['offer_letter_signature_path'])
+                        ? public_file_path((string) $employee['offer_letter_signature_path'])
+                        : '';
+                ?>
+                <section class="profile-verification-section offer-letter-section offer-letter-launch-section">
+                    <div class="profile-verification-section-head">
+                        <strong>Offer Letter</strong>
+                        <button class="button solid small" type="button" data-modal-target="employee-offer-letter-modal">Open Offer Letter Form</button>
+                    </div>
+                    <p class="hint">Open the offer letter as a separate form to update details and upload your signature.</p>
+                </section>
+            <?php endif; ?>
         </div>
     </div>
+    <?php if ($showOfferLetterForm): ?>
+        <div class="modal" id="employee-offer-letter-modal">
+            <div class="modal-card offer-letter-modal-card">
+                <button class="modal-close" type="button" data-close-modal>&times;</button>
+                <span class="eyebrow">Verified Employee</span>
+                <h2>Offer Letter Form</h2>
+                <p class="hint">Update the offer letter fields and upload your signature image.</p>
+                <section class="profile-verification-section offer-letter-section">
+                    <div class="offer-letter-preview">
+                        <div class="offer-letter-head">
+                            <strong>V Traco</strong>
+                            <span>Offer Letter</span>
+                        </div>
+                        <p>Date: <?= h(date('d M Y')) ?></p>
+                        <p>To,<br><strong><?= h($offerName) ?></strong><br><?= nl2br(h($offerAddress !== '' ? $offerAddress : '-')) ?></p>
+                        <div class="offer-letter-details">
+                            <div><strong>Employee ID</strong><span><?= h((string) (($employee['emp_id'] ?? '') ?: '-')) ?></span></div>
+                            <div><strong>Name</strong><span><?= h($offerName !== '' ? $offerName : '-') ?></span></div>
+                            <div><strong>Designation</strong><span><?= h($offerDesignation !== '' ? $offerDesignation : '-') ?></span></div>
+                            <div><strong>Employer</strong><span><?= h($employerDisplay) ?></span></div>
+                            <div><strong>Email</strong><span><?= h((string) (($employee['email'] ?? '') ?: '-')) ?></span></div>
+                            <div><strong>Phone</strong><span><?= h((string) (($employee['phone'] ?? '') ?: '-')) ?></span></div>
+                            <div><strong>Date of Joining</strong><span><?= !empty($employee['date_of_joining']) ? h(date('d M Y', strtotime((string) $employee['date_of_joining']))) : '-' ?></span></div>
+                            <div><strong>Shift</strong><span><?= h(employee_shift_display($employee)) ?></span></div>
+                            <div><strong>Salary</strong><span>Rs <?= h(number_format((float) ($employee['salary'] ?? 0), 2)) ?></span></div>
+                            <div class="offer-letter-detail-wide"><strong>Address</strong><span><?= nl2br(h($offerAddress !== '' ? $offerAddress : '-')) ?></span></div>
+                        </div>
+                        <p>Dear <?= h($offerName !== '' ? $offerName : 'Employee') ?>,</p>
+                        <p>We are pleased to offer you the position of <strong><?= h($offerDesignation !== '' ? $offerDesignation : 'Employee') ?></strong> with <?= h($employerDisplay) ?>. Your joining and work details will follow the rules assigned in V Traco.</p>
+                        <p>Please confirm your acceptance by updating the details below and uploading your signature image.</p>
+                        <div class="offer-letter-sign-row">
+                            <div>
+                                <span>Employee Signature</span>
+                                <?php if ($offerSignature !== ''): ?>
+                                    <img class="offer-letter-signature" src="<?= h($offerSignature) ?>" alt="Employee signature">
+                                <?php else: ?>
+                                    <strong class="offer-letter-sign-placeholder">Signature pending</strong>
+                                <?php endif; ?>
+                            </div>
+                            <div>
+                                <span>For <?= h($employerDisplay) ?></span>
+                                <strong>Authorized Signatory</strong>
+                            </div>
+                        </div>
+                    </div>
+                    <form method="post" enctype="multipart/form-data" class="stack-form offer-letter-form" data-validate>
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="action" value="employee_offer_letter_update">
+                        <div class="profile-verification-grid">
+                            <div class="field"><label>Name</label><div class="field-row"><input type="text" name="offer_letter_name" value="<?= h($offerName) ?>" required></div><small class="field-error"><span>!</span>Name is required.</small></div>
+                            <div class="field"><label>Designation</label><div class="field-row"><input type="text" name="offer_letter_designation" value="<?= h($offerDesignation) ?>" required></div><small class="field-error"><span>!</span>Designation is required.</small></div>
+                        </div>
+                        <label class="profile-verification-wide">Address<textarea name="offer_letter_address" required><?= h($offerAddress) ?></textarea></label>
+                        <label class="profile-document-upload<?= $offerSignature !== '' ? ' has-file' : '' ?>">
+                            <span class="profile-document-icon"><?= $offerSignature !== '' ? 'OK' : '+' ?></span>
+                            <span class="profile-document-copy">
+                                <strong>Signature Image</strong>
+                                <small><?= $offerSignature !== '' ? h((string) ($employee['offer_letter_signature_name'] ?? 'Uploaded')) : 'JPG, PNG, or WEBP' ?></small>
+                            </span>
+                            <input type="file" name="offer_letter_signature" <?= $offerSignature === '' ? 'required' : '' ?> accept=".jpg,.jpeg,.png,image/jpeg,image/png">
+                        </label>
+                        <div class="profile-verification-actions employee-profile-settings-actions">
+                            <button class="button solid" type="submit">Save Offer Letter</button>
+                        </div>
+                    </form>
+                </section>
+            </div>
+        </div>
+    <?php endif; ?>
     <?php
 }
 function render_employee_password_modal(): void
@@ -615,6 +842,23 @@ function render_admin_profile_settings_modal(array $admin): void
     if ($representativeName === '') {
         $representativeName = (string) ($admin['name'] ?? '');
     }
+    $companyAddress = trim((string) ($admin['company_address'] ?? ''));
+    $companyEmail = trim((string) ($admin['company_email'] ?? ''));
+    $companyPhone = trim((string) ($admin['company_phone'] ?? ''));
+    $designation = trim((string) ($admin['designation'] ?? ''));
+    $personalEmail = trim((string) ($admin['personal_email'] ?? ''));
+    if ($personalEmail === '') {
+        $personalEmail = (string) ($admin['email'] ?? '');
+    }
+    $personalPhone = trim((string) ($admin['personal_phone'] ?? ''));
+    if ($personalPhone === '') {
+        $personalPhone = (string) ($admin['phone'] ?? '');
+    }
+    $vendorDocumentNames = [
+        'bank_proof' => trim((string) ($admin['bank_proof_name'] ?? '')),
+        'company_logo' => trim((string) ($admin['company_logo_name'] ?? '')),
+        'profile_photo' => trim((string) ($admin['profile_photo_name'] ?? '')),
+    ];
     ?>
     <div class="modal" id="admin-profile-settings-modal">
         <div class="modal-card profile-settings-modal-card<?= $isVendorProfile ? ' vendor-profile-settings-card' : '' ?>">
@@ -626,16 +870,20 @@ function render_admin_profile_settings_modal(array $admin): void
                     <h2><?= h($companyName) ?></h2>
                     <div class="profile-settings-grid">
                         <div class="list-item">
-                            <strong>Representative</strong>
+                            <strong>Your Name</strong>
                             <span><?= h($representativeName) ?></span>
                         </div>
                         <div class="list-item">
-                            <strong>Email</strong>
-                            <span><?= h((string) $admin['email']) ?></span>
+                            <strong>Designation</strong>
+                            <span><?= h($designation !== '' ? $designation : 'Not added') ?></span>
                         </div>
                         <div class="list-item">
-                            <strong>Phone</strong>
-                            <span><?= h((string) (($admin['phone'] ?? '') ?: 'Not added')) ?></span>
+                            <strong>Company Mail</strong>
+                            <span><?= h($companyEmail !== '' ? $companyEmail : (string) $admin['email']) ?></span>
+                        </div>
+                        <div class="list-item">
+                            <strong>Company Phone</strong>
+                            <span><?= h($companyPhone !== '' ? $companyPhone : 'Not added') ?></span>
                         </div>
                         <div class="list-item">
                             <strong>Member Since</strong>
@@ -646,65 +894,87 @@ function render_admin_profile_settings_modal(array $admin): void
                             <span><?= h($roleLabel) ?></span>
                         </div>
                     </div>
-                    <label class="profile-settings-field">
-                        <span>Change Photo</span>
-                        <input type="file" accept="image/*" data-profile-photo-input>
-                    </label>
-                    <p class="hint" data-profile-photo-status>Stored only in this browser.</p>
+                    <p class="hint">Upload company proof, logo, and your photo from the form.</p>
                 </aside>
 
                 <main class="vendor-profile-settings-main">
-                    <form method="post" class="vendor-profile-settings-form" data-validate>
+                    <form method="post" enctype="multipart/form-data" class="vendor-profile-settings-form" data-validate>
                         <?= csrf_field() ?>
                         <input type="hidden" name="action" value="admin_profile_update">
                         <input type="hidden" name="return_page" value="<?= h($returnPage) ?>">
                         
-                        <div class="field">
-                            <label>Company Name</label>
-                            <div class="field-row"><input type="text" name="company_name" value="<?= h($companyName) ?>" placeholder="Your Company Name"></div>
-                        </div>
-                        <div class="field">
-                            <label>Representative Name</label>
-                            <div class="field-row"><input type="text" name="representative_name" value="<?= h($representativeName) ?>" required></div>
-                        </div>
-                        <div class="field">
-                            <label>Mail ID</label>
-                            <div class="field-row"><input type="email" name="email" value="<?= h((string) $admin['email']) ?>" required></div>
-                        </div>
-                        <div class="field">
-                            <label>Mobile Number</label>
-                            <div class="field-row"><input type="text" name="phone" value="<?= h((string) ($admin['phone'] ?? '')) ?>"></div>
+                        <div class="form-section-card">
+                            <span class="eyebrow">Company Detail</span>
+                            <div class="field">
+                                <label>Company Name</label>
+                                <div class="field-row"><input type="text" name="company_name" value="<?= h($companyName) ?>" required></div>
+                                <small class="field-error"><span>!</span>Company name is required.</small>
+                            </div>
+                            <div class="field">
+                                <label>Company Mail</label>
+                                <div class="field-row"><input type="email" name="company_email" value="<?= h($companyEmail) ?>" required></div>
+                                <small class="field-error"><span>!</span>Valid company mail is required.</small>
+                            </div>
+                            <div class="field">
+                                <label>Company Phone Number</label>
+                                <div class="field-row"><input type="text" name="company_phone" value="<?= h($companyPhone) ?>" required></div>
+                                <small class="field-error"><span>!</span>Company phone number is required.</small>
+                            </div>
+                            <div class="field profile-settings-wide">
+                                <label>Company Address</label>
+                                <div class="field-row"><input type="text" name="company_address" value="<?= h($companyAddress) ?>" required></div>
+                                <small class="field-error"><span>!</span>Company address is required.</small>
+                            </div>
                         </div>
 
                         <div class="form-section-card">
-                            <span class="eyebrow">Billing Detail</span>
+                            <span class="eyebrow">Your Detail</span>
                             <div class="field">
-                                <label>GST No (if you have )</label>
+                                <label>Your Name</label>
+                                <div class="field-row"><input type="text" name="representative_name" value="<?= h($representativeName) ?>" required></div>
+                                <small class="field-error"><span>!</span>Your name is required.</small>
+                            </div>
+                            <div class="field">
+                                <label>Your Designation</label>
+                                <div class="field-row"><input type="text" name="designation" value="<?= h($designation) ?>" required></div>
+                                <small class="field-error"><span>!</span>Your designation is required.</small>
+                            </div>
+                            <div class="field">
+                                <label>Personal Number</label>
+                                <div class="field-row"><input type="text" name="personal_phone" value="<?= h($personalPhone) ?>" required></div>
+                                <small class="field-error"><span>!</span>Personal number is required.</small>
+                            </div>
+                            <div class="field">
+                                <label>Personal Mail</label>
+                                <div class="field-row"><input type="email" name="personal_email" value="<?= h($personalEmail) ?>" required></div>
+                                <small class="field-error"><span>!</span>Valid personal mail is required.</small>
+                            </div>
+                        </div>
+
+                        <div class="form-section-card">
+                            <span class="eyebrow">Tax Detail</span>
+                            <div class="field">
+                                <label>GST (if have)</label>
                                 <div class="field-row"><input type="text" name="gst_no" value="<?= h((string) ($admin['gst_no'] ?? '')) ?>"></div>
                             </div>
-                            <div class="field">
-                                <label>PAN No</label>
-                                <div class="field-row"><input type="text" name="pan_no" value="<?= h((string) ($admin['pan_no'] ?? '')) ?>"></div>
-                            </div>
                         </div>
 
                         <div class="form-section-card">
-                            <span class="eyebrow">Bank Detail</span>
+                            <span class="eyebrow">Upload</span>
                             <div class="field">
-                                <label>Account No</label>
-                                <div class="field-row"><input type="text" name="bank_account_no" value="<?= h((string) ($admin['bank_account_no'] ?? '')) ?>"></div>
+                                <label>Company Bank Proof</label>
+                                <div class="field-row"><input type="file" name="bank_proof" accept=".jpg,.jpeg,.png,.pdf,.doc,.docx" <?= $vendorDocumentNames['bank_proof'] === '' ? 'required' : '' ?>></div>
+                                <small class="hint"><?= h($vendorDocumentNames['bank_proof'] !== '' ? $vendorDocumentNames['bank_proof'] : 'PDF, image, DOC, or DOCX up to 5 MB.') ?></small>
                             </div>
                             <div class="field">
-                                <label>IFSC Code</label>
-                                <div class="field-row"><input type="text" name="bank_ifsc_code" value="<?= h((string) ($admin['bank_ifsc_code'] ?? '')) ?>"></div>
+                                <label>Logo</label>
+                                <div class="field-row"><input type="file" name="company_logo" accept="image/*" <?= $vendorDocumentNames['company_logo'] === '' ? 'required' : '' ?>></div>
+                                <small class="hint"><?= h($vendorDocumentNames['company_logo'] !== '' ? $vendorDocumentNames['company_logo'] : 'JPG, PNG, or WEBP up to 5 MB.') ?></small>
                             </div>
                             <div class="field">
-                                <label>Branch</label>
-                                <div class="field-row"><input type="text" name="bank_branch" value="<?= h((string) ($admin['bank_branch'] ?? '')) ?>"></div>
-                            </div>
-                            <div class="field">
-                                <label>Bank Name</label>
-                                <div class="field-row"><input type="text" name="bank_name" value="<?= h((string) ($admin['bank_name'] ?? '')) ?>"></div>
+                                <label>Your Photo</label>
+                                <div class="field-row"><input type="file" name="profile_photo" accept="image/*" data-profile-photo-input <?= $vendorDocumentNames['profile_photo'] === '' ? 'required' : '' ?>></div>
+                                <small class="hint" data-profile-photo-status><?= h($vendorDocumentNames['profile_photo'] !== '' ? $vendorDocumentNames['profile_photo'] : 'JPG, PNG, or WEBP up to 5 MB.') ?></small>
                             </div>
                         </div>
 

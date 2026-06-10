@@ -88,7 +88,8 @@ function render_login(): void
             <?php if ($role !== 'super_admin'): ?>
                 <div class="cards-2 auth-role-grid">
                     <?php foreach ($roles as $key => $meta): ?>
-                        <a class="action-card<?= $key === $role ? ' active-auth-role' : '' ?>" href="<?= h(BASE_URL) ?>?page=login&role=<?= h($key) ?>">
+                        <?php $loginHref = $key === 'corporate_employee' ? (BASE_URL . '?page=landing&auth=corporate_employee') : (BASE_URL . '?page=login&role=' . $key); ?>
+                        <a class="action-card<?= $key === $role ? ' active-auth-role' : '' ?>" href="<?= h($loginHref) ?>">
                             <strong><?= h((string) ($meta['label'] ?? user_role_label($key))) ?></strong>
                             <span class="hint"><?= h($meta['eyebrow']) ?></span>
                         </a>
@@ -256,7 +257,8 @@ function render_register(): void
             <button class="button solid auth-register-submit" type="submit"><?= h($selected['button']) ?></button>
             <div class="auth-register-footer">
                 <span>Already have an account?</span>
-                <a class="auth-register-link" href="<?= h(BASE_URL) ?>?page=login&role=<?= h($selectedRole) ?>">Login</a>
+                <?php $loginHref = $selectedRole === 'corporate_employee' ? (BASE_URL . '?page=landing&auth=corporate_employee') : (BASE_URL . '?page=login&role=' . $selectedRole); ?>
+                <a class="auth-register-link" href="<?= h($loginHref) ?>">Login</a>
             </div>
         </form>
     </div>

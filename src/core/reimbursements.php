@@ -362,6 +362,7 @@ function employee_reimbursement_month_summary(int $userId, string $month): array
         'count' => count($items),
         'dates_with_claims' => 0,
         'requested_total' => 0.0,
+        'approved_total' => 0.0,
         'paid_total' => 0.0,
         'outstanding_total' => 0.0,
         'pending_count' => 0,
@@ -372,7 +373,8 @@ function employee_reimbursement_month_summary(int $userId, string $month): array
 
     foreach ($items as $item) {
         $status = reimbursement_status_label((string) ($item['status'] ?? ''));
-        $summary['requested_total'] += (float) ($item['amount_requested'] ?? 0);
+        $requestedAmount = (float) ($item['amount_requested'] ?? 0);
+        $summary['requested_total'] += $requestedAmount;
         $summary['paid_total'] += (float) ($item['amount_paid'] ?? 0);
         $summary['outstanding_total'] += (float) ($item['remaining_balance'] ?? 0);
         $dates[(string) ($item['expense_date'] ?? '')] = true;
@@ -380,8 +382,10 @@ function employee_reimbursement_month_summary(int $userId, string $month): array
         if ($status === 'PENDING') {
             $summary['pending_count']++;
         } elseif (in_array($status, ['APPROVED', 'PARTIALLY PAID'], true)) {
+            $summary['approved_total'] += $requestedAmount;
             $summary['approved_count']++;
         } elseif ($status === 'PAID') {
+            $summary['approved_total'] += $requestedAmount;
             $summary['paid_count']++;
         }
     }
@@ -473,6 +477,15 @@ function create_employee_reimbursement(array $employee, string $date, array $sou
     }
 
     validate_reimbursement_expense_date($date);
+
+    $lockStmt = db()->prepare("SELECT COUNT(*) FROM employee_reimbursements WHERE user_id = :user_id AND expense_date = :expense_date AND status IN ('APPROVED', 'PARTIALLY PAID', 'PAID')");
+    $lockStmt->execute([
+        'user_id' => (int) $employee['id'],
+        'expense_date' => $date,
+    ]);
+    if ((int) $lockStmt->fetchColumn() > 0) {
+        throw new RuntimeException('Reimbursement data cannot be updated once it is approved.');
+    }
 
     $stmt = db()->prepare('SELECT COUNT(*) FROM employee_reimbursements WHERE user_id = :user_id AND expense_date = :expense_date');
     $stmt->execute([

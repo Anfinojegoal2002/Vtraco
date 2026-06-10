@@ -130,6 +130,10 @@ function insert_employee(array $data, array $rules, array $projectIds = []): arr
     }
     $phone = trim((string) ($data['phone'] ?? ''));
     $salary = (float) ($data['salary'] ?? 0);
+    $recruiterName = trim((string) ($data['recruiter_name'] ?? ''));
+    $recruitedThrough = trim((string) ($data['recruited_through'] ?? ''));
+    $designation = trim((string) ($data['designation'] ?? 'Regular Employee'));
+    $dateOfJoining = trim((string) ($data['date_of_joining'] ?? ''));
 
     if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         throw new RuntimeException('Employee email must be valid.');
@@ -140,8 +144,21 @@ function insert_employee(array $data, array $rules, array $projectIds = []): arr
     if ($salary < 0) {
         throw new RuntimeException('Employee salary must be zero or greater.');
     }
+    if ($recruiterName === '') {
+        throw new RuntimeException('Recruiter name is required.');
+    }
+    if (!in_array($recruitedThrough, employee_recruitment_sources(), true)) {
+        throw new RuntimeException('Choose a valid recruited through source.');
+    }
+    if ($designation === '') {
+        throw new RuntimeException('Employee designation is required.');
+    }
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateOfJoining)) {
+        throw new RuntimeException('Date of joining is required.');
+    }
 
     $role = $employeeType === 'corporate' ? 'corporate_employee' : current_manager_target_role();
+    $profileStatus = in_array($employeeType, ['corporate', 'vendor'], true) ? 'verified' : 'incomplete';
 
     if (role_requires_unique_email($role) && role_email_exists($role, $email)) {
         throw new RuntimeException('This employee email is already assigned.');
@@ -152,7 +169,7 @@ function insert_employee(array $data, array $rules, array $projectIds = []): arr
     $pdo->beginTransaction();
 
     try {
-        $pdo->prepare('INSERT INTO users (role, admin_id, emp_id, name, email, phone, shift, salary, employee_type, password_hash, force_password_change, password_changed_at, created_at) VALUES (:role, :admin_id, :emp_id, :name, :email, :phone, :shift, :salary, :employee_type, :password_hash, :force_password_change, :password_changed_at, :created_at)')
+        $pdo->prepare('INSERT INTO users (role, admin_id, emp_id, name, email, phone, shift, salary, employee_type, recruiter_name, recruited_through, designation, date_of_joining, profile_status, password_hash, force_password_change, password_changed_at, created_at) VALUES (:role, :admin_id, :emp_id, :name, :email, :phone, :shift, :salary, :employee_type, :recruiter_name, :recruited_through, :designation, :date_of_joining, :profile_status, :password_hash, :force_password_change, :password_changed_at, :created_at)')
             ->execute([
                 'role' => $role,
                 'admin_id' => $adminId,
@@ -163,6 +180,11 @@ function insert_employee(array $data, array $rules, array $projectIds = []): arr
                 'shift' => normalize_shift_selection((string) ($data['shift'] ?? '')),
                 'salary' => $salary,
                 'employee_type' => $employeeType,
+                'recruiter_name' => $recruiterName,
+                'recruited_through' => $recruitedThrough,
+                'designation' => $designation,
+                'date_of_joining' => $dateOfJoining,
+                'profile_status' => $profileStatus,
                 'password_hash' => password_hash($password, PASSWORD_DEFAULT),
                 'force_password_change' => 1,
                 'password_changed_at' => null,
@@ -289,6 +311,10 @@ function import_employee_row(array $data, array $rules, array $projectIds = []):
     $phone = trim((string) ($data['phone'] ?? ''));
     $salary = (float) ($data['salary'] ?? 0);
     $empId = trim((string) ($data['emp_id'] ?? ''));
+    $recruiterName = trim((string) ($data['recruiter_name'] ?? ''));
+    $recruitedThrough = trim((string) ($data['recruited_through'] ?? ''));
+    $designation = trim((string) ($data['designation'] ?? 'Regular Employee'));
+    $dateOfJoining = trim((string) ($data['date_of_joining'] ?? ''));
 
     if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         throw new RuntimeException('Employee email must be valid.');
@@ -298,6 +324,18 @@ function import_employee_row(array $data, array $rules, array $projectIds = []):
     }
     if ($salary < 0) {
         throw new RuntimeException('Employee salary must be zero or greater.');
+    }
+    if ($recruiterName === '') {
+        throw new RuntimeException('Recruiter name is required.');
+    }
+    if (!in_array($recruitedThrough, employee_recruitment_sources(), true)) {
+        throw new RuntimeException('Choose a valid recruited through source.');
+    }
+    if ($designation === '') {
+        throw new RuntimeException('Employee designation is required.');
+    }
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateOfJoining)) {
+        throw new RuntimeException('Date of joining is required.');
     }
     if (role_email_exists($scope['role'], $email, (int) $existingEmployee['id'])) {
         throw new RuntimeException('This employee email is already assigned.');
@@ -312,7 +350,9 @@ function import_employee_row(array $data, array $rules, array $projectIds = []):
             ? (string) $existingEmployee['email']
             : $email;
 
-        $pdo->prepare('UPDATE users SET admin_id = :admin_id, emp_id = :emp_id, name = :name, email = :email, phone = :phone, shift = :shift, salary = :salary, employee_type = :employee_type, password_hash = :password_hash, force_password_change = 1, password_changed_at = NULL, password_reset_requested_at = NULL WHERE id = :id')
+        $profileStatus = in_array((string) ($scope['employee_type'] ?? ''), ['corporate', 'vendor'], true) ? 'verified' : 'incomplete';
+
+        $pdo->prepare('UPDATE users SET admin_id = :admin_id, emp_id = :emp_id, name = :name, email = :email, phone = :phone, shift = :shift, salary = :salary, employee_type = :employee_type, recruiter_name = :recruiter_name, recruited_through = :recruited_through, designation = :designation, date_of_joining = :date_of_joining, profile_status = :profile_status, password_hash = :password_hash, force_password_change = 1, password_changed_at = NULL, password_reset_requested_at = NULL WHERE id = :id')
             ->execute([
                 'id' => (int) $existingEmployee['id'],
                 'admin_id' => $scope['admin_id'],
@@ -323,6 +363,11 @@ function import_employee_row(array $data, array $rules, array $projectIds = []):
                 'shift' => normalize_shift_selection((string) ($data['shift'] ?? '')),
                 'salary' => $salary,
                 'employee_type' => $scope['employee_type'],
+                'recruiter_name' => $recruiterName,
+                'recruited_through' => $recruitedThrough,
+                'designation' => $designation,
+                'date_of_joining' => $dateOfJoining,
+                'profile_status' => $profileStatus,
                 'password_hash' => password_hash($password, PASSWORD_DEFAULT),
             ]);
         save_employee_rules((int) $existingEmployee['id'], $rules);
@@ -484,7 +529,7 @@ function normalize_import_phone(string $phone): string
     return $phone;
 }
 
-function parse_employee_csv(string $path, string $originalName = ''): array
+function parse_employee_csv(string $path, string $originalName = '', bool $salaryRequired = true): array
 {
     $sourceRows = attendance_report_rows($path, $originalName);
     if ($sourceRows === []) {
@@ -497,7 +542,7 @@ function parse_employee_csv(string $path, string $originalName = ''): array
         'email' => ['email', 'emailaddress', 'emailid', 'mail', 'mailid', 'mailaddress', 'officialemail', 'workemail'],
         'phone' => ['phonenumber', 'phone', 'mobilenumber', 'mobile', 'contactnumber', 'contact', 'mobileno', 'phoneno', 'contactno'],
         'shift' => ['shift', 'workshift', 'timeslot', 'timing'],
-        'salary' => ['salary', 'monthlysalary', 'pay', 'amount', 'wage', 'salaryamount', 'monthlypay', 'basicpay'],
+        'salary' => ['salary', 'monthlysalary', 'pay', 'amount', 'wage', 'salaryamount', 'monthlypay', 'basicpay', 'hourlyrate', 'hourlypay', 'rateperhour', 'hourlywage'],
     ];
 
     $headerMap = [];
@@ -528,7 +573,8 @@ function parse_employee_csv(string $path, string $originalName = ''): array
         }
 
         $requiredMatches = 0;
-        foreach (['emp_id', 'name', 'email', 'phone', 'salary'] as $required) {
+        $requiredFields = $salaryRequired ? ['emp_id', 'name', 'email', 'phone', 'salary'] : ['emp_id', 'name', 'email', 'phone'];
+        foreach ($requiredFields as $required) {
             if (array_key_exists($required, $candidateColumns)) {
                 $requiredMatches++;
             }
@@ -541,22 +587,23 @@ function parse_employee_csv(string $path, string $originalName = ''): array
             $columns = $candidateColumns;
         }
 
-        if ($requiredMatches === 5) {
+        if ($requiredMatches === count($requiredFields)) {
             break;
         }
     }
 
     if ($headerRowIndex === null) {
-        throw new RuntimeException('Could not find the employee header row. Use columns like Emp ID, Name, Email, Phone, and Salary.');
+        throw new RuntimeException('Could not find the employee header row. Use columns like Emp ID, Name, Email, Phone' . ($salaryRequired ? ', and Salary.' : '.'));
     }
 
-    foreach (['emp_id', 'name', 'email', 'phone', 'salary'] as $required) {
+    foreach (($salaryRequired ? ['emp_id', 'name', 'email', 'phone', 'salary'] : ['emp_id', 'name', 'email', 'phone']) as $required) {
         if (!array_key_exists($required, $columns)) {
             throw new RuntimeException('Missing required CSV column for ' . $required . '.');
         }
     }
 
     $columns['shift'] = $columns['shift'] ?? null;
+    $columns['salary'] = $columns['salary'] ?? null;
 
     $rows = [];
     $reservedEmpIds = [];
@@ -564,10 +611,10 @@ function parse_employee_csv(string $path, string $originalName = ''): array
         $rowNumber = $headerRowIndex + $offset + 2;
         $email = trim((string) (($columns['email'] !== null) ? ($row[$columns['email']] ?? '') : ''));
         $phone = normalize_import_phone((string) ($row[$columns['phone']] ?? ''));
-        $salaryText = trim((string) ($row[$columns['salary']] ?? '0'));
+        $salaryText = trim((string) (($columns['salary'] !== null) ? ($row[$columns['salary']] ?? '0') : '0'));
         $empId = trim((string) (($columns['emp_id'] !== null) ? ($row[$columns['emp_id']] ?? '') : ''));
 
-        if ($email === '' && $phone === '' && $salaryText === '') {
+        if ($email === '' && $phone === '' && $empId === '' && (!$salaryRequired || $salaryText === '')) {
             continue;
         }
 

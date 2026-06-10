@@ -2,6 +2,7 @@
     "require": {
         "phpmailer/phpmailer": "^6.9",
         "dompdf/dompdf": "^3.1",
-        "shuchkin/simplexls": "^1.0"
+        "shuchkin/simplexls": "^1.0",
+        "setasign/fpdi-fpdf": "^2.3"
     }
 }

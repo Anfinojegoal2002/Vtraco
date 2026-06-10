@@ -57,9 +57,32 @@
             return `Project #${projectId}: ${projectName}`;
         }
 
+        function projectDayPortionLabel(project) {
+            const sessionType = String(project && project.session_type ? project.session_type : 'FULL_DAY').trim().toUpperCase();
+            return ['FIRST_HALF', 'SECOND_HALF'].includes(sessionType) ? 'Half Day' : 'Full Day';
+        }
+
         function detailValue(value, fallback = '-') {
             const text = String(value ?? '').trim();
             return text !== '' ? text : fallback;
+        }
+
+        function punchDetailRow(label, value) {
+            return `
+                <div class="session-detail-row">
+                    <strong>${escapeHtml(label)}</strong>
+                    <span>${escapeHtml(detailValue(value, 'Not recorded'))}</span>
+                </div>
+            `;
+        }
+
+        function punchPhotoMarkup(src, label = 'Punch Photo') {
+            return src ? `
+                <div class="session-proof">
+                    <strong>${escapeHtml(label)}</strong>
+                    <img class="session-proof-image" src="${escapeHtml(src)}" alt="${escapeHtml(label)}">
+                </div>
+            ` : '';
         }
 
         function openModalById(id) {
@@ -83,49 +106,87 @@
             const displayStatus = payload.status || 'Not Marked';
             const displayStatusClass = payload.status ? payload.status.replace(/\s+/g, '-') : 'Unmarked';
 
-            let sessionMarkup = '<div class="list-item muted">No sessions recorded for this date.</div>';
-            if (payload.sessions && payload.sessions.length) {
-                sessionMarkup = payload.sessions.map(session => {
-                    const project = findProjectById(session.project_id);
-                    const projectName = project && project.project_name ? project.project_name : '';
-                    const sessionDuration = Number(session.session_duration || 0) > 0
-                        ? `${session.session_duration} hrs`
-                        : '-';
-                    const geoText = session.punch_in_lat || session.punch_in_lng
-                        ? `${detailValue(session.punch_in_lat)}, ${detailValue(session.punch_in_lng)}`
-                        : '-';
-                    const imageMarkup = session.punch_in_path
+            const dateProjects = availableProjectsForDate(payload.date);
+            const existingProjectRecords = Array.isArray(payload.sessions) ? payload.sessions : [];
+            const existingProjectIds = new Set(existingProjectRecords.map(record => Number(record.project_id || 0)).filter(Boolean));
+            const browserAssignedProjectRecords = dateProjects.map(project => ({
+                id: '',
+                project_id: project.id || '',
+                college_name: project.college_name || '',
+                session_name: project.project_name || '',
+                topics_handled: '',
+                total_students: '',
+                present_students: '',
+                punch_in_path: '',
+                punch_in_time: '',
+                punch_out_time: '',
+                punch_in_lat: '',
+                punch_in_lng: '',
+                location: project.location || '',
+                day_portion: projectDayPortionLabel(project),
+            }));
+            const assignedProjectRecords = browserAssignedProjectRecords.filter(record => !existingProjectIds.has(Number(record.project_id || 0)));
+            const employeeProjectRecords = [...existingProjectRecords, ...assignedProjectRecords].slice(0, 3);
+            const projectRecords = payload.context === 'employee' ? employeeProjectRecords : existingProjectRecords;
+            const hasProjectRecords = projectRecords.length > 0;
+            const projectRecordMarkup = projectRecords.map((record, index) => {
+                    const totalStudents = Number(record.total_students || 0);
+                    const presentStudents = Number(record.present_students || 0);
+                    const absentStudents = totalStudents > 0
+                        ? Math.max(totalStudents - presentStudents, 0)
+                        : '';
+                    const imageMarkup = record.punch_in_path
                         ? `
                             <div class="session-proof">
-                                <strong>Punch Image</strong>
-                                <img class="session-proof-image" src="${escapeHtml(session.punch_in_path)}" alt="Punch image for ${escapeHtml(session.slot_name || 'Session')}">
+                                <strong>GPS Photo</strong>
+                                <img class="session-proof-image" src="${escapeHtml(record.punch_in_path)}" alt="GPS photo for ${escapeHtml(record.session_name || 'project record')}">
                             </div>
+                        `
+                        : '';
+                    const projectRecordForm = payload.context === 'employee'
+                        ? `
+                            <form method="post" enctype="multipart/form-data" class="stack-form project-record-form" data-validate>
+                                ${csrfInputMarkup()}
+                                <input type="hidden" name="action" value="employee_project_record">
+                                <input type="hidden" name="attend_date" value="${escapeHtml(payload.date)}">
+                                <div class="field"><label>Project<div class="field-row"><select name="project_id" data-project-select required>${projectOptionsMarkup(record.project_id, payload.date)}</select></div></label><small class="field-error"><span>!</span>Project is required.</small></div>
+                                <input type="hidden" name="latitude" class="geo-lat">
+                                <input type="hidden" name="longitude" class="geo-lng">
+                                <div class="field"><label>College Name<div class="field-row"><input type="text" name="college_name" data-project-college value="${escapeHtml(record.college_name)}" required></div></label><small class="field-error"><span>!</span>College name is required.</small></div>
+                                <div class="field"><label>Subject<div class="field-row"><input type="text" name="session_name" data-project-session value="${escapeHtml(record.session_name)}" required></div></label><small class="field-error"><span>!</span>Subject is required.</small></div>
+                                <div class="field"><label>Day Type<div class="field-row"><select name="day_portion" data-project-day-portion required><option value="Full Day" ${String(record.day_portion || 'Full Day') === 'Full Day' ? 'selected' : ''}>Full Day</option><option value="Half Day" ${String(record.day_portion || '') === 'Half Day' ? 'selected' : ''}>Half Day</option></select></div></label><small class="field-error"><span>!</span>Day type is required.</small></div>
+                                <div class="field"><label>Topics Handled<div class="field-row"><textarea name="topics_handled" rows="3" required>${escapeHtml(record.topics_handled)}</textarea></div></label><small class="field-error"><span>!</span>Topics handled is required.</small></div>
+                                <div class="field"><label>Total No of Students<div class="field-row"><input type="number" name="total_students" min="1" step="1" value="${escapeHtml(record.total_students)}" required></div></label><small class="field-error"><span>!</span>Total students is required.</small></div>
+                                <div class="field"><label>Present<div class="field-row"><input type="number" name="present_students" min="0" step="1" value="${escapeHtml(record.present_students)}" required></div></label><small class="field-error"><span>!</span>Present count is required.</small></div>
+                                <div class="field"><label>GPS Photo<div class="field-row"><input type="file" name="gps_photo" accept="image/*" ${record.id ? '' : 'required'}></div></label><small class="field-error"><span>!</span>${record.id ? 'Upload only if you want to replace the existing GPS photo.' : 'GPS photo is required.'}</small></div>
+                                <input type="hidden" name="location" data-project-location value="${escapeHtml(record.location || '')}">
+                                <p class="hint geo-hint">Location will be captured when this popup opens.</p>
+                                <div class="project-record-actions">
+                                    <button class="button ghost" type="button" data-next-project>Next Project</button>
+                                    <button class="button solid" type="submit">Submit</button>
+                                </div>
+                            </form>
                         `
                         : '';
 
                     return `
                         <div class="list-item session-detail-card">
                             <div class="split">
-                                <strong>${escapeHtml(session.slot_name || 'Session')}</strong>
-                                ${projectName ? `<span class="badge">${escapeHtml(projectName)}</span>` : ''}
+                                <strong>Project Record ${index + 1}</strong>
                             </div>
-                            <div class="session-detail-grid">
-                                <div class="session-detail-row"><strong>Project</strong><span>${escapeHtml(detailValue(projectName))}</span></div>
-                                <div class="session-detail-row"><strong>College Name</strong><span>${escapeHtml(detailValue(session.college_name))}</span></div>
-                                <div class="session-detail-row"><strong>Session Name</strong><span>${escapeHtml(detailValue(session.session_name))}</span></div>
-                                <div class="session-detail-row"><strong>Session Duration</strong><span>${escapeHtml(sessionDuration)}</span></div>
-                                <div class="session-detail-row"><strong>Total Students</strong><span>${escapeHtml(detailValue(session.total_students))}</span></div>
-                                <div class="session-detail-row"><strong>Present Students</strong><span>${escapeHtml(detailValue(session.present_students))}</span></div>
-                                <div class="session-detail-row"><strong>Topics Handled</strong><span>${escapeHtml(detailValue(session.topics_handled))}</span></div>
-                                <div class="session-detail-row"><strong>Location</strong><span>${escapeHtml(detailValue(session.location))}</span></div>
-                                <div class="session-detail-row"><strong>Punch In Time</strong><span>${escapeHtml(detailValue(session.punch_in_time))}</span></div>
-                                <div class="session-detail-row"><strong>Geo Coordinates</strong><span>${escapeHtml(geoText)}</span></div>
-                            </div>
+                            ${payload.context !== 'employee' ? `<div class="session-detail-grid">
+                                <div class="session-detail-row"><strong>College Name</strong><span>${escapeHtml(detailValue(record.college_name))}</span></div>
+                                <div class="session-detail-row"><strong>Subject</strong><span>${escapeHtml(detailValue(record.session_name))}</span></div>
+                                <div class="session-detail-row"><strong>Day Type</strong><span>${escapeHtml(detailValue(record.day_portion))}</span></div>
+                                <div class="session-detail-row"><strong>Topics Handled</strong><span>${escapeHtml(detailValue(record.topics_handled))}</span></div>
+                                <div class="session-detail-row"><strong>Total No of Students</strong><span>${escapeHtml(detailValue(record.total_students))}</span></div>
+                                <div class="session-detail-row"><strong>Present</strong><span>${escapeHtml(detailValue(record.present_students))}</span></div>
+                                <div class="session-detail-row"><strong>Absent</strong><span>${escapeHtml(detailValue(absentStudents))}</span></div>
+                            </div>` : projectRecordForm}
                             ${imageMarkup}
                         </div>
                     `;
                 }).join('');
-            }
 
             let reimbursementMarkup = '';
             if (payload.reimbursement && payload.reimbursement.count > 0) {
@@ -153,189 +214,152 @@
                     </section>
                 `;
             }
+            let employeeReimbursementForm = '';
+            const reimbursementAvailable = !payload.reimbursement || payload.reimbursement.available !== false;
+            if (reimbursementAvailable && payload.context === 'employee' && payload.view_mode !== 'reimbursement') {
+                const reimbursementLocked = !!(payload.reimbursement && payload.reimbursement.locked);
+                const reimbursementFuture = !!(payload.reimbursement && payload.reimbursement.future);
+                const reimbursementCurrentMonth = !!(payload.reimbursement && payload.reimbursement.current_month);
+                const hasApprovedReimbursement = !!(payload.reimbursement && Array.isArray(payload.reimbursement.items) && payload.reimbursement.items.some(item => ['APPROVED', 'PARTIALLY PAID', 'PAID'].includes(String(item.status || '').toUpperCase())));
+                const reimbursementDisabled = reimbursementLocked || reimbursementFuture || !reimbursementCurrentMonth || hasApprovedReimbursement;
+                const disabledAttr = reimbursementDisabled ? 'disabled' : '';
+                const reimbursementHint = reimbursementLocked
+                    ? 'You can submit up to 3 reimbursement requests for this date.'
+                    : (reimbursementFuture
+                        ? 'Future dates are not allowed for reimbursement claims.'
+                        : (!reimbursementCurrentMonth
+                            ? 'Reimbursements can only be submitted for dates in the current month.'
+                            : (hasApprovedReimbursement
+                                ? 'Reimbursement data cannot be updated once it is approved.'
+                                : 'Submit food, travel, or accommodation expenses for this date.')));
 
-            let adminForm = '';
-            if (payload.context === 'admin') {
-                adminForm = `
+                employeeReimbursementForm = `
                     <section class="attendance-modal-section">
-                        <h3>Update Attendance</h3>
-                        <form method="post" class="stack-form">
+                        <div class="split">
+                            <h3>Employee Reimbursement</h3>
+                            <span class="badge">${escapeHtml(payload.display_date)}</span>
+                        </div>
+                        <p class="hint">${escapeHtml(reimbursementHint)}</p>
+                        <form method="post" enctype="multipart/form-data" class="stack-form" data-validate>
                             ${csrfInputMarkup()}
-                            <input type="hidden" name="action" value="admin_set_status">
-                            <input type="hidden" name="employee_id" value="${payload.employee_id}">
-                            <input type="hidden" name="attend_date" value="${payload.date}">
-                            <label>Update Status
-                                <select name="status">
-                                    <option value="" disabled ${payload.status ? '' : 'selected'}>Select status</option>
-                                    ${['Present','Absent','Half Day','Leave','Week Off'].map(status => `<option value="${status}" ${status === payload.status ? 'selected' : ''}>${status}</option>`).join('')}
-                                </select>
-                            </label>
-                            <button class="button solid" type="submit">Save Status</button>
+                            <input type="hidden" name="action" value="employee_submit_reimbursement">
+                            <input type="hidden" name="expense_date" value="${escapeHtml(payload.date)}">
+                            <input type="hidden" name="return_page" value="employee_log">
+                            <input type="hidden" name="return_month" value="${escapeHtml(String(payload.date || '').slice(0, 7))}">
+                            <div class="field">
+                                <label>Category</label>
+                                <div class="reimbursement-radio-group">
+                                    ${['FOOD', 'TRAVEL', 'ACCOMMODATION'].map(category => `
+                                        <label class="reimbursement-radio">
+                                            <input type="radio" name="category" value="${category}" required ${disabledAttr}>
+                                            <span>${category}</span>
+                                        </label>
+                                    `).join('')}
+                                </div>
+                                <small class="field-error"><span>!</span>Please choose a category.</small>
+                            </div>
+                            <div class="field">
+                                <label>Expense Description</label>
+                                <div class="field-row"><textarea name="expense_description" rows="4" placeholder="Explain the expense briefly." required ${disabledAttr}></textarea></div>
+                                <small class="field-error"><span>!</span>Description is required.</small>
+                            </div>
+                            <div class="field">
+                                <label>Amount</label>
+                                <div class="field-row"><input type="number" name="amount_requested" min="0.01" step="0.01" placeholder="Enter amount" required ${disabledAttr}></div>
+                                <small class="field-error"><span>!</span>Enter a valid amount.</small>
+                            </div>
+                            <div class="field">
+                                <label>Upload File (JPG/PDF, max 5MB)</label>
+                                <div class="field-row"><input type="file" name="attachment" accept=".jpg,.jpeg,.pdf,image/jpeg,application/pdf" required ${disabledAttr}></div>
+                                <small class="field-error"><span>!</span>Upload a JPG or PDF file up to 5MB.</small>
+                            </div>
+                            <button class="button solid" type="submit" ${disabledAttr}>Submit Reimbursement</button>
                         </form>
                     </section>
                 `;
             }
 
+            let adminForm = '';
+            let adminPunchSection = '';
+            const currentShellRole = document.querySelector('[data-profile-card]')?.dataset.profileRole || '';
+            const isVendorShell = currentShellRole === 'external_vendor';
+            if (payload.context === 'admin') {
+                const manualSessionRows = projectRecords
+                    .filter(record => record.punch_in_time || record.punch_out_time || record.punch_in_path || record.punch_in_lat || record.punch_in_lng || record.location)
+                    .map(record => {
+                        const title = detailValue(record.slot_name || record.session_name || record.college_name, 'Manual Punch');
+                        return `
+                            <div class="list-item session-detail-card">
+                                <div class="split"><strong>${escapeHtml(title)}</strong></div>
+                                <div class="session-detail-grid">
+                                    ${punchDetailRow('Manual In', record.punch_in_time)}
+                                    ${punchDetailRow('Manual Out', record.punch_out_time)}
+                                    ${record.location ? punchDetailRow('Location', record.location) : ''}
+                                    ${record.punch_in_lat || record.punch_in_lng ? punchDetailRow('Coordinates', `${detailValue(record.punch_in_lat)} / ${detailValue(record.punch_in_lng)}`) : ''}
+                                </div>
+                                ${punchPhotoMarkup(record.punch_in_path, 'Manual Punch Photo')}
+                            </div>
+                        `;
+                    }).join('');
+                const hasTopLevelManual = !!(payload.punch_in_time || payload.punch_out_time || payload.punch_in_path || payload.punch_in_lat || payload.punch_in_lng);
+                const topLevelManualMarkup = hasTopLevelManual ? `
+                    <div class="list-item session-detail-card">
+                        <div class="split"><strong>Manual Punch</strong></div>
+                        <div class="session-detail-grid">
+                            ${punchDetailRow('Manual In', payload.punch_in_time)}
+                            ${punchDetailRow('Manual Out', payload.punch_out_time)}
+                            ${payload.punch_in_lat || payload.punch_in_lng ? punchDetailRow('Coordinates', `${detailValue(payload.punch_in_lat)} / ${detailValue(payload.punch_in_lng)}`) : ''}
+                        </div>
+                        ${punchPhotoMarkup(payload.punch_in_path, 'Manual Punch Photo')}
+                    </div>
+                ` : '';
+
+                adminPunchSection = `
+                    <section class="attendance-modal-section">
+                        <div class="split">
+                            <h3>Punch Details</h3>
+                            <span class="badge">${escapeHtml(payload.display_date)}</span>
+                        </div>
+                        <div class="list">
+                            <div class="list-item session-detail-card">
+                                <div class="split"><strong>Biometric Punch</strong></div>
+                                <div class="session-detail-grid">
+                                    ${punchDetailRow('Biometric In', payload.biometric_in_time)}
+                                    ${punchDetailRow('Biometric Out', payload.biometric_out_time)}
+                                </div>
+                            </div>
+                            ${topLevelManualMarkup}
+                            ${manualSessionRows}
+                            ${(!topLevelManualMarkup && !manualSessionRows && !payload.biometric_in_time && !payload.biometric_out_time) ? '<p class="hint">No punch details recorded for this date.</p>' : ''}
+                        </div>
+                    </section>
+                `;
+                if (!isVendorShell) {
+                    adminForm = `
+                        <section class="attendance-modal-section">
+                            <h3>Update Attendance</h3>
+                            <form method="post" class="stack-form">
+                                ${csrfInputMarkup()}
+                                <input type="hidden" name="action" value="admin_set_status">
+                                <input type="hidden" name="employee_id" value="${payload.employee_id}">
+                                <input type="hidden" name="attend_date" value="${payload.date}">
+                                <label>Update Status
+                                    <select name="status">
+                                        <option value="" disabled ${payload.status ? '' : 'selected'}>Select status</option>
+                                        ${['Present','Absent','Half Day','Leave','Week Off'].map(status => `<option value="${status}" ${status === payload.status ? 'selected' : ''}>${status}</option>`).join('')}
+                                    </select>
+                                </label>
+                                <button class="button solid" type="submit">Save Status</button>
+                            </form>
+                        </section>
+                    `;
+                }
+            }
+
             let employeeCards = '';
             if (payload.context === 'employee') {
-                const dateProjects = availableProjectsForDate(payload.date);
-                const hasDateProjects = dateProjects.length > 0;
-                const manualInEnabled = payload.rule_manual_in || hasDateProjects;
-                const manualOutEnabled = payload.rule_manual_out || hasDateProjects;
-                const sessionForProject = (project, index) => {
-                    const projectId = Number(project.id || 0);
-                    const slot = projectManualSlotName(project);
-                    return payload.sessions.find(session => Number(session.project_id || 0) === projectId)
-                        || payload.sessions.find(session => (session.slot_name || '') === slot)
-                        || null;
-                };
-                const showAddManualPunchButton = false;
                 const isWeekOff = payload.status === 'Week Off';
                 const isFuture = !!payload.future;
-                const manualPunchPairs = dateProjects.map((project, index) => {
-                    const pairNumber = index + 1;
-                    const pairSession = sessionForProject(project, index);
-                    const selectedProjectId = Number(project.id || 0);
-                    const selectedProject = project;
-                    const slot = projectManualSlotName(project);
-                    const pairPunchInPath = pairSession && pairSession.punch_in_path
-                        ? pairSession.punch_in_path
-                        : (pairNumber === 1 ? (payload.punch_in_path || '') : '');
-                    const pairPunchInTime = pairSession && pairSession.punch_in_time
-                        ? pairSession.punch_in_time
-                        : (pairNumber === 1 ? (payload.punch_in_time || '') : '');
-                    const pairPunchInLat = pairSession && pairSession.punch_in_lat
-                        ? pairSession.punch_in_lat
-                        : (pairNumber === 1 ? (payload.punch_in_lat || '') : '');
-                    const pairPunchInLng = pairSession && pairSession.punch_in_lng
-                        ? pairSession.punch_in_lng
-                        : (pairNumber === 1 ? (payload.punch_in_lng || '') : '');
-                    const pairPunchInDone = !!pairPunchInPath;
-                    const pairPunchOutDone = !!(pairSession && (pairSession.college_name || pairSession.session_name || pairSession.location || Number(pairSession.session_duration || 0) > 0));
-                    const pairHiddenClass = '';
-                    const manualInSectionDisabled = (!manualInEnabled || !hasDateProjects) ? 'disabled' : '';
-                    const manualInFormDisabled = (!manualInEnabled || !hasDateProjects || pairPunchInDone) ? 'disabled' : '';
-                    const manualInRequired = manualInFormDisabled ? '' : 'required';
-                    const manualOutSectionDisabled = (!manualOutEnabled || !hasDateProjects || !pairPunchInDone) ? 'disabled' : '';
-                    const manualOutFormDisabled = (!manualOutEnabled || !hasDateProjects || !pairPunchInDone || pairPunchOutDone) ? 'disabled' : '';
-                    const manualInNote = pairPunchInDone
-                        ? `Submitted at ${escapeHtml(pairPunchInTime || 'Saved')}. Bio: ${escapeHtml(pairPunchInLat || '-')}, ${escapeHtml(pairPunchInLng || '-')}`
-                        : (!hasDateProjects ? 'No assigned project is active for this date.' : 'Location will be captured when this popup opens.');
-                    const manualOutNote = !hasDateProjects
-                        ? 'No assigned project is active for this date.'
-                        : (!manualOutEnabled
-                        ? 'Manual Punch Out is not enabled for this employee.'
-                        : (!pairPunchInDone
-                            ? `Submit Manual Punch In ${pairNumber} first.`
-                            : (pairPunchOutDone
-                                ? `Manual Punch Out ${pairNumber} is already submitted.`
-                                : `Fill the required fields for Manual Punch Out ${pairNumber}.`)));
-                    const pairStatus = pairPunchOutDone ? 'Completed' : (pairPunchInDone ? 'Punch In Submitted' : 'Pending');
-                    const sessionDurationValue = pairSession && pairSession.session_duration ? pairSession.session_duration : '';
-                    const collegeNameValue = pairSession && pairSession.college_name
-                        ? pairSession.college_name
-                        : (selectedProject && selectedProject.college_name ? selectedProject.college_name : '');
-                    const sessionNameValue = pairSession && pairSession.session_name
-                        ? pairSession.session_name
-                        : (selectedProject && selectedProject.project_name ? selectedProject.project_name : '');
-                    const locationValue = pairSession && pairSession.location
-                        ? pairSession.location
-                        : (selectedProject && selectedProject.location ? selectedProject.location : '');
-                    const totalStudentsValue = pairSession && pairSession.total_students ? pairSession.total_students : '';
-                    const presentStudentsValue = pairSession && pairSession.present_students ? pairSession.present_students : '';
-                    const topicsHandledValue = pairSession && pairSession.topics_handled ? pairSession.topics_handled : '';
-                    const sessionIdField = pairSession && pairSession.id ? `<input type="hidden" name="session_id" value="${escapeHtml(pairSession.id)}">` : '';
-
-                    return `
-                        <div class="manual-punch-pair ${pairHiddenClass}" data-manual-punch-pair>
-                            <div class="split manual-punch-pair-head">
-                                <div>
-                                    <h3>Manual Punch Pair ${pairNumber}</h3>
-                                    <p>${escapeHtml(selectedProject.project_name || slot)}</p>
-                                </div>
-                                <span class="badge">${escapeHtml(pairStatus)}</span>
-                            </div>
-                            <div class="manual-punch-grid">
-                                <div class="manual-punch-section ${manualInSectionDisabled}">
-                                    <h3>Manual Punch In ${pairNumber}</h3>
-                                    <p>Upload the photo for Manual Punch In ${pairNumber}.</p>
-                                    <form method="post" enctype="multipart/form-data" class="stack-form">
-                                        ${csrfInputMarkup()}
-                                        <input type="hidden" name="action" value="employee_manual_in">
-                                        <input type="hidden" name="attend_date" value="${payload.date}">
-                                        <input type="hidden" name="slot_index" value="${pairNumber}">
-                                        <input type="hidden" name="slot_name" value="${escapeHtml(slot)}">
-                                        <input type="hidden" name="project_id" value="${escapeHtml(selectedProjectId)}">
-                                        ${sessionIdField}
-                                        <div class="list-item"><strong>Project</strong><br><span>${escapeHtml(selectedProject.project_name || '')}</span></div>
-                                        <label>Punch In Photo *<input type="file" name="punch_photo" accept="image/*" ${manualInFormDisabled} ${manualInRequired}></label>
-                                        <div class="list-item hidden file-preview-box"></div>
-                                        <input type="hidden" name="latitude" class="geo-lat">
-                                        <input type="hidden" name="longitude" class="geo-lng">
-                                        <div class="hint geo-hint">${manualInNote}</div>
-                                        <button class="button solid" type="submit" ${manualInFormDisabled}>${pairPunchInDone ? 'Submitted' : `Punch In ${pairNumber}`}</button>
-                                    </form>
-                                </div>
-                                <div class="manual-punch-section ${manualOutSectionDisabled}">
-                                    <h3>Manual Punch Out ${pairNumber}</h3>
-                                    <p>${escapeHtml(manualOutNote)}</p>
-                                    <form method="post" class="stack-form">
-                                        ${csrfInputMarkup()}
-                                        <input type="hidden" name="action" value="employee_manual_out">
-                                        <input type="hidden" name="attend_date" value="${payload.date}">
-                                        <input type="hidden" name="slot_index" value="${pairNumber}">
-                                        <input type="hidden" name="slot_name" value="${escapeHtml(slot)}">
-                                        <input type="hidden" name="project_id" value="${escapeHtml(selectedProjectId)}">
-                                        ${sessionIdField}
-                                        <label>Project<input type="text" value="${escapeHtml(selectedProject.project_name || '')}" ${manualOutFormDisabled} readonly></label>
-                                        <label>College Name *<input type="text" name="college_name" data-project-college value="${escapeHtml(collegeNameValue)}" ${manualOutFormDisabled} required></label>
-                                        <label>Session Name *<input type="text" name="session_name" data-project-session value="${escapeHtml(sessionNameValue)}" ${manualOutFormDisabled} required></label>
-                                        <label>Session Duration in hours *<input type="number" step="0.5" min="0.5" name="session_duration" value="${escapeHtml(sessionDurationValue)}" ${manualOutFormDisabled} required></label>
-                                        <label>Total Students *<input type="number" min="1" step="1" name="total_students" value="${escapeHtml(totalStudentsValue)}" ${manualOutFormDisabled} required></label>
-                                        <label>Present Students *<input type="number" min="0" step="1" name="present_students" value="${escapeHtml(presentStudentsValue)}" ${manualOutFormDisabled} required></label>
-                                        <label>Topics Handled *<textarea name="topics_handled" rows="3" ${manualOutFormDisabled} required>${escapeHtml(topicsHandledValue)}</textarea></label>
-                                        <label>Location *<input type="text" name="location" data-project-location value="${escapeHtml(locationValue)}" ${manualOutFormDisabled} required></label>
-                                        <button class="button secondary" type="submit" ${manualOutFormDisabled}>${pairPunchOutDone ? 'Submitted' : `Punch Out ${pairNumber}`}</button>
-                                    </form>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-
-                const manualPunchCard = hasDateProjects ? `
-                        <div class="action-card manual-punch-card">
-                            <button class="manual-punch-toggle" type="button" data-toggle-manual-punch aria-expanded="false">
-                                <span class="manual-punch-toggle-copy">
-                                    <strong>Manual Punch</strong>
-                                    <span>Open all configured manual punch pairs for this assigned project date.</span>
-                                </span>
-                                <span class="manual-punch-toggle-state">Open</span>
-                            </button>
-                            <div class="manual-punch-panel hidden" data-manual-punch-panel>
-                                <div class="manual-punch-popup">
-                                    <div class="split manual-punch-popup-head">
-                                        <div>
-                                            <h3>Manual Punch</h3>
-                                            <p>Each manual punch pair has its own Manual Punch In and Manual Punch Out section. All configured slots are shown for this date.</p>
-                                        </div>
-                                        <div class="inline-actions">
-                                            ${showAddManualPunchButton ? '<button class="button outline small" type="button" data-add-manual-punch-entry>Add More Manual Punch</button>' : ''}
-                                            <button class="manual-punch-popup-close" type="button" data-close-manual-punch-popup>&times;</button>
-                                        </div>
-                                    </div>
-                                    <div class="manual-punch-pairs">
-                                        ${manualPunchPairs}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                ` : `
-                        <div class="action-card disabled">
-                            <h3>Manual Punch</h3>
-                            <p>Manual Punch In and Punch Out are shown only for dates with an active assigned project.</p>
-                        </div>
-                `;
 
                 employeeCards = isFuture ? `
                     <div class="section-block">
@@ -349,7 +373,6 @@
                     </div>
                 ` : `
                     <div class="cards-2">
-                        ${manualPunchCard}
                         <div class="action-card ${(!payload.rule_bio_in && !payload.rule_bio_out) ? 'disabled' : ''}">
                             <h3>Biometric Options</h3>
                             <p>Use biometric actions only if they are enabled by the admin.</p>
@@ -384,18 +407,41 @@
                     </div>
                 `;
             }
-            const manualGeoSession = Array.isArray(payload.sessions) ? payload.sessions.find(session => !!session.punch_in_path && (session.punch_in_lat || session.punch_in_lng)) : null;
-            const isManualPunchRecord = !!payload.punch_in_path || (Array.isArray(payload.sessions) && payload.sessions.some(session => !!session.punch_in_path));
-            const manualGeoLat = payload.punch_in_lat || (manualGeoSession ? manualGeoSession.punch_in_lat : '');
-            const manualGeoLng = payload.punch_in_lng || (manualGeoSession ? manualGeoSession.punch_in_lng : '');
-            const punchDetailsMarkup = isManualPunchRecord
-                ? ((manualGeoLat || manualGeoLng) ? `Bio: ${escapeHtml(manualGeoLat || '-')}, ${escapeHtml(manualGeoLng || '-')}` : '')
-                : `
-                        <strong>Punch Details</strong><br>
-                        Punch In: ${escapeHtml(payload.biometric_in_time || 'Not submitted')}<br>
-                        Punch Out: ${escapeHtml(payload.biometric_out_time || 'Not submitted')}<br>
-                        ${(payload.biometric_in_time || payload.biometric_out_time) ? 'Source: Imported biometric attendance' : 'Bio: Not available'}
-                    `;
+            const projectRecordSection = (payload.view_mode !== 'reimbursement' && projectRecords.length) ? `
+                <section class="attendance-modal-section">
+                    <div class="split">
+                        <h3>Project Record :-</h3>
+                    </div>
+                    <div class="list">${projectRecordMarkup}</div>
+                </section>
+            ` : '';
+            const reimbursementSection = `${reimbursementMarkup}${employeeReimbursementForm}`;
+            const employeeChooser = (reimbursementAvailable && payload.context === 'employee' && payload.view_mode !== 'reimbursement') ? `
+                <section class="attendance-modal-section">
+                    <div class="cards-2">
+                        ${hasProjectRecords ? `<button class="action-card" type="button" data-attendance-detail-button="project">
+                            <h3>Project Record</h3>
+                            <p>Open project record details and mark attendance.</p>
+                        </button>` : ''}
+                        <button class="action-card" type="button" data-attendance-detail-button="reimbursement">
+                            <h3>Employee Reimbursement</h3>
+                            <p>Open reimbursement requests and submit a claim.</p>
+                        </button>
+                    </div>
+                </section>
+                ${hasProjectRecords ? `<div class="attendance-detail-popup hidden" data-attendance-detail-section="project">
+                    <div class="attendance-detail-popup-card">
+                        <button class="modal-close attendance-detail-close" type="button" data-attendance-detail-close>&times;</button>
+                        ${projectRecordSection}
+                    </div>
+                </div>` : ''}
+                <div class="attendance-detail-popup hidden" data-attendance-detail-section="reimbursement">
+                    <div class="attendance-detail-popup-card">
+                        <button class="modal-close attendance-detail-close" type="button" data-attendance-detail-close>&times;</button>
+                        ${reimbursementSection}
+                    </div>
+                </div>
+            ` : '';
             modalContent.className = `modal-grid attendance-context-${payload.context}`;
             modalContent.innerHTML = `
                 <section class="attendance-modal-hero">
@@ -404,22 +450,10 @@
                         <h2>${escapeHtml(payload.display_date)}</h2>
                         ${payload.view_mode !== 'reimbursement' ? `<p>Status: <span class="status-pill status-${escapeHtml(displayStatusClass)}">${escapeHtml(displayStatus)}</span></p>` : ''}
                     </div>
-                    ${payload.view_mode !== 'reimbursement' ? `
-                    <div class="attendance-modal-meta">
-                        ${punchDetailsMarkup}
-                    </div>
-                    ` : ''}
                 </section>
-                ${(payload.view_mode !== 'reimbursement' && payload.context === 'admin') ? `
-                <section class="attendance-modal-section">
-                    <div class="split">
-                        <h3>Sessions Handled</h3>
-                        <span class="badge">${payload.sessions ? payload.sessions.length : 0} total</span>
-                    </div>
-                    <div class="list">${sessionMarkup}</div>
-                </section>
-                ` : ''}
-                ${reimbursementMarkup}
+                ${payload.context === 'employee' ? employeeChooser : projectRecordSection}
+                ${adminPunchSection}
+                ${payload.context === 'employee' ? '' : reimbursementMarkup}
                 ${payload.view_mode !== 'reimbursement' ? `
                 ${adminForm}
                 ${employeeCards}
@@ -441,6 +475,50 @@
         }
 
         function wireDynamicModalUi() {
+            document.querySelectorAll('[data-attendance-detail-button]').forEach(button => {
+                button.addEventListener('click', () => {
+                    const target = button.dataset.attendanceDetailButton || '';
+                    document.querySelectorAll('[data-attendance-detail-section]').forEach(section => {
+                        section.classList.toggle('hidden', section.dataset.attendanceDetailSection !== target);
+                    });
+                    document.querySelectorAll('[data-attendance-detail-button]').forEach(item => {
+                        item.classList.toggle('active', item === button);
+                    });
+                });
+            });
+            document.querySelectorAll('[data-attendance-detail-close]').forEach(button => {
+                button.addEventListener('click', () => {
+                    const popup = button.closest('[data-attendance-detail-section]');
+                    if (popup) {
+                        popup.classList.add('hidden');
+                    }
+                    document.querySelectorAll('[data-attendance-detail-button]').forEach(item => item.classList.remove('active'));
+                });
+            });
+
+            document.querySelectorAll('[data-next-project]').forEach(button => {
+                const card = button.closest('.session-detail-card');
+                const nextCard = card ? card.nextElementSibling : null;
+                if (!nextCard || !nextCard.classList.contains('session-detail-card')) {
+                    button.disabled = true;
+                    button.textContent = 'Next Project';
+                }
+
+                button.addEventListener('click', () => {
+                    const currentCard = button.closest('.session-detail-card');
+                    const targetCard = currentCard ? currentCard.nextElementSibling : null;
+                    if (!targetCard || !targetCard.classList.contains('session-detail-card')) {
+                        return;
+                    }
+
+                    targetCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    const firstField = targetCard.querySelector('input:not([type="hidden"]), textarea, select');
+                    if (firstField) {
+                        firstField.focus({ preventScroll: true });
+                    }
+                });
+            });
+
             const syncProjectFields = (form, force = false) => {
                 if (!form) {
                     return;
@@ -469,6 +547,7 @@
                 setValue('[data-project-college]', String(project.college_name || ''));
                 setValue('[data-project-session]', String(project.project_name || ''));
                 setValue('[data-project-location]', String(project.location || ''));
+                setValue('[data-project-day-portion]', projectDayPortionLabel(project));
 
             };
 
@@ -595,6 +674,50 @@
                 openModalById(button.dataset.switchModalTarget);
             });
         });
+        document.querySelectorAll('[data-project-confirmation-form]').forEach(form => {
+            form.querySelectorAll('[data-signature-upload]').forEach(input => {
+                input.addEventListener('change', () => {
+                    const file = input.files && input.files[0] ? input.files[0] : null;
+                    if (!file || !file.type.startsWith('image/')) {
+                        return;
+                    }
+                    const key = input.dataset.signatureUpload || '';
+                    const signatureType = input.dataset.signatureType || 'authorized';
+                    const editor = Array.from(form.querySelectorAll('[data-confirmation-editor]'))
+                        .find(item => (item.dataset.confirmationEditor || '') === key);
+                    if (!editor) {
+                        return;
+                    }
+                    const reader = new FileReader();
+                    reader.addEventListener('load', () => {
+                        const slot = signatureType === 'trainer'
+                            ? editor.querySelector('[data-trainer-signature-slot]')
+                            : editor.querySelector('[data-signature-slot]');
+                        if (!slot) {
+                            return;
+                        }
+                        const image = document.createElement('img');
+                        image.className = 'karyoun-signature-image';
+                        image.src = String(reader.result || '');
+                        image.alt = signatureType === 'trainer' ? 'Trainer signature' : 'Authorized signature';
+                        slot.innerHTML = '';
+                        slot.append('Signature: ');
+                        slot.appendChild(image);
+                    });
+                    reader.readAsDataURL(file);
+                });
+            });
+            form.addEventListener('submit', () => {
+                form.querySelectorAll('[data-confirmation-editor]').forEach(editor => {
+                    const key = editor.dataset.confirmationEditor || '';
+                    const target = Array.from(form.querySelectorAll('[data-confirmation-html]'))
+                        .find(input => (input.dataset.confirmationHtml || '') === key);
+                    if (target) {
+                        target.value = editor.innerHTML;
+                    }
+                });
+            });
+        });
         document.querySelectorAll('.modal').forEach(dialog => {
             dialog.addEventListener('click', event => {
                 if (event.target === dialog) {
@@ -646,17 +769,28 @@
             const form = select.closest('form');
             const empIdField = form ? form.querySelector('[data-contractual-emp-id-field]') : null;
             const empIdInput = empIdField ? empIdField.querySelector('input[name="emp_id"]') : null;
+            const contractualHiddenFields = form ? [...form.querySelectorAll('[data-contractual-hidden-field]')] : [];
             const sync = () => {
                 const isContractual = select.value === 'corporate';
-                if (empIdField) {
-                    empIdField.classList.toggle('hidden', isContractual);
-                }
-                if (empIdInput) {
-                    empIdInput.required = !isContractual;
-                    empIdInput.disabled = isContractual;
-                    if (isContractual) {
-                        empIdInput.value = '';
-                    }
+                const isVendorEmployee = select.value === 'vendor';
+                const hideManagedFields = isContractual || isVendorEmployee;
+                contractualHiddenFields.forEach(field => {
+                    field.classList.toggle('hidden', hideManagedFields);
+                    field.querySelectorAll('input, select, textarea').forEach(input => {
+                        input.disabled = hideManagedFields;
+                        if (hideManagedFields) {
+                            input.dataset.wasRequired = input.required ? '1' : '';
+                            input.required = false;
+                            if (input.name === 'emp_id') {
+                                input.value = '';
+                            }
+                        } else if (input.dataset.wasRequired === '1') {
+                            input.required = true;
+                        }
+                    });
+                });
+                if (empIdInput && !hideManagedFields) {
+                    empIdInput.required = true;
                 }
             };
             select.addEventListener('change', sync);
@@ -686,14 +820,21 @@
             if (!tableBody) {
                 return;
             }
+            const linkedFilters = [...document.querySelectorAll(`[data-table-filter="${filterInput.dataset.tableFilter}"]`)];
             const rows = [...tableBody.querySelectorAll('[data-filter-row]')];
             const totalCount = rows.length;
             const update = () => {
-                const term = filterInput.value.trim().toLowerCase();
                 let visibleCount = 0;
                 rows.forEach(row => {
-                    const haystack = (row.dataset.filterText || row.textContent || '').toLowerCase();
-                    const matches = term === '' || haystack.includes(term);
+                    const matches = linkedFilters.every(input => {
+                        const term = input.value.trim().toLowerCase();
+                        if (term === '') {
+                            return true;
+                        }
+                        const key = input.dataset.filterKey || 'filterText';
+                        const haystack = (row.dataset[key] || row.dataset.filterText || row.textContent || '').toLowerCase();
+                        return haystack.includes(term);
+                    });
                     row.style.display = matches ? '' : 'none';
                     if (matches) {
                         visibleCount += 1;
@@ -703,10 +844,12 @@
                     emptyState.classList.toggle('hidden', visibleCount !== 0);
                 }
                 if (countTarget) {
-                    countTarget.textContent = term === '' ? totalCount + ' total' : visibleCount + ' of ' + totalCount;
+                    const hasTerm = linkedFilters.some(input => input.value.trim() !== '');
+                    countTarget.textContent = hasTerm ? visibleCount + ' of ' + totalCount : totalCount + ' total';
                 }
             };
             filterInput.addEventListener('input', update);
+            filterInput.addEventListener('change', update);
             update();
         });
         document.querySelectorAll('[data-tag-source]').forEach(container => {
@@ -732,12 +875,13 @@
             }
             const ruleCount = form.querySelectorAll('.rule-card input:checked, input[type="hidden"][name="manual_punch"], input[type="hidden"][name="biometric_punch"]').length;
             const employeeCount = form.matches('[data-employee-form]') ? form.querySelectorAll('input[name="employee_ids[]"]:checked').length : 1;
-            const valid = form.matches('[data-project-allocation-form]') ? employeeCount > 0 : (ruleCount > 0 && employeeCount > 0);
+            const valid = form.matches('[data-project-allocation-form], [data-time-allocation-form], [data-power-access-form]') ? employeeCount > 0 : (ruleCount > 0 && employeeCount > 0);
             submits.forEach(submit => submit.classList.toggle('ghost', !valid));
         }
         document.querySelectorAll('form[data-rule-form]').forEach(form => {
-            form.querySelectorAll('.rule-card input, input[name="employee_ids[]"], input[type="hidden"][name="manual_punch"], input[type="hidden"][name="biometric_punch"]').forEach(input => {
+            form.querySelectorAll('.rule-card input, input[name="employee_ids[]"], .power-access-rule input, input[type="hidden"][name="manual_punch"], input[type="hidden"][name="biometric_punch"], select[name="shift"], input[name="shift_from"], input[name="shift_to"], input[name="employee_from"], input[name="employee_to"]').forEach(input => {
                 input.addEventListener('change', () => updateRuleSubmit(form));
+                input.addEventListener('input', () => updateRuleSubmit(form));
             });
             updateRuleSubmit(form);
         });
@@ -764,11 +908,42 @@
                 openModalById('delete-employee-modal');
             });
         });
+        document.querySelectorAll('[data-confirm-vendor-delete]').forEach(button => {
+            button.addEventListener('click', () => {
+                const modalId = button.dataset.vendorDeleteModal || '';
+                const modal = document.getElementById(modalId);
+                if (!modal) {
+                    return;
+                }
+                const vendorIdInput = modal.querySelector('input[name="vendor_id"]');
+                const vendorName = modal.querySelector('[data-vendor-delete-name]');
+                if (vendorIdInput) {
+                    vendorIdInput.value = button.dataset.vendorId || '';
+                }
+                if (vendorName) {
+                    vendorName.textContent = button.dataset.vendorName || 'this vendor';
+                }
+                openModalById(modalId);
+            });
+        });
         document.querySelectorAll('.flash').forEach((toast, index) => {
-            setTimeout(() => {
+            const closeFlash = () => {
                 toast.style.opacity = '0';
-                toast.style.transform = 'translateY(-6px)';
-                setTimeout(() => toast.remove(), 220);
+                toast.style.transform = 'scale(0.96)';
+                setTimeout(() => {
+                    const stack = toast.closest('.flash-stack');
+                    toast.remove();
+                    if (stack && !stack.querySelector('.flash')) {
+                        stack.remove();
+                    }
+                }, 220);
+            };
+            const okButton = toast.querySelector('.flash-ok');
+            if (okButton) {
+                okButton.addEventListener('click', closeFlash);
+            }
+            setTimeout(() => {
+                closeFlash();
             }, 3400 + (index * 200));
         });
         const sidebarToggle = document.querySelector('[data-sidebar-toggle]');

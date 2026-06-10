@@ -303,8 +303,23 @@ function initialize_database(): void
     if (!table_has_column($pdo, 'users', 'company_name')) {
         $pdo->exec('ALTER TABLE users ADD COLUMN company_name VARCHAR(191) NULL AFTER phone');
     }
+    if (!table_has_column($pdo, 'users', 'company_address')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN company_address TEXT NULL AFTER company_name');
+    }
+    if (!table_has_column($pdo, 'users', 'company_email')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN company_email VARCHAR(191) NULL AFTER company_address');
+    }
+    if (!table_has_column($pdo, 'users', 'company_phone')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN company_phone VARCHAR(50) NULL AFTER company_email');
+    }
     if (!table_has_column($pdo, 'users', 'representative_name')) {
-        $pdo->exec('ALTER TABLE users ADD COLUMN representative_name VARCHAR(191) NULL AFTER company_name');
+        $pdo->exec('ALTER TABLE users ADD COLUMN representative_name VARCHAR(191) NULL AFTER company_phone');
+    }
+    if (!table_has_column($pdo, 'users', 'personal_email')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN personal_email VARCHAR(191) NULL AFTER representative_name');
+    }
+    if (!table_has_column($pdo, 'users', 'personal_phone')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN personal_phone VARCHAR(50) NULL AFTER personal_email');
     }
     if (!table_has_column($pdo, 'users', 'gst_no')) {
         $pdo->exec('ALTER TABLE users ADD COLUMN gst_no VARCHAR(50) NULL AFTER representative_name');
@@ -324,6 +339,88 @@ function initialize_database(): void
     if (!table_has_column($pdo, 'users', 'bank_name')) {
         $pdo->exec('ALTER TABLE users ADD COLUMN bank_name VARCHAR(191) NULL AFTER bank_branch');
     }
+    if (!table_has_column($pdo, 'users', 'recruiter_name')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN recruiter_name VARCHAR(191) NULL AFTER employee_type');
+    }
+    if (!table_has_column($pdo, 'users', 'recruited_through')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN recruited_through VARCHAR(100) NULL AFTER recruiter_name');
+    }
+    if (!table_has_column($pdo, 'users', 'designation')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN designation VARCHAR(100) NULL AFTER recruited_through');
+    }
+    if (!table_has_column($pdo, 'users', 'date_of_joining')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN date_of_joining DATE NULL AFTER designation');
+    }
+    if (!table_has_column($pdo, 'users', 'profile_status')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN profile_status VARCHAR(50) NOT NULL DEFAULT "incomplete" AFTER date_of_joining');
+    }
+    if (!table_has_column($pdo, 'users', 'profile_rejection_reason')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN profile_rejection_reason TEXT NULL AFTER profile_status');
+    }
+    if (!table_has_column($pdo, 'users', 'profile_changed_fields_json')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN profile_changed_fields_json TEXT NULL AFTER profile_rejection_reason');
+    }
+    if (!table_has_column($pdo, 'users', 'profile_changed_at')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN profile_changed_at DATETIME NULL AFTER profile_changed_fields_json');
+    }
+    if (!table_has_column($pdo, 'users', 'date_of_birth')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN date_of_birth DATE NULL AFTER profile_changed_at');
+    }
+    if (!table_has_column($pdo, 'users', 'gender')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN gender VARCHAR(50) NULL AFTER date_of_birth');
+    }
+    if (!table_has_column($pdo, 'users', 'highest_qualification')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN highest_qualification VARCHAR(191) NULL AFTER gender');
+    }
+    if (!table_has_column($pdo, 'users', 'address')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN address TEXT NULL AFTER highest_qualification');
+    }
+    if (!table_has_column($pdo, 'users', 'offer_letter_name')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN offer_letter_name VARCHAR(191) NULL AFTER address');
+    }
+    if (!table_has_column($pdo, 'users', 'offer_letter_address')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN offer_letter_address TEXT NULL AFTER offer_letter_name');
+    }
+    if (!table_has_column($pdo, 'users', 'offer_letter_designation')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN offer_letter_designation VARCHAR(191) NULL AFTER offer_letter_address');
+    }
+    if (!table_has_column($pdo, 'users', 'offer_letter_signature_path')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN offer_letter_signature_path VARCHAR(255) NULL AFTER offer_letter_designation');
+    }
+    if (!table_has_column($pdo, 'users', 'offer_letter_signature_name')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN offer_letter_signature_name VARCHAR(191) NULL AFTER offer_letter_signature_path');
+    }
+    if (!table_has_column($pdo, 'users', 'training_experience_years')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN training_experience_years VARCHAR(50) NULL AFTER address');
+    }
+    if (!table_has_column($pdo, 'users', 'languages_known')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN languages_known TEXT NULL AFTER training_experience_years');
+    }
+    if (!table_has_column($pdo, 'users', 'technical_skills')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN technical_skills TEXT NULL AFTER languages_known');
+    }
+    if (!table_has_column($pdo, 'users', 'account_holder_name')) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN account_holder_name VARCHAR(191) NULL AFTER bank_name');
+    }
+    foreach (['aadhaar_card', 'pan_card', 'profile_photo', 'qualification_certificate', 'bank_proof', 'resume'] as $documentKey) {
+        if (!table_has_column($pdo, 'users', $documentKey . '_path')) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN ' . $documentKey . '_path VARCHAR(255) NULL');
+        }
+        if (!table_has_column($pdo, 'users', $documentKey . '_name')) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN ' . $documentKey . '_name VARCHAR(191) NULL');
+        }
+    }
+    foreach (['company_logo'] as $documentKey) {
+        if (!table_has_column($pdo, 'users', $documentKey . '_path')) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN ' . $documentKey . '_path VARCHAR(255) NULL');
+        }
+        if (!table_has_column($pdo, 'users', $documentKey . '_name')) {
+            $pdo->exec('ALTER TABLE users ADD COLUMN ' . $documentKey . '_name VARCHAR(191) NULL');
+        }
+    }
+    $pdo->exec("UPDATE users SET profile_status = 'verified' WHERE role IN ('admin', 'freelancer', 'external_vendor', 'super_admin') AND (profile_status IS NULL OR profile_status = '' OR profile_status = 'incomplete')");
+    $pdo->exec("UPDATE users SET profile_status = 'verified', profile_rejection_reason = NULL WHERE role IN ('employee', 'corporate_employee') AND (role = 'corporate_employee' OR employee_type IN ('corporate', 'vendor') OR designation IN ('Contractual', 'Vendor')) AND profile_status <> 'verified'");
+    $pdo->exec("UPDATE users SET profile_status = 'incomplete' WHERE role IN ('employee', 'corporate_employee') AND (profile_status IS NULL OR profile_status = '')");
     $pdo->exec("CREATE TABLE IF NOT EXISTS employee_rules (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         user_id INT UNSIGNED NOT NULL,
@@ -373,6 +470,8 @@ function initialize_database(): void
         project_from DATE NULL,
         project_to DATE NULL,
         project_incentive DECIMAL(12,2) NOT NULL DEFAULT 0,
+        project_daily_salary DECIMAL(12,2) NOT NULL DEFAULT 0,
+        project_pay_basis VARCHAR(20) NOT NULL DEFAULT 'daily',
         created_at DATETIME NOT NULL,
         UNIQUE KEY uniq_employee_project_assignment (user_id, project_id),
         INDEX idx_employee_project_assignments_user_id (user_id),
@@ -388,6 +487,12 @@ function initialize_database(): void
     }
     if (!table_has_column($pdo, 'employee_project_assignments', 'project_incentive')) {
         $pdo->exec('ALTER TABLE employee_project_assignments ADD COLUMN project_incentive DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER project_to');
+    }
+    if (!table_has_column($pdo, 'employee_project_assignments', 'project_daily_salary')) {
+        $pdo->exec('ALTER TABLE employee_project_assignments ADD COLUMN project_daily_salary DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER project_incentive');
+    }
+    if (!table_has_column($pdo, 'employee_project_assignments', 'project_pay_basis')) {
+        $pdo->exec("ALTER TABLE employee_project_assignments ADD COLUMN project_pay_basis VARCHAR(20) NOT NULL DEFAULT 'daily' AFTER project_daily_salary");
     }
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS shift_timings (
@@ -417,13 +522,17 @@ function initialize_database(): void
     $pdo->exec("CREATE TABLE IF NOT EXISTS projects (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         admin_id INT UNSIGNED NULL,
+        project_code VARCHAR(50) NULL,
         project_name VARCHAR(191) NOT NULL,
+        vendor_name VARCHAR(191) NULL,
         college_name VARCHAR(191) NOT NULL,
         location VARCHAR(191) NOT NULL,
         total_days INT NOT NULL,
         session_type ENUM('FULL_DAY', 'FIRST_HALF', 'SECOND_HALF') NOT NULL,
         start_date DATE NULL,
         end_date DATE NULL,
+        approval_status VARCHAR(50) NOT NULL DEFAULT 'verified',
+        created_by_user_id INT UNSIGNED NULL,
         is_active TINYINT(1) NOT NULL DEFAULT 1,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -435,9 +544,23 @@ function initialize_database(): void
     if (!table_has_column($pdo, 'projects', 'admin_id')) {
         $pdo->exec('ALTER TABLE projects ADD COLUMN admin_id INT UNSIGNED NULL AFTER id');
     }
+    if (!table_has_column($pdo, 'projects', 'project_code')) {
+        $pdo->exec('ALTER TABLE projects ADD COLUMN project_code VARCHAR(50) NULL AFTER admin_id');
+    }
+    if (!table_has_column($pdo, 'projects', 'vendor_name')) {
+        $pdo->exec('ALTER TABLE projects ADD COLUMN vendor_name VARCHAR(191) NULL AFTER project_name');
+    }
     if (!index_exists($pdo, 'projects', 'idx_projects_admin_active')) {
         $pdo->exec('CREATE INDEX idx_projects_admin_active ON projects(admin_id, is_active)');
     }
+    if (!table_has_column($pdo, 'projects', 'approval_status')) {
+        $pdo->exec("ALTER TABLE projects ADD COLUMN approval_status VARCHAR(50) NOT NULL DEFAULT 'verified' AFTER end_date");
+    }
+    if (!table_has_column($pdo, 'projects', 'created_by_user_id')) {
+        $pdo->exec('ALTER TABLE projects ADD COLUMN created_by_user_id INT UNSIGNED NULL AFTER approval_status');
+    }
+    $pdo->exec("UPDATE projects SET approval_status = 'verified' WHERE approval_status IS NULL OR approval_status = ''");
+    $pdo->exec("UPDATE projects SET project_code = CONCAT('P', LPAD(id, 3, '0')) WHERE approval_status = 'verified' AND (project_code IS NULL OR project_code = '' OR project_code LIKE 'PRJ-%')");
     $pdo->exec('ALTER TABLE projects MODIFY COLUMN start_date DATE NULL');
     $pdo->exec('ALTER TABLE projects MODIFY COLUMN end_date DATE NULL');
 
@@ -457,6 +580,9 @@ function initialize_database(): void
         biometric_out_time DATETIME NULL,
         leave_reason TEXT NULL,
         admin_override_status VARCHAR(50) NULL,
+        admin_override_by_user_id INT UNSIGNED NULL,
+        admin_override_by_name VARCHAR(191) NULL,
+        admin_override_at DATETIME NULL,
         created_at DATETIME NOT NULL,
         updated_at DATETIME NOT NULL,
         UNIQUE KEY uniq_user_attend_date (user_id, attend_date),
@@ -576,6 +702,52 @@ function initialize_database(): void
         CONSTRAINT fk_payments_admin FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE,
         CONSTRAINT fk_payments_reimbursement FOREIGN KEY (reimbursement_id) REFERENCES employee_reimbursements(id) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS vendor_payment_invoice_requests (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        vendor_id INT UNSIGNED NOT NULL,
+        user_id INT UNSIGNED NOT NULL,
+        project_id INT UNSIGNED NOT NULL,
+        invoice_date DATE NOT NULL,
+        amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+        admin_note TEXT NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        INDEX idx_vendor_payment_invoice_vendor_status (vendor_id, status),
+        INDEX idx_vendor_payment_invoice_user_date (user_id, invoice_date),
+        INDEX idx_vendor_payment_invoice_project_date (project_id, invoice_date),
+        CONSTRAINT fk_vendor_payment_invoice_vendor FOREIGN KEY (vendor_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_vendor_payment_invoice_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_vendor_payment_invoice_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS contractual_payment_requests (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        user_id INT UNSIGNED NOT NULL,
+        admin_id INT UNSIGNED NOT NULL,
+        request_month CHAR(7) NOT NULL,
+        request_date DATE NULL,
+        amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+        note TEXT NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        UNIQUE KEY uniq_contractual_payment_request_date (user_id, request_date),
+        INDEX idx_contractual_payment_admin_status (admin_id, status, request_month),
+        CONSTRAINT fk_contractual_payment_request_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_contractual_payment_request_admin FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    if (!table_has_column($pdo, 'contractual_payment_requests', 'request_date')) {
+        $pdo->exec('ALTER TABLE contractual_payment_requests ADD COLUMN request_date DATE NULL AFTER request_month');
+    }
+    if (!index_exists($pdo, 'contractual_payment_requests', 'idx_contractual_payment_request_user')) {
+        $pdo->exec('ALTER TABLE contractual_payment_requests ADD INDEX idx_contractual_payment_request_user (user_id)');
+    }
+    if (index_exists($pdo, 'contractual_payment_requests', 'uniq_contractual_payment_request_month')) {
+        $pdo->exec('ALTER TABLE contractual_payment_requests DROP INDEX uniq_contractual_payment_request_month');
+    }
+    if (!index_exists($pdo, 'contractual_payment_requests', 'uniq_contractual_payment_request_date')) {
+        $pdo->exec('ALTER TABLE contractual_payment_requests ADD UNIQUE KEY uniq_contractual_payment_request_date (user_id, request_date)');
+    }
     $pdo->exec("CREATE TABLE IF NOT EXISTS notifications (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         user_id INT UNSIGNED NOT NULL,
@@ -653,6 +825,9 @@ function initialize_database(): void
         'punch_in_photo' => 'LONGBLOB NULL AFTER punch_in_path',
         'punch_in_photo_mime' => 'VARCHAR(100) NULL AFTER punch_in_photo',
         'punch_in_photo_name' => 'VARCHAR(255) NULL AFTER punch_in_photo_mime',
+        'admin_override_by_user_id' => 'INT UNSIGNED NULL AFTER admin_override_status',
+        'admin_override_by_name' => 'VARCHAR(191) NULL AFTER admin_override_by_user_id',
+        'admin_override_at' => 'DATETIME NULL AFTER admin_override_by_name',
     ];
     foreach ($recordPhotoColumns as $column => $definition) {
         if (!table_has_column($pdo, 'attendance_records', $column)) {

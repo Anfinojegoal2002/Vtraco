@@ -2,95 +2,105 @@
 
 ## Project Title
 
-V Traco - Employee Attendance, Project Allocation, Incentive, Reimbursement, and Payroll Management System
+V Traco - Attendance, Employee Log, Reimbursement, Accounts, and Payroll Management System
 
 ## Project Overview
 
-V Traco is a web-based attendance and payroll management system designed for organizations that manage regular employees, contractual employees, external vendors, and project-based work. The system helps administrators assign employees to projects, manage attendance through manual punch and biometric imports, verify employee sessions, calculate salary, track incentives, handle reimbursements, and maintain payment records.
+V Traco is a web-based attendance and payroll management system for organizations that manage regular employees, contractual employees, external vendors, and project-based work. The website brings employee onboarding, attendance tracking, project assignment, reimbursement requests, accounts payment records, reports, and notifications into one role-based platform.
 
-The project is built around a simple idea: attendance should be connected to the work an employee is actually assigned to. Instead of only marking a day as present or absent, V Traco allows attendance to be tied to assigned projects, session details, project dates, and incentives.
+The core idea is simple: attendance should not be an isolated daily mark. It should connect to the employee, their assigned projects, manual or biometric punch records, admin verification, reimbursement claims, and payroll/accounting workflow.
 
 ## Problem Statement
 
-Many organizations manage employee attendance, project allocation, reimbursement, and payroll separately. This creates problems such as:
+Many organizations track employee attendance, project allocation, reimbursements, and payroll in separate files or tools. This causes issues such as:
 
-- Employees marking attendance for projects they are not assigned to.
-- Admins manually verifying attendance without project context.
-- Project-based incentives being difficult to track.
-- Bulk biometric attendance imports overwriting manually verified attendance.
-- Payroll calculations being disconnected from attendance status.
-- Reimbursement and incentive payments being tracked outside the attendance system.
+- Employees being marked present without clear project or session context.
+- Admins spending extra time checking manual punch details.
+- Vendor and contractual employee records being mixed with regular employees.
+- Biometric imports overwriting manually checked attendance decisions.
+- Salary, incentives, and reimbursement payments being calculated outside the attendance system.
+- Employees lacking visibility into attendance, reimbursement status, and payment updates.
 
-V Traco solves these problems by bringing these workflows into one system.
+V Traco solves this by combining attendance, employee logs, project allocation, reimbursement, accounts, reports, and notifications in one web application.
 
 ## Main Users
 
 ### Admin
 
-The admin manages employees, projects, attendance, incentives, reimbursements, and payroll.
+The admin manages employees, projects, rules, attendance, reimbursements, accounts, reports, and vendor/contractual workflows.
 
 Admin responsibilities include:
 
-- Add employees manually or through CSV import.
+- Add employees manually or through file import.
+- View employee lists with employee role, type, salary, shift, and rules.
 - Create and manage projects.
-- Assign projects to employees with date ranges and incentives.
-- Allocate shift timing and employee active date ranges.
+- Assign employees to active projects.
+- Configure attendance rules and shift timing.
 - Import biometric attendance reports.
-- Verify employee manual punch sessions.
-- Update attendance status after verification.
-- Review reimbursements.
-- Manage salary, incentives, reimbursements, and payment history.
+- Review employee attendance calendars and session details.
+- Override daily attendance status when needed.
+- Review, approve, deny, partially pay, or pay reimbursement requests.
+- Process salary, incentive, reimbursement, and other account payments.
+- View reports and export attendance data.
 
 ### Employee
 
-Employees use the system to view attendance, submit manual punch details, and request reimbursements.
+Employees use the system to view their attendance calendar, submit attendance details, and manage reimbursements.
 
 Employee responsibilities include:
 
-- View monthly attendance calendar.
-- Submit Manual Punch In for assigned project dates.
-- Submit Manual Punch Out with session details.
-- View assigned project-based manual punch options.
-- Request reimbursements.
-- View reimbursement status.
+- View monthly employee log calendar.
+- Submit manual punch-in and manual punch-out when rules allow it.
+- Submit biometric attendance when enabled.
+- Request leave.
+- Submit reimbursement claims for eligible dates.
+- View reimbursement and payment notifications.
+- Change password and access profile settings.
 
 ### External Vendor
 
-External vendors can manage their own assigned employees after completing their profile.
+External vendors can access their own vendor workspace after profile completion.
 
 Vendor responsibilities include:
 
-- Add vendor employees.
-- Manage vendor employee attendance.
-- View employee logs.
+- Add and manage vendor employees.
+- View vendor employee logs.
+- Track employee attendance and notifications within the vendor scope.
 
-### Contractual Employee
+### Contractual / Corporate Employee
 
-Contractual employees can use the employee workspace like regular employees but may be managed under a freelancer or contractual workflow.
+Contractual employees use the employee workspace but are handled through the corporate/contractual flow. Their salary can be calculated from completed sessions instead of standard monthly attendance.
+
+### Super Admin
+
+The super admin manages higher-level administrative access and approval of admin accounts.
 
 ## Core Modules
 
-## 1. Authentication Module
+## 1. Authentication and Role-Based Access
 
-The system supports login and registration flows for different user types:
+The website supports login and access flows for:
 
 - Admin
 - Employee
-- Contractual Employee
+- Corporate Employee
 - External Vendor
+- Freelancer / Corporate manager
 - Super Admin
 
-This module controls role-based access and redirects users to the correct workspace.
+Each role is routed to the correct dashboard and sidebar. Admin, vendor, employee, and corporate users see different workspaces based on their responsibilities.
 
-## 2. Employee Management Module
+## 2. Employee Management
 
-Admins can manage employees through:
+Admins and eligible managers can manage employees through:
 
 - Manual employee creation.
-- CSV employee import.
+- Bulk employee import.
 - Employee edit and delete.
 - Password reset.
-- Employee type selection.
+- Employee role display.
+- Employee type selection: regular, vendor, or corporate.
+- Rules and project assignment.
 
 Employee records include:
 
@@ -98,54 +108,43 @@ Employee records include:
 - Name
 - Email
 - Phone number
+- Role
 - Shift
-- Salary
+- Salary or session rate
 - Employee type
 - Assigned admin/vendor
 
-## 3. Project Management Module
+## 3. Project Management
 
-Admins can create projects with:
+Admins can create and maintain project records with:
 
 - Project name
 - College name
 - Location
-- Total days
-- Session type
+- Project dates
+- Session details
 - Active/inactive status
 
-Projects can be assigned to employees. Assignment includes:
+Projects can be assigned to employees. Assigned projects determine which manual punch options are available to employees on specific dates.
 
-- Project date range
-- Project incentive
+## 4. Rules and Shift Management
 
-Only active assigned projects are shown to employees for manual punch.
+The Rules section controls how employees can record attendance.
 
-## 4. Time Allocation Module
+Rules can include:
 
-Time Allocation is used for assigning:
+- Manual punch-in permission.
+- Manual punch-out permission.
+- Number of manual punch slots.
+- Shift selection.
+- Employee active date range.
+- Biometric attendance permissions.
 
-- Shift timing
-- Employee From date
-- Employee To date
+Admins can apply rules to selected employees and notify employees when rules are updated.
 
-Manual Punch and Biometric Punch controls are intentionally removed from Time Allocation so that project and attendance rules stay cleaner.
+## 5. Attendance and Employee Log Calendar
 
-## 5. Project Allocation Module
-
-Project Allocation lets admins assign projects to selected employees.
-
-For each selected project, admin can enter:
-
-- From date
-- To date
-- Incentive amount
-
-If multiple projects are assigned on the same date, the employee sees separate Manual Punch In and Manual Punch Out sections for each project.
-
-## 6. Attendance Module
-
-Attendance is shown in a monthly calendar.
+Attendance is displayed in a monthly calendar for both admins and employees.
 
 Attendance statuses include:
 
@@ -156,159 +155,224 @@ Attendance statuses include:
 - Week Off
 - Pending
 
-Manual punch attendance stays Pending until admin verification.
+The Employee Log calendar lets admins inspect each date, view manual session details, review biometric punch data, and update attendance status.
 
-## 7. Manual Punch Module
+## 6. Manual Punch and Biometric Attendance
 
-Employees can submit manual punch only for assigned active project dates.
+Employees can submit attendance based on the rules assigned by their admin.
 
-Manual Punch In includes:
+Manual Punch In can include:
 
 - Punch photo upload
 - Location coordinates
-- Project ID
-- Date
+- Project/session context
+- Punch time
 
-Manual Punch Out includes:
+Manual Punch Out can include:
 
-- Project
 - College name
 - Session name
-- Full day or half day
+- Full day or half day selection
 - Session duration
+- Total students
+- Present students
+- Topics handled
 - Location
 
-After Manual Punch Out, attendance remains Pending. Admin must verify the session details and update attendance status.
+Biometric imports can load in/out times and attendance status from uploaded files.
 
-## 8. Admin Attendance Verification
+## 7. Bulk Attendance Import
 
-Admin reviews employee attendance and session details from the Employee Log calendar.
-
-Admin can manually set attendance as:
-
-- Present
-- Absent
-- Half Day
-- Leave
-- Week Off
-
-Once admin updates the status, that status is preserved even after future bulk imports.
-
-## 9. Bulk Attendance Import Module
-
-Admins can upload biometric attendance files in formats such as:
+Admins can upload biometric attendance reports in formats such as:
 
 - XLSX
 - XLS
 - CSV
 - TXT
 
-The importer reads employee attendance using employee code/name and attendance columns such as:
+The importer reads employee and attendance columns such as:
 
+- Employee code / Emp ID
 - Date
 - INTime
 - OUTTime
 - Status
 - Remark
 
-Bulk import updates biometric punch times and shift timing. If admin has already verified a status manually, the import does not overwrite that admin decision.
+If an admin has already manually changed a status, the import preserves that admin override instead of replacing it.
 
-## 10. Incentive Module
+## 8. Salary Calculation
 
-Admins can assign project incentives during Project Allocation.
+Salary calculation is connected to the attendance calendar.
 
-The attendance summary can show assigned incentive totals for the selected month. Earned incentive is based on completed and verified project sessions.
-
-Half-day project sessions count as half incentive.
-
-## 11. Salary Calculation Module
-
-Salary is calculated based on monthly salary and attendance.
-
-Basic formula:
+For regular employees:
 
 ```text
 working_days = total_days_in_month - leave_days - week_off_days
 
-payable_days = present_days + (half_days * 0.5)
+payable_days = present_days + half_days
 
 calculated_salary = monthly_salary * (payable_days / working_days)
 ```
 
-Pending attendance does not count as paid attendance until admin verifies it.
+In the current website rule, Half Day is counted as a full payable day for salary.
 
-## 12. Reimbursement Module
+Absent, Pending, and unmarked days do not add payable salary. Leave and Week Off are removed from the working-day denominator.
 
-Employees can submit reimbursement requests for eligible dates.
+For vendor or corporate/contractual employees, salary can work as a session rate:
 
-Reimbursement request includes:
+```text
+calculated_salary = full_sessions * session_rate + half_sessions * (session_rate / 2)
+```
 
-- Date
+Only completed manual sessions count toward session-based salary.
+
+## 9. Incentive Management
+
+Project/session activity can generate incentives based on completed sessions and project allocation rules.
+
+The calendar summary can show:
+
+- Total present days
+- Half days
+- Incentive amount
+- Calculated salary
+
+## 10. Reimbursement Management
+
+Employees can submit reimbursement requests from the monthly reimbursement calendar.
+
+Each reimbursement can include:
+
+- Expense date
 - Category
 - Description
-- Amount
-- Attachment
+- Requested amount
+- Attachment/proof
 
-Admins can review, approve, deny, partially pay, or mark reimbursements as paid.
+Admins can:
 
-## 13. Accounts and Payment Module
+- View reimbursement requests.
+- Preview uploaded proof.
+- Approve or deny requests.
+- Mark partial payment.
+- Mark full payment.
+- Record reimbursement payment through Accounts.
+- Export recent reimbursements.
 
-The Accounts module helps admins manage payments such as:
+## 11. Accounts and Payments
+
+The Accounts module manages financial processing for:
 
 - Salary
 - Incentive
 - Reimbursement
 - Other payments
 
-It can show pending payment requests, payment history, and calculated amounts.
+It supports:
 
-## Key Workflow
+- Approval queues.
+- Payable amount review.
+- Employee/vendor payment grouping.
+- Payment method selection.
+- Transaction ID tracking.
+- Proof of payment upload.
+- Payment history and reports.
+- Payslip/payment email notifications.
+
+## 12. Reports
+
+The Reports section helps admins review attendance and session history.
+
+Reports can include:
+
+- Date
+- Employee name
+- Attendance source
+- Project name
+- Slot/session type
+- Attendance status
+- Manual punch-in and punch-out details
+- Biometric punch-in and punch-out details
+- Student/session data
+- Topics handled
+
+Reports can be filtered and exported.
+
+## 13. Notifications
+
+The notification system keeps users informed about:
+
+- Payment updates
+- Reimbursement updates
+- Account activity
+- Important workflow changes
+
+Unread notifications are shown in the sidebar.
+
+## Key Workflows
 
 ### Employee Attendance Workflow
 
-1. Admin creates projects.
-2. Admin assigns projects to employees with date range and incentive.
-3. Employee opens attendance calendar.
+1. Admin creates employees and assigns rules.
+2. Admin creates and assigns projects when needed.
+3. Employee opens the employee log calendar.
 4. Employee selects a date.
-5. System shows manual punch sections only for active assigned projects on that date.
-6. Employee submits Manual Punch In.
-7. Employee submits Manual Punch Out with session details.
-8. Attendance remains Pending.
-9. Admin verifies session details.
-10. Admin updates attendance status.
-11. Salary and incentive calculations use verified attendance.
+5. System shows available manual or biometric attendance options.
+6. Employee submits punch-in and punch-out details.
+7. Admin reviews the date in Employee Log.
+8. Admin updates or confirms attendance status.
+9. Salary, incentive, and reports use the updated attendance data.
 
-### Bulk Import Workflow
+### Salary Workflow
 
-1. Admin uploads biometric attendance report.
-2. System matches rows to employees.
-3. System imports biometric in/out times and status.
-4. If admin already manually verified attendance, the verified status is preserved.
-5. Admin sees updated attendance in the same selected employee/month calendar.
+1. Employee attendance is resolved for the selected month.
+2. System counts Present and Half Day as payable days for regular salary.
+3. System removes Leave and Week Off from working days.
+4. System calculates monthly payable salary.
+5. Accounts subtracts salary already paid for that month.
+6. Remaining salary can be processed as a payment.
 
-## Suggested Future Improvements
+### Reimbursement Workflow
 
-- Add a dedicated admin approval queue for pending manual punch sessions.
-- Add notification when employees submit manual punch.
-- Add project-wise attendance reports.
-- Add project-wise incentive reports.
-- Add export options for payroll, incentives, and reimbursements.
-- Add employee mobile-friendly punch interface.
-- Add GPS validation for project location.
-- Add photo preview and fraud detection checks.
-- Add role-based permission customization.
-- Add super admin analytics dashboard.
+1. Employee opens the reimbursement calendar.
+2. Employee submits a reimbursement request with amount, category, description, and proof.
+3. Admin reviews the request.
+4. Admin approves, denies, partially pays, or pays the request.
+5. Payment details are recorded in Accounts.
+6. Employee receives notification/email update.
+
+### Bulk Attendance Import Workflow
+
+1. Admin uploads attendance file.
+2. System maps report rows to employees.
+3. System imports biometric times and status.
+4. Existing admin overrides are preserved.
+5. Admin reviews the updated calendar and reports.
 
 ## Expected Benefits
 
-- Better control over project-based attendance.
-- Clear admin verification before salary impact.
-- Reduced payroll mistakes.
-- Clean separation between time allocation and project allocation.
-- Better handling of biometric imports.
-- Transparent incentive tracking.
-- Easier reimbursement and payment management.
+- One place for employee attendance, project logs, reimbursements, accounts, and reports.
+- Better visibility for admins, employees, vendors, and corporate users.
+- Clear attendance-driven salary calculation.
+- Reduced payroll and reimbursement tracking mistakes.
+- Stronger handling of manual punch and biometric import together.
+- Separate workflows for regular, vendor, and contractual employees.
+- Payment history and notification trail for finance-related actions.
+
+## Suggested Future Improvements
+
+- Add a dedicated approval queue for pending manual punch sessions.
+- Add stronger payroll finalization and monthly lock.
+- Add allowance and deduction support.
+- Add payroll export and payslip generation for salary.
+- Add GPS validation for project locations.
+- Add project-wise attendance and incentive reports.
+- Add richer dashboard analytics.
+- Add more granular role permissions.
+- Add automated test coverage for critical flows.
+- Add production deployment documentation and backup process.
 
 ## Conclusion
 
-V Traco is a practical attendance and payroll management platform for teams that work across multiple projects, vendors, and employee types. Its strength is connecting attendance with assigned projects and admin verification, making payroll and incentives more reliable.
+V Traco is a practical attendance and payroll web platform for organizations that manage employees, vendors, contractual workers, projects, reimbursements, and payments. Its strength is connecting daily attendance with project/session records, admin verification, salary calculation, reimbursement approval, and accounts payment tracking.

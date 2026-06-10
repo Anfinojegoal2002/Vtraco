@@ -57,4 +57,4 @@ if ($page === 'landing' && $currentUser) {
     $page = home_page_for_user($currentUser);
 }
 
-render_page($page);
+render_page($page); 

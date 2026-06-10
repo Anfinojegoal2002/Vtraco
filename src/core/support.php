@@ -28,6 +28,31 @@ function asset_url(string $path): string
     return base_path_url() . '/' . ltrim($path, '/');
 }
 
+function app_url(array $params = []): string
+{
+    $configuredAppUrl = trim((string) (getenv('VTRACO_APP_URL') ?: ''));
+    $baseUrl = $configuredAppUrl !== '' ? $configuredAppUrl : trim((string) BASE_URL);
+    if ($baseUrl === '') {
+        $baseUrl = '/index.php';
+    }
+
+    if (!preg_match('#^https?://#i', $baseUrl)) {
+        $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
+        if ($host === '') {
+            $host = 'localhost';
+        }
+        $isHttps = !empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off';
+        $scheme = $isHttps ? 'https' : 'http';
+        $baseUrl = $scheme . '://' . $host . '/' . ltrim($baseUrl, '/');
+    }
+
+    if ($params === []) {
+        return $baseUrl;
+    }
+
+    return $baseUrl . (str_contains($baseUrl, '?') ? '&' : '?') . http_build_query($params);
+}
+
 function normalize_relative_path(string $path): string
 {
     $path = str_replace('\\', '/', trim($path));
@@ -358,11 +383,19 @@ function require_role(string $role): array
 function current_admin_id(): ?int
 {
     $user = current_user();
-    if (!$user || !in_array($user['role'] ?? '', ['admin', 'freelancer', 'external_vendor'], true)) {
+    if (!$user) {
         return null;
     }
 
-    return (int) $user['id'];
+    if (in_array($user['role'] ?? '', ['admin', 'freelancer', 'external_vendor'], true)) {
+        return (int) $user['id'];
+    }
+
+    if (employee_has_power_access($user) && !empty($user['admin_id'])) {
+        return (int) $user['admin_id'];
+    }
+
+    return null;
 }
 
 function user_role_label(string $role): string
@@ -376,6 +409,123 @@ function user_role_label(string $role): string
         'super_admin' => 'Super Admin',
         default => ucwords(str_replace('_', ' ', $role)),
     };
+}
+
+function employee_designation_groups(): array
+{
+    return [
+        'Internal Teams' => [
+            'HR' => 'HR',
+            'Accounts' => 'Accounts',
+            'Management Team' => 'Management Team',
+            'Backend Team' => 'Backend Team',
+        ],
+        'Field and Training' => [
+            'Project Coordinator' => 'Project Coordinator',
+            'In-house Trainer' => 'In-house Trainer',
+        ],
+        'Employee Types' => [
+            'Regular Employee' => 'Regular Employee',
+            'Contractual' => 'Contractual',
+            'Vendor' => 'Vendor',
+        ],
+    ];
+}
+
+function employee_designation_options(): array
+{
+    $options = [];
+    foreach (employee_designation_groups() as $group) {
+        foreach ($group as $value => $label) {
+            $options[$value] = $label;
+        }
+    }
+
+    return $options;
+}
+
+function valid_employee_designation(string $designation): bool
+{
+    return array_key_exists($designation, employee_designation_options());
+}
+
+function employee_recruitment_sources(): array
+{
+    return ['Referral', 'Job Portal', 'Walk-in', 'Campus', 'Social Media', 'Consultancy', 'Other'];
+}
+
+function employee_profile_requires_completion(?array $user): bool
+{
+    if (!$user || !in_array((string) ($user['role'] ?? ''), ['employee', 'corporate_employee'], true)) {
+        return false;
+    }
+
+    if (employee_profile_verification_exempt($user)) {
+        return false;
+    }
+
+    return (string) ($user['profile_status'] ?? 'incomplete') !== 'verified';
+}
+
+function employee_profile_verification_exempt(?array $user): bool
+{
+    if (!$user) {
+        return false;
+    }
+
+    $role = (string) ($user['role'] ?? '');
+    $employeeType = strtolower(trim((string) ($user['employee_type'] ?? '')));
+    $designation = strtolower(trim((string) ($user['designation'] ?? '')));
+
+    return $role === 'corporate_employee'
+        || in_array($employeeType, ['corporate', 'vendor'], true)
+        || in_array($designation, ['contractual', 'vendor'], true);
+}
+
+function employee_is_vendor_trainer(?array $user): bool
+{
+    if (!$user) {
+        return false;
+    }
+
+    $role = (string) ($user['role'] ?? '');
+    $employeeType = strtolower(trim((string) ($user['employee_type'] ?? '')));
+    $designation = strtolower(trim((string) ($user['designation'] ?? '')));
+
+    return $role === 'employee' && ($employeeType === 'vendor' || $designation === 'vendor');
+}
+
+function employee_is_hr_reviewer(?array $user): bool
+{
+    if (!$user) {
+        return false;
+    }
+
+    if (in_array((string) ($user['role'] ?? ''), ['admin', 'freelancer'], true)) {
+        return true;
+    }
+
+    return in_array((string) ($user['role'] ?? ''), ['employee', 'corporate_employee'], true)
+        && (string) ($user['designation'] ?? '') === 'HR'
+        && (string) ($user['profile_status'] ?? '') === 'verified';
+}
+
+function employee_is_in_house_trainer(?array $user): bool
+{
+    if (!$user || (string) ($user['role'] ?? '') !== 'employee') {
+        return false;
+    }
+
+    return (string) ($user['designation'] ?? '') === 'In-house Trainer';
+}
+
+function employee_is_project_coordinator(?array $user): bool
+{
+    if (!$user || (string) ($user['role'] ?? '') !== 'employee') {
+        return false;
+    }
+
+    return (string) ($user['designation'] ?? '') === 'Project Coordinator';
 }
 
 function current_manager_target_role(): string
@@ -400,11 +550,17 @@ function is_vendor_profile_complete(?array $user): bool
     }
 
     $required = [
+        'company_name',
+        'company_address',
+        'company_email',
+        'company_phone',
         'representative_name',
-        'pan_no',
-        'bank_account_no',
-        'bank_ifsc_code',
-        'bank_name',
+        'designation',
+        'personal_email',
+        'personal_phone',
+        'bank_proof_path',
+        'company_logo_path',
+        'profile_photo_path',
     ];
 
     foreach ($required as $field) {
@@ -453,6 +609,188 @@ function role_email_exists(string $role, string $email, ?int $ignoreUserId = nul
 function is_member_portal_role(string $role): bool
 {
     return in_array($role, ['external_vendor', 'freelancer'], true);
+}
+
+function employee_has_power_access(?array $user = null): bool
+{
+    $user = $user ?? current_user();
+    if (!$user || !in_array((string) ($user['role'] ?? ''), ['employee', 'corporate_employee'], true)) {
+        return false;
+    }
+
+    $rules = employee_rules((int) ($user['id'] ?? 0));
+    return !empty($rules['power_access']);
+}
+
+function employee_power_attendance_scopes(?array $user = null): array
+{
+    $user = $user ?? current_user();
+    if (!employee_has_power_access($user)) {
+        return [];
+    }
+
+    $rules = employee_rules((int) ($user['id'] ?? 0));
+    $scopes = [];
+    foreach (power_attendance_scope_options() as $scope => $label) {
+        if (!empty($rules['power_attendance_' . $scope])) {
+            $scopes[] = $scope;
+        }
+    }
+
+    return $scopes;
+}
+
+function employee_has_power_attendance_access(?array $user = null): bool
+{
+    return employee_power_attendance_scopes($user) !== [];
+}
+
+function employee_has_power_projects_access(?array $user = null): bool
+{
+    $user = $user ?? current_user();
+    if (!employee_has_power_access($user)) {
+        return false;
+    }
+
+    $rules = employee_rules((int) ($user['id'] ?? 0));
+    return !empty($rules['power_projects']);
+}
+
+function employee_power_team_scopes(?array $user = null): array
+{
+    $user = $user ?? current_user();
+    if (!employee_has_power_access($user)) {
+        return [];
+    }
+
+    $rules = employee_rules((int) ($user['id'] ?? 0));
+    $scopes = [];
+    foreach (power_team_scope_options() as $scope => $label) {
+        if (!empty($rules['power_team_' . $scope])) {
+            $scopes[] = $scope;
+        }
+    }
+
+    return $scopes;
+}
+
+function employee_has_power_team_access(?array $user = null): bool
+{
+    return employee_power_team_scopes($user) !== [];
+}
+
+function employee_has_power_accounts_access(?array $user = null): bool
+{
+    return employee_power_account_scopes($user) !== [];
+}
+
+function employee_power_account_scopes(?array $user = null): array
+{
+    $user = $user ?? current_user();
+    if (!employee_has_power_access($user)) {
+        return [];
+    }
+
+    $rules = employee_rules((int) ($user['id'] ?? 0));
+    $scopes = [];
+    foreach (power_accounts_scope_options() as $scope => $label) {
+        if (!empty($rules['power_accounts_' . $scope]) || (!empty($rules['power_accounts']) && empty($rules['power_accounts_verify']) && empty($rules['power_accounts_pay']) && empty($rules['power_accounts_history']))) {
+            $scopes[] = $scope;
+        }
+    }
+
+    return $scopes;
+}
+
+function employee_has_power_account_scope(string $scope, ?array $user = null): bool
+{
+    return in_array($scope, employee_power_account_scopes($user), true);
+}
+
+function can_access_power_admin_pages(?array $user = null): bool
+{
+    $user = $user ?? current_user();
+    if (!$user) {
+        return false;
+    }
+
+    return in_array((string) ($user['role'] ?? ''), ['admin', 'freelancer', 'external_vendor'], true)
+        || employee_has_power_access($user);
+}
+
+function require_power_admin_access(array $baseRoles = ['admin']): array
+{
+    $user = current_user();
+    if (!$user) {
+        flash('error', 'Please sign in with an allowed account to continue.');
+        redirect_to('login');
+    }
+
+    if (in_array((string) ($user['role'] ?? ''), $baseRoles, true)) {
+        return $user;
+    }
+
+    if (employee_has_power_access($user) && !empty($user['admin_id'])) {
+        $delegatedUser = $user;
+        $delegatedUser['delegated_user_id'] = (int) ($user['id'] ?? 0);
+        $delegatedUser['id'] = (int) $user['admin_id'];
+        return $delegatedUser;
+    }
+
+    flash('error', 'You do not have permission to access this page.');
+    redirect_to(home_page_for_user($user));
+}
+
+function require_power_attendance_access(array $baseRoles = ['admin']): array
+{
+    $user = current_user();
+    $delegated = require_power_admin_access($baseRoles);
+    if ($user && in_array((string) ($user['role'] ?? ''), ['employee', 'corporate_employee'], true) && !employee_has_power_attendance_access($user)) {
+        flash('error', 'Track Attendance power is not assigned to your account.');
+        redirect_to(home_page_for_user($user));
+    }
+
+    return $delegated;
+}
+
+function require_power_projects_access(array $baseRoles = ['admin']): array
+{
+    $user = current_user();
+    $delegated = require_power_admin_access($baseRoles);
+    if ($user && in_array((string) ($user['role'] ?? ''), ['employee', 'corporate_employee'], true) && !employee_has_power_projects_access($user)) {
+        flash('error', 'Employee Projects power is not assigned to your account.');
+        redirect_to(home_page_for_user($user));
+    }
+
+    return $delegated;
+}
+
+function require_power_team_access(array $baseRoles = ['admin']): array
+{
+    $user = current_user();
+    $delegated = require_power_admin_access($baseRoles);
+    if ($user && in_array((string) ($user['role'] ?? ''), ['employee', 'corporate_employee'], true) && !employee_has_power_team_access($user)) {
+        flash('error', 'Employee power is not assigned to your account.');
+        redirect_to(home_page_for_user($user));
+    }
+
+    return $delegated;
+}
+
+function require_power_accounts_access(array $baseRoles = ['admin'], ?string $scope = null): array
+{
+    $user = current_user();
+    $delegated = require_power_admin_access($baseRoles);
+    if ($user && in_array((string) ($user['role'] ?? ''), ['employee', 'corporate_employee'], true) && !employee_has_power_accounts_access($user)) {
+        flash('error', 'Accounts power is not assigned to your account.');
+        redirect_to(home_page_for_user($user));
+    }
+    if ($scope !== null && $user && in_array((string) ($user['role'] ?? ''), ['employee', 'corporate_employee'], true) && !employee_has_power_account_scope($scope, $user)) {
+        flash('error', 'This Accounts power is not assigned to your account.');
+        redirect_to('admin_accounts');
+    }
+
+    return $delegated;
 }
 
 function home_page_for_user(array $user): string

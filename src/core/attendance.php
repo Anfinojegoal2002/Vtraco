@@ -257,7 +257,7 @@ function shift_based_attendance_status(array $record, array $sessions): ?string
     }
 
     if ($inTime === null || $outTime === null) {
-        return attendance_date_is_closed((string) ($record['attend_date'] ?? '')) ? 'Half Day' : 'Pending';
+        return 'Half Day';
     }
 
     $attendDate = (string) ($record['attend_date'] ?? date('Y-m-d'));
@@ -320,6 +320,21 @@ function manual_attendance_status(array $record, array $sessions): ?string
     return null;
 }
 
+function has_completed_project_record_session(array $sessions): bool
+{
+    foreach ($sessions as $session) {
+        if (($session['session_mode'] ?? '') !== 'project_record') {
+            continue;
+        }
+
+        if (session_has_manual_in($session) && session_has_manual_out($session)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function resolved_attendance_status(array $record, array $sessions): string
 {
     $overrideStatus = trim((string) ($record['admin_override_status'] ?? ''));
@@ -336,6 +351,10 @@ function resolved_attendance_status(array $record, array $sessions): string
         return $status;
     }
 
+    if (has_completed_project_record_session($sessions)) {
+        return 'Present';
+    }
+
     $manualStatus = manual_attendance_status($record, $sessions);
     if ($manualStatus !== null && $manualStatus !== 'Present') {
         return $manualStatus;
@@ -350,8 +369,8 @@ function resolved_attendance_status(array $record, array $sessions): string
         return $manualStatus;
     }
 
-    if ($status === 'Pending' && attendance_date_is_closed((string) ($record['attend_date'] ?? ''))) {
-        return 'Absent';
+    if ($status === 'Pending') {
+        return 'Half Day';
     }
 
     return $status;
@@ -448,10 +467,21 @@ function working_days_total(array $monthAttendance): float
         if ($status === 'Present') {
             $total += 1.0;
         } elseif ($status === 'Half Day') {
-            $total += 1.0;
+            $total += 0.5;
         }
     }
     return $total;
+}
+
+function attendance_day_portion_units(string $dayPortion): float
+{
+    $normalized = strtoupper(trim(str_replace('_', ' ', $dayPortion)));
+    return in_array($normalized, ['HALF DAY', 'FIRST HALF', 'SECOND HALF'], true) ? 0.5 : 1.0;
+}
+
+function attendance_session_is_half_day(array $session): bool
+{
+    return attendance_day_portion_units((string) ($session['day_portion'] ?? 'Full Day')) === 0.5;
 }
 
 function week_off_counts_as_present(string $status): bool
@@ -519,13 +549,14 @@ function attendance_counts(array $monthAttendance): array
                 break;
             case 'HALF DAY':
                 $counts['half_day']++;
-                $counts['payable_days'] += 1.0;
+                $counts['payable_days'] += 0.5;
                 break;
             case 'LEAVE':
                 $counts['leave']++;
                 break;
             case 'PENDING':
-                $counts['pending']++;
+                $counts['half_day']++;
+                $counts['payable_days'] += 0.5;
                 break;
             case 'WEEK OFF':
                 $counts['week_off']++;
@@ -557,16 +588,20 @@ function attendance_counts(array $monthAttendance): array
 function salary_breakdown_for_month(float $salary, array $monthAttendance): array
 {
     $counts = attendance_counts($monthAttendance);
-    $presentDays = (float) working_days_total($monthAttendance);
+    $payableDays = (float) ($counts['payable_days'] ?? working_days_total($monthAttendance));
+    $presentDays = (float) (($counts['present'] ?? 0) + ($counts['half_day'] ?? 0) + ($counts['leave'] ?? 0));
     $workingDays = (int) $counts['working_days'];
-    $payableDays = $presentDays;
+    $halfDayCount = (int) ($counts['half_day'] ?? 0);
 
     $dailyRate = $workingDays > 0 ? round($salary / $workingDays, 2) : 0.0;
+    $halfDaySalary = round($halfDayCount * ($dailyRate / 2), 2);
     $calculatedSalary = round($salary * ($payableDays / max(1, $workingDays)), 2);
 
     return [
         'monthly_salary' => round($salary, 2),
         'daily_rate' => $dailyRate,
+        'half_day_count' => $halfDayCount,
+        'half_day_salary' => $halfDaySalary,
         'payable_days' => round($payableDays, 2),
         'present_days' => round($presentDays, 2),
         'working_days' => $workingDays,
@@ -584,14 +619,14 @@ function vendor_session_breakdown_for_month(float $sessionRate, array $monthAtte
         $sessions = is_array($entry['sessions'] ?? null) ? $entry['sessions'] : [];
 
         foreach ($sessions as $session) {
-            if (($session['session_mode'] ?? '') !== 'manual_pair') {
+            if (!in_array((string) ($session['session_mode'] ?? ''), ['manual_pair', 'project_record'], true)) {
                 continue;
             }
             if (!session_has_manual_in($session) || !session_has_manual_out($session)) {
                 continue;
             }
 
-            if (($session['day_portion'] ?? 'Full Day') === 'Half Day') {
+            if (attendance_session_is_half_day($session)) {
                 $halfSessions++;
             } else {
                 $fullSessions++;
@@ -600,18 +635,218 @@ function vendor_session_breakdown_for_month(float $sessionRate, array $monthAtte
     }
 
     $sessionUnits = $fullSessions + ($halfSessions * 0.5);
+    $presentSessions = $fullSessions + $halfSessions;
+    $halfDaySalary = round($halfSessions * ($sessionRate / 2), 2);
     $calculatedSalary = round(($fullSessions * $sessionRate) + ($halfSessions * ($sessionRate / 2)), 2);
 
     return [
         'session_rate' => round($sessionRate, 2),
         'full_sessions' => $fullSessions,
         'half_sessions' => $halfSessions,
+        'half_day_count' => $halfSessions,
+        'half_day_salary' => $halfDaySalary,
         'session_units' => round($sessionUnits, 2),
+        'present_days' => round($presentSessions, 2),
+        'payable_days' => round($sessionUnits, 2),
         'calculated_salary' => $calculatedSalary,
         'counts' => [
             'full_sessions' => $fullSessions,
             'half_sessions' => $halfSessions,
         ],
+    ];
+}
+
+function contractual_project_salary_breakdown_for_month(float $fallbackDailyRate, array $monthAttendance): array
+{
+    $fullSessions = 0;
+    $halfSessions = 0;
+    $amount = 0.0;
+    $halfDaySalary = 0.0;
+
+    foreach ($monthAttendance as $entry) {
+        $sessions = is_array($entry['sessions'] ?? null) ? $entry['sessions'] : [];
+        $record = is_array($entry['record'] ?? null) ? $entry['record'] : [];
+        $userId = (int) ($record['user_id'] ?? 0);
+        $attendDate = (string) ($record['attend_date'] ?? '');
+
+        foreach ($sessions as $session) {
+            if (!in_array((string) ($session['session_mode'] ?? ''), ['manual_pair', 'project_record'], true)) {
+                continue;
+            }
+            if (!session_has_manual_in($session) || !session_has_manual_out($session)) {
+                continue;
+            }
+
+            $project = null;
+            foreach (employee_available_projects_for_date(['id' => $userId], $attendDate) as $availableProject) {
+                if ((int) ($availableProject['id'] ?? 0) === (int) ($session['project_id'] ?? 0)) {
+                    $project = $availableProject;
+                    break;
+                }
+            }
+            $sessionPay = [
+                'hours' => session_work_hours($session),
+                'day_units' => attendance_day_portion_units((string) ($session['day_portion'] ?? 'Full Day')),
+            ];
+            $sessionAmount = $project ? project_assignment_payment_amount($project, $sessionPay) : 0.0;
+            if ($sessionAmount <= 0 && $fallbackDailyRate > 0) {
+                $sessionAmount = $fallbackDailyRate * (float) $sessionPay['day_units'];
+            }
+
+            if (attendance_session_is_half_day($session)) {
+                $halfSessions++;
+                $halfDaySalary += $sessionAmount;
+                $amount += $sessionAmount;
+            } else {
+                $fullSessions++;
+                $amount += $sessionAmount;
+            }
+        }
+    }
+
+    $sessionUnits = $fullSessions + ($halfSessions * 0.5);
+    $presentSessions = $fullSessions + $halfSessions;
+
+    return [
+        'session_rate' => round($fallbackDailyRate, 2),
+        'daily_rate' => round($fallbackDailyRate, 2),
+        'full_sessions' => $fullSessions,
+        'half_sessions' => $halfSessions,
+        'half_day_count' => $halfSessions,
+        'half_day_salary' => round($halfDaySalary, 2),
+        'session_units' => round($sessionUnits, 2),
+        'present_days' => round($presentSessions, 2),
+        'payable_days' => round($sessionUnits, 2),
+        'calculated_salary' => round($amount, 2),
+        'counts' => [
+            'full_sessions' => $fullSessions,
+            'half_sessions' => $halfSessions,
+        ],
+    ];
+}
+
+function employee_is_freelancer_managed(array $employee): bool
+{
+    $adminId = (int) ($employee['admin_id'] ?? 0);
+    if ($adminId <= 0) {
+        return false;
+    }
+
+    static $managerRoleCache = [];
+    if (!array_key_exists($adminId, $managerRoleCache)) {
+        $stmt = db()->prepare('SELECT role FROM users WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $adminId]);
+        $managerRoleCache[$adminId] = (string) ($stmt->fetchColumn() ?: '');
+    }
+
+    return $managerRoleCache[$adminId] === 'freelancer';
+}
+
+function session_work_hours(array $session): float
+{
+    $duration = (float) ($session['session_duration'] ?? 0);
+    if ($duration > 0) {
+        return $duration;
+    }
+
+    $seconds = attendance_seconds_between(
+        (string) ($session['punch_in_time'] ?? ''),
+        (string) ($session['punch_out_time'] ?? '')
+    );
+
+    return $seconds !== null ? round($seconds / 3600, 2) : 0.0;
+}
+
+function freelancer_hourly_salary_breakdown_for_month(float $hourlyRate, array $monthAttendance): array
+{
+    $hours = 0.0;
+    $completedSessions = 0;
+
+    foreach ($monthAttendance as $entry) {
+        $sessions = is_array($entry['sessions'] ?? null) ? $entry['sessions'] : [];
+
+        foreach ($sessions as $session) {
+            if (!in_array((string) ($session['session_mode'] ?? ''), ['manual_pair', 'project_record'], true)) {
+                continue;
+            }
+            if (!session_has_manual_in($session) || !session_has_manual_out($session)) {
+                continue;
+            }
+
+            $sessionHours = session_work_hours($session);
+            if ($sessionHours <= 0) {
+                continue;
+            }
+
+            $hours += $sessionHours;
+            $completedSessions++;
+        }
+    }
+
+    $hours = round($hours, 2);
+
+    return [
+            'hourly_rate' => round($hourlyRate, 2),
+            'total_hours' => $hours,
+            'payable_hours' => $hours,
+            'present_days' => $hours,
+            'payable_days' => $hours,
+            'half_day_count' => 0,
+            'half_day_salary' => 0.0,
+            'completed_sessions' => $completedSessions,
+            'calculated_salary' => round($hourlyRate * $hours, 2),
+            'counts' => [
+                'completed_sessions' => $completedSessions,
+            ],
+    ];
+}
+
+function project_session_salary_for_date(array $employee, int $projectId, string $date): array
+{
+    if ($projectId <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return ['hours' => 0.0, 'amount' => 0.0, 'completed_sessions' => 0, 'day_units' => 0.0];
+    }
+
+    $hourlyRate = (float) ($employee['salary'] ?? 0);
+    $hours = 0.0;
+    $dayUnits = 0.0;
+    $completedSessions = 0;
+    foreach (month_attendance_for_user((int) ($employee['id'] ?? 0), substr($date, 0, 7)) as $entry) {
+        $record = is_array($entry['record'] ?? null) ? $entry['record'] : [];
+        if ((string) ($record['attend_date'] ?? '') !== $date) {
+            continue;
+        }
+
+        $sessions = is_array($entry['sessions'] ?? null) ? $entry['sessions'] : [];
+        foreach ($sessions as $session) {
+            if ((int) ($session['project_id'] ?? 0) !== $projectId) {
+                continue;
+            }
+            if (!in_array((string) ($session['session_mode'] ?? ''), ['manual_pair', 'project_record'], true)) {
+                continue;
+            }
+            if (!session_has_manual_in($session) || !session_has_manual_out($session)) {
+                continue;
+            }
+
+            $sessionHours = session_work_hours($session);
+            if ($sessionHours > 0) {
+                $hours += $sessionHours;
+            }
+
+            $dayUnits += attendance_day_portion_units((string) ($session['day_portion'] ?? 'Full Day'));
+            $completedSessions++;
+        }
+    }
+
+    $hours = round($hours, 2);
+    $dayUnits = round($dayUnits, 2);
+
+    return [
+        'hours' => $hours,
+        'amount' => round($hourlyRate * $hours, 2),
+        'completed_sessions' => $completedSessions,
+        'day_units' => $dayUnits,
     ];
 }
 
@@ -621,8 +856,16 @@ function employee_salary_breakdown_for_month(array $employee, array $monthAttend
     $employeeType = strtolower(trim((string) ($employee['employee_type'] ?? '')));
     $employeeRole = strtolower(trim((string) ($employee['role'] ?? '')));
 
-    if ($employeeType === 'vendor' || $employeeType === 'corporate' || $employeeRole === 'corporate_employee') {
-        return vendor_session_breakdown_for_month($salary, $monthAttendance);
+    if (employee_is_freelancer_managed($employee)) {
+        return freelancer_hourly_salary_breakdown_for_month($salary, $monthAttendance);
+    }
+
+    if ($employeeType === 'corporate' || $employeeRole === 'corporate_employee') {
+        return contractual_project_salary_breakdown_for_month($salary, $monthAttendance);
+    }
+
+    if ($employeeType === 'vendor') {
+        return freelancer_hourly_salary_breakdown_for_month($salary, $monthAttendance);
     }
 
     return salary_breakdown_for_month($salary, $monthAttendance);
@@ -642,7 +885,7 @@ function vendor_session_display_for_entry(array $entry): array
             continue;
         }
 
-        if (($session['day_portion'] ?? 'Full Day') === 'Half Day') {
+        if (attendance_session_is_half_day($session)) {
             $halfSessions++;
         } else {
             $fullSessions++;
@@ -698,12 +941,13 @@ function incentive_breakdown_for_month(array $monthAttendance): array
             }
 
             $projectIncentive = employee_project_incentive_for_date($userId, (int) ($session['project_id'] ?? 0), $attendDate);
-            if (($session['day_portion'] ?? 'Full Day') === 'Half Day') {
+            if (attendance_session_is_half_day($session)) {
                 $halfDayCount++;
+                $amount += $projectIncentive / 2;
             } else {
                 $fullDayCount++;
+                $amount += $projectIncentive;
             }
-            $amount += $projectIncentive;
         }
     }
 
@@ -2154,7 +2398,7 @@ function parse_attendance_report_csv(string $path, ?string $overrideDate = null,
     if (!$entries) {
         throw new RuntimeException('Attendance report does not contain any usable employee rows.');
     }
-
+ 
     $entryDates = array_values(array_unique(array_map(
         static fn(array $entry): string => (string) ($entry['date'] ?? ''),
         array_filter($entries, static fn(array $entry): bool => !empty($entry['date']))
@@ -2364,15 +2608,6 @@ function optimized_punch_photo_database_contents(string $source): array|false
         ? ['data' => $encoded, 'mime' => 'image/jpeg']
         : ['data' => $raw, 'mime' => mime_content_type($source) ?: 'image/jpeg'];
 }
-
-
-
-
-
-
-
-
-
 
 
 

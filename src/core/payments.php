@@ -320,7 +320,7 @@ function accounts_scope_label(string $scope): string
 
 function accounts_scope_members(string $scope): array
 {
-    $admin = require_role('admin');
+    $admin = require_power_accounts_access(['admin']);
     $sql = 'SELECT u.*,
                 vendor.id AS vendor_id,
                 vendor.name AS vendor_name
@@ -353,7 +353,7 @@ function accounts_vendor_accounts(): array
 
 function accounts_pending_reimbursements(?string $scope = null): array
 {
-    $admin = require_role('admin');
+    $admin = require_power_accounts_access(['admin']);
     $sql = 'SELECT er.*, u.name AS employee_name, u.emp_id AS employee_emp_id, u.role AS employee_role, u.employee_type AS employee_type
         FROM employee_reimbursements er
         JOIN users u ON u.id = er.user_id
@@ -416,7 +416,7 @@ function accounts_reimbursement_breakdown_payload(array $reimbursement): array
 
 function approve_reimbursement_request(int $reimbursementId, array $approvedAmounts): array
 {
-    $admin = require_role('admin');
+    $admin = require_power_accounts_access(['admin']);
     $reimbursement = admin_reimbursement_by_id($reimbursementId);
     if (!$reimbursement || (string) ($reimbursement['status'] ?? '') !== 'PENDING') {
         throw new RuntimeException('Reimbursement request not found or already processed.');
@@ -503,7 +503,7 @@ function approve_reimbursement_request(int $reimbursementId, array $approvedAmou
 
 function deny_reimbursement_request(int $reimbursementId): array
 {
-    $admin = require_role('admin');
+    $admin = require_power_accounts_access(['admin']);
     $reimbursement = admin_reimbursement_by_id($reimbursementId);
     if (!$reimbursement || (string) ($reimbursement['status'] ?? '') !== 'PENDING') {
         throw new RuntimeException('Reimbursement request not found or already processed.');
@@ -610,6 +610,7 @@ function accounts_pay_group_rows(string $month, string $scope, array $selectedTy
                         'status' => $status,
                         'expense_date' => $expenseDate,
                         'category' => (string) ($reimbursement['category'] ?? ''),
+                        'project_name' => (string) ($reimbursement['project_name'] ?? ''),
                     ],
                 ];
             }
@@ -640,6 +641,11 @@ function accounts_approval_rows(string $month, string $approvalType, string $sco
             $row['breakdown'] = accounts_reimbursement_breakdown_payload($row);
             return $row;
         }, accounts_pending_reimbursements($scope));
+    }
+
+    if ($approvalType === 'CONTRACTUAL') {
+        $admin = require_power_accounts_access(['admin']);
+        return contractual_payment_request_rows((int) $admin['id'], $month);
     }
 
     $effectiveScope = $approvalType === 'CONTRACTUAL' ? 'freelancer' : $scope;
@@ -678,7 +684,7 @@ function accounts_approval_rows(string $month, string $approvalType, string $sco
 
 function payment_request_action_map(): array
 {
-    $admin = require_role('admin');
+    $admin = require_power_accounts_access(['admin']);
     $stmt = db()->prepare('SELECT request_key, status, approved_amount FROM payment_request_actions WHERE admin_id = :admin_id');
     $stmt->execute(['admin_id' => (int) $admin['id']]);
     $map = [];
@@ -690,6 +696,137 @@ function payment_request_action_map(): array
     }
 
     return $map;
+}
+
+function contractual_payment_request_key(int $employeeId, string $date): string
+{
+    return 'salary:' . $employeeId . ':' . $date;
+}
+
+function contractual_payment_amount_due(array $employee, string $date): float
+{
+    if (!preg_match('/^\d{4}-\d{2}$/', $date)) {
+        return 0.0;
+    }
+    return assigned_project_payment_total_for_month((int) ($employee['id'] ?? 0), $date);
+}
+
+function contractual_payment_amount_due_for_date(array $employee, string $date): float
+{
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return 0.0;
+    }
+
+    $amount = 0.0;
+    foreach (employee_available_projects_for_date($employee, $date) as $project) {
+        $sessionPay = project_session_salary_for_date($employee, (int) ($project['id'] ?? 0), $date);
+        if ((int) ($sessionPay['completed_sessions'] ?? 0) <= 0) {
+            continue;
+        }
+        $projectAmount = project_assignment_payment_amount($project, $sessionPay);
+        if ($projectAmount <= 0) {
+            continue;
+        }
+        $amount += $projectAmount;
+    }
+
+    $paid = paid_amount_for_employee_month_by_admin(
+        (int) ($employee['id'] ?? 0),
+        'SALARY',
+        substr($date, 0, 7),
+        !empty($employee['admin_id']) ? (int) $employee['admin_id'] : null
+    );
+
+    return round(max($amount - $paid, 0), 2);
+}
+
+function contractual_payment_request_for_employee_date(int $employeeId, string $date): ?array
+{
+    if ($employeeId <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        return null;
+    }
+
+    $stmt = db()->prepare('SELECT * FROM contractual_payment_requests WHERE user_id = :user_id AND request_date = :request_date LIMIT 1');
+    $stmt->execute([
+        'user_id' => $employeeId,
+        'request_date' => $date,
+    ]);
+    $row = $stmt->fetch();
+
+    return $row ?: null;
+}
+
+function create_contractual_payment_request(array $employee, string $date, string $note = ''): array
+{
+    if ((string) ($employee['role'] ?? '') !== 'corporate_employee') {
+        throw new RuntimeException('Only contractual employees can request payment.');
+    }
+    if (empty($employee['admin_id'])) {
+        throw new RuntimeException('No admin is assigned to this contractual employee.');
+    }
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        throw new RuntimeException('Choose a valid payment date.');
+    }
+
+    $amount = contractual_payment_amount_due_for_date($employee, $date);
+    if ($amount <= 0) {
+        throw new RuntimeException('No payable project amount is available for this date.');
+    }
+
+    $existing = contractual_payment_request_for_employee_date((int) $employee['id'], $date);
+    if ($existing && in_array((string) ($existing['status'] ?? ''), ['PENDING', 'APPROVED'], true)) {
+        throw new RuntimeException('A payment request for this date is already ' . strtolower((string) $existing['status']) . '.');
+    }
+
+    db()->prepare('INSERT INTO contractual_payment_requests (user_id, admin_id, request_month, request_date, amount, status, note, created_at, updated_at)
+        VALUES (:user_id, :admin_id, :request_month, :request_date, :amount, "PENDING", :note, :created_at, :updated_at)
+        ON DUPLICATE KEY UPDATE amount = VALUES(amount), status = "PENDING", note = VALUES(note), updated_at = VALUES(updated_at)')
+        ->execute([
+            'user_id' => (int) $employee['id'],
+            'admin_id' => (int) $employee['admin_id'],
+            'request_month' => substr($date, 0, 7),
+            'request_date' => $date,
+            'amount' => $amount,
+            'note' => trim($note) !== '' ? trim($note) : null,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+    return contractual_payment_request_for_employee_date((int) $employee['id'], $date) ?: [];
+}
+
+function contractual_payment_request_rows(int $adminId, string $month): array
+{
+    if ($adminId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) {
+        return [];
+    }
+
+    $stmt = db()->prepare('SELECT cpr.*, u.name AS employee_name, u.emp_id AS employee_emp_id
+        FROM contractual_payment_requests cpr
+        JOIN users u ON u.id = cpr.user_id
+        WHERE cpr.admin_id = :admin_id
+          AND cpr.request_month = :request_month
+          AND cpr.status = "PENDING"
+        ORDER BY cpr.created_at DESC, cpr.id DESC');
+    $stmt->execute([
+        'admin_id' => $adminId,
+        'request_month' => $month,
+    ]);
+
+    return array_map(static function (array $row): array {
+        return [
+            'request_key' => contractual_payment_request_key((int) ($row['user_id'] ?? 0), (string) ($row['request_date'] ?? '')),
+            'employee_id' => (int) ($row['user_id'] ?? 0),
+            'employee_name' => (string) ($row['employee_name'] ?? ''),
+            'employee_emp_id' => (string) ($row['employee_emp_id'] ?? ''),
+            'scope' => 'freelancer',
+            'request_type' => 'CONTRACTUAL EMPLOYEE PAY',
+            'amount' => (float) ($row['amount'] ?? 0),
+            'status' => (string) ($row['status'] ?? 'PENDING'),
+            'note' => (string) ($row['note'] ?? ''),
+            'request_date' => (string) ($row['request_date'] ?? ''),
+        ];
+    }, $stmt->fetchAll());
 }
 
 function payment_breakdowns_for_payment_ids(array $paymentIds): array
@@ -713,7 +850,7 @@ function payment_breakdowns_for_payment_ids(array $paymentIds): array
 
 function accounts_payment_history_rows(array $filters = []): array
 {
-    $admin = require_role('admin');
+    $admin = require_power_accounts_access(['admin']);
     $scope = (string) ($filters['pay_group'] ?? 'employee');
     $sql = 'SELECT p.*,
                 u.name AS employee_name,
@@ -835,8 +972,19 @@ function store_payment_breakdowns(int $paymentId, array $breakdowns): void
 
 function approved_reimbursement_requests(?int $employeeId = null): array
 {
-    $admin = require_role('admin');
-    $sql = 'SELECT er.*, u.name AS employee_name, u.emp_id AS employee_emp_id
+    $admin = require_power_accounts_access(['admin']);
+    $sql = 'SELECT er.*, u.name AS employee_name, u.emp_id AS employee_emp_id,
+                (
+                    SELECT p.project_name
+                    FROM attendance_records ar
+                    JOIN attendance_sessions s ON s.attendance_id = ar.id
+                    JOIN projects p ON p.id = s.project_id
+                    WHERE ar.user_id = er.user_id
+                      AND ar.attend_date = er.expense_date
+                      AND s.project_id IS NOT NULL
+                    ORDER BY s.id ASC
+                    LIMIT 1
+                ) AS project_name
             FROM employee_reimbursements er
             JOIN users u ON u.id = er.user_id
             WHERE er.admin_id = :admin_id
@@ -859,7 +1007,7 @@ function approved_reimbursement_requests(?int $employeeId = null): array
 
 function incentive_totals_by_employee(): array
 {
-    $admin = require_role('admin');
+    $admin = require_power_accounts_access(['admin']);
     $stmt = db()->prepare('SELECT ar.user_id, COALESCE(SUM(r.incentive_earned), 0) AS total_incentive
         FROM attendance_records ar
         JOIN users u ON u.id = ar.user_id
@@ -895,7 +1043,25 @@ function payment_month_bounds(string $month): array
 
 function paid_amount_for_employee_month(int $employeeId, string $paymentType, string $month): float
 {
-    $admin = require_role('admin');
+    $admin = require_power_accounts_access(['admin']);
+    return paid_amount_for_employee_month_by_admin($employeeId, $paymentType, $month, (int) $admin['id']);
+}
+
+function paid_amount_for_employee_month_by_admin(int $employeeId, string $paymentType, string $month, ?int $adminId = null): float
+{
+    if ($employeeId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) {
+        return 0.0;
+    }
+
+    if ($adminId === null || $adminId <= 0) {
+        $stmt = db()->prepare('SELECT admin_id FROM users WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $employeeId]);
+        $adminId = (int) ($stmt->fetchColumn() ?: 0);
+    }
+    if ($adminId <= 0) {
+        return 0.0;
+    }
+
     [$start, $end] = payment_month_bounds($month);
     $stmt = db()->prepare('SELECT COALESCE(SUM(amount), 0) FROM payments
         WHERE admin_id = :admin_id
@@ -903,7 +1069,7 @@ function paid_amount_for_employee_month(int $employeeId, string $paymentType, st
           AND payment_type = :payment_type
           AND payment_date BETWEEN :start_date AND :end_date');
     $stmt->execute([
-        'admin_id' => (int) $admin['id'],
+        'admin_id' => $adminId,
         'user_id' => $employeeId,
         'payment_type' => strtoupper($paymentType),
         'start_date' => $start,
@@ -911,6 +1077,229 @@ function paid_amount_for_employee_month(int $employeeId, string $paymentType, st
     ]);
 
     return round((float) $stmt->fetchColumn(), 2);
+}
+
+function paid_amount_for_employee_month_all_admins(int $employeeId, string $paymentType, string $month): float
+{
+    if ($employeeId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) {
+        return 0.0;
+    }
+
+    [$start, $end] = payment_month_bounds($month);
+    $stmt = db()->prepare('SELECT COALESCE(SUM(amount), 0) FROM payments
+        WHERE user_id = :user_id
+          AND payment_type = :payment_type
+          AND payment_date BETWEEN :start_date AND :end_date');
+    $stmt->execute([
+        'user_id' => $employeeId,
+        'payment_type' => strtoupper($paymentType),
+        'start_date' => $start,
+        'end_date' => $end,
+    ]);
+
+    return round((float) $stmt->fetchColumn(), 2);
+}
+
+function vendor_payment_history_rows(int $vendorId, array $filters = []): array
+{
+    if ($vendorId <= 0) {
+        return [];
+    }
+
+    $sql = 'SELECT p.*,
+                u.name AS employee_name,
+                u.emp_id AS employee_emp_id,
+                u.admin_id AS employee_admin_id
+            FROM payments p
+            JOIN users u ON u.id = p.user_id
+            WHERE u.admin_id = :vendor_id
+              AND u.role = "employee"';
+    $params = ['vendor_id' => $vendorId];
+
+    if (!empty($filters['employee_id'])) {
+        $sql .= ' AND p.user_id = :user_id';
+        $params['user_id'] = (int) $filters['employee_id'];
+    }
+    if (!empty($filters['payment_type'])) {
+        $sql .= ' AND p.payment_type = :payment_type';
+        $params['payment_type'] = strtoupper((string) $filters['payment_type']);
+    }
+    if (!empty($filters['from_date'])) {
+        $sql .= ' AND p.payment_date >= :from_date';
+        $params['from_date'] = (string) $filters['from_date'];
+    }
+    if (!empty($filters['to_date'])) {
+        $sql .= ' AND p.payment_date <= :to_date';
+        $params['to_date'] = (string) $filters['to_date'];
+    }
+
+    $sql .= ' ORDER BY p.payment_date DESC, p.id DESC';
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll();
+    $breakdownMap = payment_breakdowns_for_payment_ids(array_map(static fn(array $row): int => (int) ($row['id'] ?? 0), $rows));
+
+    foreach ($rows as &$row) {
+        $paymentId = (int) ($row['id'] ?? 0);
+        $row['breakdowns'] = $breakdownMap[$paymentId] ?? [];
+    }
+    unset($row);
+
+    return $rows;
+}
+
+function vendor_payment_invoice_requests(int $vendorId, array $filters = []): array
+{
+    if ($vendorId <= 0) {
+        return [];
+    }
+
+    $sql = 'SELECT r.*,
+                u.name AS employee_name,
+                u.emp_id AS employee_emp_id,
+                p.project_name
+            FROM vendor_payment_invoice_requests r
+            JOIN users u ON u.id = r.user_id
+            JOIN projects p ON p.id = r.project_id
+            WHERE r.vendor_id = :vendor_id';
+    $params = ['vendor_id' => $vendorId];
+
+    if (!empty($filters['user_id'])) {
+        $sql .= ' AND r.user_id = :user_id';
+        $params['user_id'] = (int) $filters['user_id'];
+    }
+    if (!empty($filters['invoice_date'])) {
+        $sql .= ' AND r.invoice_date = :invoice_date';
+        $params['invoice_date'] = (string) $filters['invoice_date'];
+    }
+
+    $sql .= ' ORDER BY r.created_at DESC, r.id DESC';
+    $stmt = db()->prepare($sql);
+    $stmt->execute($params);
+
+    return $stmt->fetchAll();
+}
+
+function create_vendor_payment_invoice_request(array $vendor, array $source): array
+{
+    if (($vendor['role'] ?? '') !== 'external_vendor') {
+        throw new RuntimeException('Only vendors can request payment invoices.');
+    }
+
+    $vendorId = (int) ($vendor['id'] ?? 0);
+    $employeeId = max(0, (int) ($source['employee_id'] ?? 0));
+    $projectId = max(0, (int) ($source['project_id'] ?? 0));
+    $invoiceDate = trim((string) ($source['payment_date'] ?? ''));
+    $amount = round(max(0.0, (float) ($source['amount'] ?? 0)), 2);
+    if ($vendorId <= 0 || $employeeId <= 0 || $projectId <= 0) {
+        throw new RuntimeException('Select trainer and project before requesting payment.');
+    }
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $invoiceDate)) {
+        throw new RuntimeException('Select a valid payment date.');
+    }
+    if ($amount <= 0) {
+        throw new RuntimeException('Payment amount must be greater than zero.');
+    }
+
+    $employee = payment_user_by_id($employeeId);
+    if (!$employee || (int) ($employee['admin_id'] ?? 0) !== $vendorId || (string) ($employee['role'] ?? '') !== 'employee') {
+        throw new RuntimeException('Select a valid trainer from your vendor account.');
+    }
+
+    $matchedProject = null;
+    foreach (employee_available_projects_for_date($employee, $invoiceDate) as $project) {
+        if ((int) ($project['id'] ?? 0) === $projectId) {
+            $matchedProject = $project;
+            break;
+        }
+    }
+    if (!$matchedProject) {
+        throw new RuntimeException('Selected project is not assigned to this trainer on that date.');
+    }
+    $sessionPay = project_session_salary_for_date($employee, $projectId, $invoiceDate);
+    if ((float) ($sessionPay['amount'] ?? 0) > 0) {
+        $amount = round((float) $sessionPay['amount'], 2);
+    } elseif ((float) ($matchedProject['project_daily_salary'] ?? 0) > 0) {
+        $amount = project_assignment_payment_amount($matchedProject, $sessionPay);
+    }
+
+    $existing = db()->prepare('SELECT id FROM vendor_payment_invoice_requests
+        WHERE vendor_id = :vendor_id
+          AND user_id = :user_id
+          AND project_id = :project_id
+          AND invoice_date = :invoice_date
+          AND status = "PENDING"
+        LIMIT 1');
+    $existing->execute([
+        'vendor_id' => $vendorId,
+        'user_id' => $employeeId,
+        'project_id' => $projectId,
+        'invoice_date' => $invoiceDate,
+    ]);
+    if ($existing->fetchColumn()) {
+        throw new RuntimeException('A pending payment invoice request already exists for this trainer, project, and date.');
+    }
+
+    $now = now();
+    db()->prepare('INSERT INTO vendor_payment_invoice_requests (vendor_id, user_id, project_id, invoice_date, amount, status, created_at, updated_at)
+        VALUES (:vendor_id, :user_id, :project_id, :invoice_date, :amount, "PENDING", :created_at, :updated_at)')
+        ->execute([
+            'vendor_id' => $vendorId,
+            'user_id' => $employeeId,
+            'project_id' => $projectId,
+            'invoice_date' => $invoiceDate,
+            'amount' => $amount,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+
+    $requestId = (int) db()->lastInsertId();
+    $adminRows = db()->query("SELECT id FROM users WHERE role = 'admin' AND status = 'ACTIVE'")->fetchAll();
+    foreach ($adminRows as $adminRow) {
+        create_notification_entry(
+            (int) ($adminRow['id'] ?? 0),
+            'Vendor payment invoice request',
+            (string) ($vendor['name'] ?? 'Vendor') . ' requested Rs ' . number_format($amount, 2) . ' for ' . (string) ($employee['name'] ?? 'trainer') . ' - ' . (string) ($matchedProject['project_name'] ?? 'project') . '.',
+            'payment',
+            'vendor_payment_invoice_request',
+            $requestId,
+            $vendorId
+        );
+    }
+
+    $stmt = db()->prepare('SELECT * FROM vendor_payment_invoice_requests WHERE id = :id LIMIT 1');
+    $stmt->execute(['id' => $requestId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        throw new RuntimeException('Unable to create payment invoice request.');
+    }
+
+    return $row;
+}
+
+function create_vendor_payment_invoice_requests(array $vendor, array $items): array
+{
+    $created = [];
+    foreach ($items as $item) {
+        $parts = explode('|', (string) $item);
+        if (count($parts) !== 4) {
+            continue;
+        }
+
+        [$employeeId, $projectId, $paymentDate, $amount] = $parts;
+        $created[] = create_vendor_payment_invoice_request($vendor, [
+            'employee_id' => (int) $employeeId,
+            'project_id' => (int) $projectId,
+            'payment_date' => (string) $paymentDate,
+            'amount' => (float) $amount,
+        ]);
+    }
+
+    if ($created === []) {
+        throw new RuntimeException('Select at least one trainer payment to request.');
+    }
+
+    return $created;
 }
 
 function incentive_total_for_employee_month(int $employeeId, string $month): float
@@ -996,7 +1385,7 @@ function payment_request_rows(string $month): array
               AND er.status NOT IN ("PAID", "DENIED")
               AND er.remaining_balance > 0
             ORDER BY er.expense_date DESC');
-    $stmt->execute(['admin_id' => (int) require_role('admin')['id']]);
+    $stmt->execute(['admin_id' => (int) require_power_accounts_access(['admin'])['id']]);
     $allReimbursements = $stmt->fetchAll();
 
     foreach ($allReimbursements as $reimbursement) {
@@ -1023,7 +1412,7 @@ function payment_request_rows(string $month): array
 
     // Fetch stored actions for Salary/Incentive
     $stmt = db()->prepare('SELECT request_key, status FROM payment_request_actions WHERE admin_id = :admin_id');
-    $stmt->execute(['admin_id' => (int) require_role('admin')['id']]);
+    $stmt->execute(['admin_id' => (int) require_power_accounts_access(['admin'])['id']]);
     $storedActions = [];
     foreach ($stmt->fetchAll() as $actionRow) {
         $storedActions[(string) $actionRow['request_key']] = (string) $actionRow['status'];
@@ -1066,7 +1455,7 @@ function payment_query_base(): string
 
 function admin_payments(array $filters = []): array
 {
-    $admin = require_role('admin');
+    $admin = require_power_accounts_access(['admin']);
     $sql = payment_query_base() . ' WHERE p.admin_id = :admin_id';
     $params = ['admin_id' => (int) $admin['id']];
 
@@ -1100,7 +1489,7 @@ function admin_payments(array $filters = []): array
 
 function admin_payment_by_id(int $paymentId): ?array
 {
-    $admin = require_role('admin');
+    $admin = require_power_accounts_access(['admin']);
     $stmt = db()->prepare(payment_query_base() . ' WHERE p.id = :id AND p.admin_id = :admin_id LIMIT 1');
     $stmt->execute([
         'id' => $paymentId,
@@ -1171,7 +1560,7 @@ function payment_redirect_query(array $filters): array
 
 function normalize_payment_payload(array $source, ?array $existingPayment = null): array
 {
-    $admin = require_role('admin');
+    $admin = require_power_accounts_access(['admin']);
     $employeeId = max(0, (int) ($source['employee_id'] ?? ($existingPayment['user_id'] ?? 0)));
     $employee = employee_by_id($employeeId);
     if (!$employee) {
@@ -1341,7 +1730,7 @@ function insert_payment_record(array $payload, ?array $proof = null, array $brea
 
 function create_accounts_payment_batch(array $source, array $file = []): array
 {
-    $admin = require_role('admin');
+    $admin = require_power_accounts_access(['admin']);
     $employeeId = max(0, (int) ($source['employee_id'] ?? 0));
     $employee = employee_by_id($employeeId);
     if (!$employee) {
@@ -1552,7 +1941,7 @@ function payment_payslip_filename(array $payment): string
 
 function grouped_reimbursement_requests(): array
 {
-    $admin = require_role('admin');
+    $admin = require_power_accounts_access(['admin']);
     $stmt = db()->prepare('SELECT er.*, u.name AS employee_name, u.emp_id AS employee_emp_id
             FROM employee_reimbursements er
             JOIN users u ON u.id = er.user_id
@@ -1763,7 +2152,7 @@ function stream_payment_payslip_pdf(array $payment): void
 
 function update_payment_request_status(string $requestKey, string $status, ?float $approvedAmount = null): void
 {
-    $admin = require_role('admin');
+    $admin = require_power_accounts_access(['admin']);
     $status = strtoupper(trim($status));
     if (!in_array($status, ['APPROVED', 'REJECTED', 'PENDING'], true)) {
         throw new RuntimeException('Invalid status for payment request.');
@@ -1779,6 +2168,29 @@ function update_payment_request_status(string $requestKey, string $status, ?floa
                 'admin_id' => (int) $admin['id'],
             ]);
         return;
+    }
+
+    if (str_starts_with($requestKey, 'salary:')) {
+        $parts = explode(':', $requestKey);
+        $employeeId = (int) ($parts[1] ?? 0);
+        $date = (string) ($parts[2] ?? '');
+        if ($employeeId > 0 && preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            db()->prepare('UPDATE contractual_payment_requests
+                SET status = :status,
+                    amount = COALESCE(:approved_amount, amount),
+                    updated_at = :updated_at
+                WHERE user_id = :user_id
+                  AND admin_id = :admin_id
+                  AND request_date = :request_date')
+                ->execute([
+                    'status' => $status,
+                    'approved_amount' => $approvedAmount,
+                    'updated_at' => now(),
+                    'user_id' => $employeeId,
+                    'admin_id' => (int) $admin['id'],
+                    'request_date' => $date,
+                ]);
+        }
     }
 
     db()->prepare('INSERT INTO payment_request_actions (request_key, status, approved_amount, admin_id, created_at, updated_at)
