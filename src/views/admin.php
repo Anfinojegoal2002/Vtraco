@@ -1573,37 +1573,21 @@ function render_admin_employees(): void
                         <label>Phone Number<input type="text" name="phone" value="<?= h($editEmployee['phone']) ?>" required></label>
                         <?php if (!$isVendorTrainerView): ?>
                             <?php
-                                $editShiftOptions = array_map(
-                                    static fn(array $timing): string => format_shift_selection_from_times((string) ($timing['start_time'] ?? ''), (string) ($timing['end_time'] ?? '')),
-                                    shift_timings()
-                                );
-                                $editShiftOptions = array_values(array_unique(array_merge(standard_shift_options(), $editShiftOptions)));
                                 $editSelectedShift = normalize_shift_selection((string) ($editEmployee['shift'] ?? ''));
-                                if ($editSelectedShift !== '' && !in_array($editSelectedShift, $editShiftOptions, true)) {
-                                    $editShiftOptions[] = $editSelectedShift;
-                                }
+                                $editShiftWindow = shift_window_from_label($editSelectedShift);
+                                $editShiftStart = shift_time_input_value((string) ($editShiftWindow['start_time'] ?? ''));
+                                $editShiftEnd = shift_time_input_value((string) ($editShiftWindow['end_time'] ?? ''));
                             ?>
-                            <label class="<?= $editUsesManagedFields ? 'hidden' : '' ?>" data-contractual-hidden-field>Shift
-                                <select name="shift" <?= $editUsesManagedFields ? 'disabled' : '' ?>>
-                                    <option value="">Not assigned</option>
-                                    <?php foreach ($editShiftOptions as $shiftOption): ?>
-                                        <option value="<?= h($shiftOption) ?>" <?= $editSelectedShift === $shiftOption ? 'selected' : '' ?>><?= h(str_replace('-', '–', $shiftOption)) ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </label>
+                            <input type="hidden" name="shift" value="<?= h($editSelectedShift) ?>">
+                            <label class="<?= $editUsesManagedFields ? 'hidden' : '' ?>" data-contractual-hidden-field>Shift From Time<input type="time" name="shift_start_time" value="<?= h($editShiftStart) ?>" <?= $editUsesManagedFields ? 'disabled' : '' ?>></label>
+                            <label class="<?= $editUsesManagedFields ? 'hidden' : '' ?>" data-contractual-hidden-field>Shift To Time<input type="time" name="shift_end_time" value="<?= h($editShiftEnd) ?>" <?= $editUsesManagedFields ? 'disabled' : '' ?>></label>
                             <label class="<?= $editHideCompensationField ? 'hidden' : '' ?>"<?= $usesHourlyRate ? '' : ' data-contractual-hidden-field' ?>><?= $usesHourlyRate ? 'Hourly Rate' : 'Salary' ?><input type="number" step="0.01" min="0" name="salary" value="<?= h((string) $editEmployee['salary']) ?>" <?= $editHideCompensationField ? 'disabled' : 'required' ?>></label>
                         <?php endif; ?>
                         <label class="<?= $editUsesManagedFields ? 'hidden' : '' ?>" data-contractual-hidden-field>Recruiter Name<input type="text" name="recruiter_name" value="<?= h((string) ($editEmployee['recruiter_name'] ?? '')) ?>" <?= $editUsesManagedFields ? 'disabled' : 'required' ?>></label>
                         <?php if ($editUsesManagedFields): ?>
-                            <input type="hidden" name="recruited_through" value="<?= h((string) (($editEmployee['recruited_through'] ?? '') ?: 'Other')) ?>">
+                            <input type="hidden" name="recruited_through" value="<?= h((string) ($editEmployee['recruited_through'] ?? '')) ?>">
                         <?php else: ?>
-                            <label>Recruited Through
-                                <select name="recruited_through" required>
-                                    <?php foreach (employee_recruitment_sources() as $source): ?>
-                                        <option value="<?= h($source) ?>" <?= ((string) ($editEmployee['recruited_through'] ?? '')) === $source ? 'selected' : '' ?>><?= h($source) ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </label>
+                            <label>Recruited Through<input type="text" name="recruited_through" value="<?= h((string) ($editEmployee['recruited_through'] ?? '')) ?>" required></label>
                         <?php endif; ?>
                         <label class="<?= $editUsesManagedFields ? 'hidden' : '' ?>" data-contractual-hidden-field>Designation
                             <select name="designation" <?= $editUsesManagedFields ? 'disabled' : 'required' ?>>
@@ -1745,7 +1729,7 @@ function render_admin_employees(): void
                         <div class="field"><label>Name</label><div class="field-row"><input type="text" name="name" required></div><small class="field-error"><span>!</span>Name is required.</small></div>
                         <div class="field"><label>Phone Number</label><div class="field-row"><input type="text" name="phone" required></div><small class="field-error"><span>!</span>Phone number required.</small></div>
                         <div class="field"><label>Mail ID</label><div class="field-row"><input type="email" name="email" required></div><small class="field-error"><span>!</span>Valid mail ID required.</small></div>
-                        <div class="field<?= ($employeeType === 'vendor' || $isVendor) ? ' hidden' : '' ?>"><label>Sourced Through</label><div class="field-row"><select name="recruited_through" <?= ($employeeType === 'vendor' || $isVendor) ? 'disabled' : 'required' ?>><?php foreach (employee_recruitment_sources() as $source): ?><option value="<?= h($source) ?>"><?= h($source) ?></option><?php endforeach; ?></select></div><small class="field-error"><span>!</span>Source is required.</small></div>
+                        <div class="field<?= ($employeeType === 'vendor' || $isVendor) ? ' hidden' : '' ?>"><label>Sourced Through</label><div class="field-row"><input type="text" name="recruited_through" <?= ($employeeType === 'vendor' || $isVendor) ? 'disabled' : 'required' ?>></div><small class="field-error"><span>!</span>Source is required.</small></div>
                         <?php $hideCompensationField = ($employeeType === 'vendor' || $isVendor || ($employeeType === 'corporate' && !$isFreelancer)); ?>
                         <div class="field<?= $hideCompensationField ? ' hidden' : '' ?>"<?= $usesHourlyRate ? '' : ' data-contractual-hidden-field' ?>><label><?= $usesHourlyRate ? 'Hourly Rate' : 'Salary' ?></label><div class="field-row"><input type="number" step="0.01" min="0" name="salary" <?= $hideCompensationField ? 'disabled' : 'required' ?>></div><small class="field-error"><span>!</span><?= $usesHourlyRate ? 'Hourly rate is required.' : 'Salary is required.' ?></small></div>
                         <div class="field<?= ($employeeType === 'corporate' || $employeeType === 'vendor' || $isFreelancer || $isVendor) ? ' hidden' : '' ?>" data-contractual-hidden-field><label>Recruiter Name</label><div class="field-row"><input type="text" name="recruiter_name" <?= ($employeeType === 'corporate' || $employeeType === 'vendor' || $isFreelancer || $isVendor) ? 'disabled' : 'required' ?>></div><small class="field-error"><span>!</span>Recruiter name is required.</small></div>
@@ -2335,7 +2319,18 @@ function render_admin_projects(): void
                         <input type="text" name="project_name" value="<?= h((string) ($formValues['project_name'] ?? '')) ?>" placeholder="Vendor training program" required>
                     </label>
                     <label>Vendor
-                        <input type="text" name="vendor_name" value="<?= h((string) ($formValues['vendor_name'] ?? '')) ?>" placeholder="Vendor name" required>
+                        <?php $vendorAccounts = db()->query("SELECT id, name, company_name FROM users WHERE role = 'external_vendor' AND status = 'ACTIVE' ORDER BY COALESCE(NULLIF(company_name, ''), name), name")->fetchAll(); ?>
+                        <?php if ($vendorAccounts): ?>
+                            <select name="vendor_id" required>
+                                <option value="">-- Select Vendor --</option>
+                                <?php foreach ($vendorAccounts as $vendorAccount): ?>
+                                    <?php $vendorAccountName = (string) (($vendorAccount['company_name'] ?? '') ?: ($vendorAccount['name'] ?? '')); ?>
+                                    <option value="<?= (int) $vendorAccount['id'] ?>" <?= (int) ($formValues['vendor_id'] ?? 0) === (int) $vendorAccount['id'] ? 'selected' : '' ?>><?= h($vendorAccountName) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        <?php else: ?>
+                            <input type="text" name="vendor_name" value="<?= h((string) ($formValues['vendor_name'] ?? '')) ?>" placeholder="Vendor name" required>
+                        <?php endif; ?>
                     </label>
                     <label>College Name
                         <input type="text" name="college_name" value="<?= h((string) ($formValues['college_name'] ?? '')) ?>" placeholder="ABC Engineering College" required>
@@ -2596,23 +2591,7 @@ function calendar_sheet_shift_label(array $employee, array $monthAttendance): st
 
 function calendar_sheet_display_status(string $date, array $entry, string $status): string
 {
-    if (date('w', strtotime($date)) !== '0') {
-        return $status;
-    }
-
-    $record = $entry['record'] ?? [];
-    $hasAdminOverride = trim((string) ($record['admin_override_status'] ?? '')) !== '';
-    $hasPunch = trim((string) ($record['punch_in_time'] ?? '')) !== ''
-        || trim((string) ($record['punch_out_time'] ?? '')) !== ''
-        || trim((string) ($record['biometric_in_time'] ?? '')) !== ''
-        || trim((string) ($record['biometric_out_time'] ?? '')) !== ''
-        || !empty($entry['sessions']);
-
-    if (!$hasAdminOverride && !$hasPunch && in_array($status, ['', 'Absent'], true)) {
-        return 'Week Off';
-    }
-
-    return $status;
+    return attendance_status_for_counts($date, $entry);
 }
 
 function render_calendar(string $context, array $employee, string $month, array $monthAttendance, array $calendarMeta = []): void
@@ -3060,6 +3039,9 @@ function render_admin_attendance(): void
         }
     }
     $month = preg_match('/^\d{4}-\d{2}$/', $_GET['month'] ?? '') ? $_GET['month'] : date('Y-m');
+    if ($view === 'attendance' && !$isFreelancer && !$isVendor) {
+        auto_sync_etime_attendance_for_month($month);
+    }
 
     render_header('Track Attendance', 'admin-employee-log-page');
     ?>
@@ -3179,6 +3161,17 @@ function render_admin_profile_settings(): void
 {
     $admin = require_role('admin');
     $memberSince = !empty($admin['created_at']) ? date('d M Y', strtotime((string) $admin['created_at'])) : 'Recently added';
+    $biometricIntegration = biometric_integration_for_admin((int) $admin['id']);
+    $biometricBaseUrl = (string) ($biometricIntegration['base_url'] ?? 'https://api.etimeoffice.com/api/');
+    $biometricCorporateId = (string) ($biometricIntegration['corporate_id'] ?? 'karyoun');
+    $biometricUsername = (string) ($biometricIntegration['username'] ?? 'Arun');
+    $biometricEnabled = $biometricIntegration ? !empty($biometricIntegration['is_enabled']) : true;
+    $biometricLastSync = !empty($biometricIntegration['last_sync_at'])
+        ? date('d M Y, h:i A', strtotime((string) $biometricIntegration['last_sync_at']))
+        : 'Not synced yet';
+    $biometricLastTest = !empty($biometricIntegration['last_test_at'])
+        ? date('d M Y, h:i A', strtotime((string) $biometricIntegration['last_test_at']))
+        : 'Not tested yet';
 
     render_header('Profile Settings');
     ?>
@@ -3241,6 +3234,63 @@ function render_admin_profile_settings(): void
                 <div class="field-row"><input type="text" name="phone" value="<?= h((string) ($admin['phone'] ?? '')) ?>"></div>
             </div>
             <button class="button solid" type="submit">Save Profile</button>
+        </form>
+    </section>
+
+    <div class="spacer"></div>
+
+    <section class="section-block">
+        <div class="split">
+            <div>
+                <span class="eyebrow">Biometric Integration</span>
+                <h2>eTime Office</h2>
+                <p>Connect this admin account to eTime Office so Track Attendance can mark biometric IN/OUT records automatically.</p>
+            </div>
+            <span class="badge"><?= $biometricEnabled ? 'Enabled' : 'Disabled' ?></span>
+        </div>
+        <form method="post" class="stack-form" data-validate>
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="admin_biometric_integration_save">
+            <label class="checkbox-line">
+                <input type="checkbox" name="is_enabled" value="1" <?= $biometricEnabled ? 'checked' : '' ?>>
+                <span>Enable automatic eTime Office attendance sync</span>
+            </label>
+            <div class="reports-filter-grid">
+                <div class="field">
+                    <label>API Base URL</label>
+                    <div class="field-row"><input type="url" name="base_url" value="<?= h($biometricBaseUrl) ?>" required></div>
+                    <small class="field-error"><span>!</span>Base URL is required.</small>
+                </div>
+                <div class="field">
+                    <label>Corporate ID</label>
+                    <div class="field-row"><input type="text" name="corporate_id" value="<?= h($biometricCorporateId) ?>" required></div>
+                    <small class="field-error"><span>!</span>Corporate ID is required.</small>
+                </div>
+                <div class="field">
+                    <label>Username</label>
+                    <div class="field-row"><input type="text" name="username" value="<?= h($biometricUsername) ?>" required></div>
+                    <small class="field-error"><span>!</span>Username is required.</small>
+                </div>
+                <div class="field">
+                    <label>Password</label>
+                    <div class="field-row"><input type="password" name="password" autocomplete="new-password" placeholder="<?= $biometricIntegration ? 'Leave blank to keep saved password' : 'Enter eTime password' ?>" <?= $biometricIntegration ? '' : 'required' ?>></div>
+                    <small class="field-error"><span>!</span>Password is required.</small>
+                </div>
+            </div>
+            <div class="profile-settings-grid">
+                <div class="list-item">
+                    <strong>Last Sync</strong>
+                    <span><?= h($biometricLastSync) ?></span>
+                </div>
+                <div class="list-item">
+                    <strong>Last Test</strong>
+                    <span><?= h($biometricLastTest) ?></span>
+                </div>
+            </div>
+            <div class="inline-actions">
+                <button class="button solid" type="submit" name="integration_mode" value="save">Save Integration</button>
+                <button class="button outline" type="submit" name="integration_mode" value="test">Test Connection</button>
+            </div>
         </form>
     </section>
 

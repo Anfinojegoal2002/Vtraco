@@ -9,6 +9,8 @@ require_once __DIR__ . '/core/projects.php';
 require_once __DIR__ . '/core/mail.php';
 require_once __DIR__ . '/core/employee_management.php';
 require_once __DIR__ . '/core/attendance.php';
+require_once __DIR__ . '/core/etime.php';
+require_once __DIR__ . '/core/etime_webhook.php';
 require_once __DIR__ . '/core/reports.php';
 require_once __DIR__ . '/core/reimbursements.php';
 require_once __DIR__ . '/core/payments.php';

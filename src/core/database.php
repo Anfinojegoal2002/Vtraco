@@ -522,6 +522,7 @@ function initialize_database(): void
     $pdo->exec("CREATE TABLE IF NOT EXISTS projects (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         admin_id INT UNSIGNED NULL,
+        vendor_id INT UNSIGNED NULL,
         project_code VARCHAR(50) NULL,
         project_name VARCHAR(191) NOT NULL,
         vendor_name VARCHAR(191) NULL,
@@ -544,6 +545,9 @@ function initialize_database(): void
     if (!table_has_column($pdo, 'projects', 'admin_id')) {
         $pdo->exec('ALTER TABLE projects ADD COLUMN admin_id INT UNSIGNED NULL AFTER id');
     }
+    if (!table_has_column($pdo, 'projects', 'vendor_id')) {
+        $pdo->exec('ALTER TABLE projects ADD COLUMN vendor_id INT UNSIGNED NULL AFTER admin_id');
+    }
     if (!table_has_column($pdo, 'projects', 'project_code')) {
         $pdo->exec('ALTER TABLE projects ADD COLUMN project_code VARCHAR(50) NULL AFTER admin_id');
     }
@@ -553,6 +557,17 @@ function initialize_database(): void
     if (!index_exists($pdo, 'projects', 'idx_projects_admin_active')) {
         $pdo->exec('CREATE INDEX idx_projects_admin_active ON projects(admin_id, is_active)');
     }
+    if (!index_exists($pdo, 'projects', 'idx_projects_vendor_active')) {
+        $pdo->exec('CREATE INDEX idx_projects_vendor_active ON projects(vendor_id, is_active)');
+    }
+    $pdo->exec("UPDATE projects p
+        INNER JOIN users v
+            ON v.role = 'external_vendor'
+           AND LOWER(TRIM(p.vendor_name)) = LOWER(TRIM(COALESCE(NULLIF(v.company_name, ''), v.name)))
+        SET p.vendor_id = v.id
+        WHERE p.vendor_id IS NULL
+          AND p.vendor_name IS NOT NULL
+          AND p.vendor_name <> ''");
     if (!table_has_column($pdo, 'projects', 'approval_status')) {
         $pdo->exec("ALTER TABLE projects ADD COLUMN approval_status VARCHAR(50) NOT NULL DEFAULT 'verified' AFTER end_date");
     }
@@ -617,6 +632,26 @@ function initialize_database(): void
         INDEX idx_attendance_sessions_project_id (project_id),
         CONSTRAINT fk_attendance_sessions_attendance FOREIGN KEY (attendance_id) REFERENCES attendance_records(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS biometric_integrations (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        admin_id INT UNSIGNED NOT NULL,
+        provider VARCHAR(50) NOT NULL DEFAULT 'etime_office',
+        base_url VARCHAR(255) NOT NULL,
+        corporate_id VARCHAR(191) NOT NULL,
+        username VARCHAR(191) NOT NULL,
+        password_cipher TEXT NULL,
+        password_iv VARCHAR(64) NULL,
+        is_enabled TINYINT(1) NOT NULL DEFAULT 1,
+        last_sync_at DATETIME NULL,
+        last_test_at DATETIME NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        UNIQUE KEY uniq_biometric_admin_provider (admin_id, provider),
+        INDEX idx_biometric_integrations_admin_enabled (admin_id, is_enabled),
+        CONSTRAINT fk_biometric_integrations_admin FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
     $pdo->exec("CREATE TABLE IF NOT EXISTS reimbursements (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         attendance_session_id INT UNSIGNED NOT NULL,

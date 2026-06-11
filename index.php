@@ -28,6 +28,10 @@ if ($relativeUri === '/super-admin') {
     $page = 'super_admin_dashboard';
 }
 
+if ($relativeUri === '/webhooks/etime-punch' || ($_GET['webhook'] ?? '') === 'etime_punch') {
+    handle_etime_punch_webhook();
+}
+
 $action = $_POST['action'] ?? $_GET['action'] ?? null;
 
 if ($action) {

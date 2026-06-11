@@ -809,6 +809,12 @@ function format_shift_selection_from_times(string $startTime, string $endTime): 
     return date('h:i A', strtotime($startTime)) . ' - ' . date('h:i A', strtotime($endTime));
 }
 
+function shift_time_input_value(?string $value): string
+{
+    $time = shift_time_to_24h($value);
+    return $time === null ? '' : substr($time, 0, 5);
+}
+
 function shift_time_to_24h(?string $value): ?string
 {
     $value = trim((string) $value);
@@ -853,6 +859,21 @@ function normalize_shift_selection(?string $shift): string
     }
 
     return $normalized;
+}
+
+function shift_selection_from_time_inputs(array $source, string $fallback = ''): string
+{
+    $from = shift_time_to_24h($source['shift_start_time'] ?? '');
+    $to = shift_time_to_24h($source['shift_end_time'] ?? '');
+
+    if ($from === null && $to === null) {
+        return normalize_shift_selection($fallback);
+    }
+    if ($from === null || $to === null || $from === $to) {
+        throw new RuntimeException('Shift From Time and To Time are required.');
+    }
+
+    return normalize_shift_selection(format_shift_selection_from_times($from, $to));
 }
 
 function shift_window_from_label(?string $shift): ?array

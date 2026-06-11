@@ -221,6 +221,9 @@
             .auth-panel { max-width: 520px; margin: 0 auto; }
             .panel, .section-block, .calendar-shell, .table-wrap, .metric-card { padding: 24px; }
             .stack-form { display: grid; gap: 14px; }
+            .soft-divider { border: 0; border-top: 1px solid var(--line); margin: 8px 0; }
+            .checkbox-line { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+            .checkbox-line input { width: auto; }
             label { display: grid; gap: 8px; font-weight: 700; }
             input, select, textarea { width: 100%; border-radius: 14px; border: 1px solid var(--line); padding: 12px 14px; font: inherit; background: rgba(255,255,255,0.94); transition: border-color .2s ease, box-shadow .2s ease; }
             select,
@@ -1397,6 +1400,7 @@
             .profile-settings-field { display: grid; gap: 8px; font-weight: 700; }
             .profile-settings-field input { background: rgba(255,255,255,0.96); }
             .profile-settings-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+            .profile-settings-toggle { width: 100%; justify-content: center; }
             .employee-sidebar .hint, .admin-sidebar .hint { color: rgba(248,250,252,0.72); }
             .skeleton { position: relative; overflow: hidden; background: linear-gradient(90deg, rgba(226,232,240,0.7) 0%, rgba(248,250,252,0.95) 45%, rgba(226,232,240,0.7) 100%); background-size: 240% 100%; animation: shimmer 1.4s linear infinite; }
             .employee-topbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }

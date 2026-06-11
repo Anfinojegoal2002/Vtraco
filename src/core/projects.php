@@ -22,6 +22,8 @@ function project_form_defaults(): array
     return [
         'id' => 0,
         'project_name' => '',
+        'vendor_id' => 0,
+        'vendor_name' => '',
         'college_name' => '',
         'location' => '',
         'total_days' => 1,
@@ -72,7 +74,13 @@ function active_projects(?int $adminId = null): array
 {
     $user = current_user();
     if (($user['role'] ?? '') === 'external_vendor' && $adminId === null) {
-        return db()->query('SELECT * FROM projects WHERE is_active = 1 AND approval_status = "verified" ORDER BY project_name ASC, id DESC')->fetchAll();
+        $stmt = db()->prepare('SELECT * FROM projects
+            WHERE is_active = 1
+              AND approval_status = "verified"
+              AND (vendor_id = :vendor_id OR admin_id = :vendor_id)
+            ORDER BY project_name ASC, id DESC');
+        $stmt->execute(['vendor_id' => (int) $user['id']]);
+        return $stmt->fetchAll();
     }
 
     $adminId ??= project_scope_admin_id();
@@ -120,7 +128,11 @@ function normalize_project_assignment_ids(array $projectIds): array
     $placeholders = implode(',', array_fill(0, count($projectIds), '?'));
     $params = $projectIds;
     $sql = 'SELECT id FROM projects WHERE id IN (' . $placeholders . ') AND is_active = 1 AND approval_status = "verified"';
-    if (($user['role'] ?? '') !== 'external_vendor' && $adminId !== null) {
+    if (($user['role'] ?? '') === 'external_vendor') {
+        $sql .= ' AND (vendor_id = ? OR admin_id = ?)';
+        $params[] = (int) ($user['id'] ?? 0);
+        $params[] = (int) ($user['id'] ?? 0);
+    } elseif ($adminId !== null) {
         $sql .= ' AND admin_id = ?';
         $params[] = $adminId;
     }
@@ -669,8 +681,10 @@ function save_contractual_project_setup(int $projectId, array $source, int $admi
 
 function normalize_project_payload(array $source): array
 {
+    $vendorId = max(0, (int) ($source['vendor_id'] ?? 0));
     $payload = [
         'project_name' => trim((string) ($source['project_name'] ?? '')),
+        'vendor_id' => $vendorId > 0 ? $vendorId : null,
         'vendor_name' => trim((string) ($source['vendor_name'] ?? '')),
         'college_name' => trim((string) ($source['college_name'] ?? '')),
         'location' => trim((string) ($source['location'] ?? '')),
@@ -681,6 +695,17 @@ function normalize_project_payload(array $source): array
 
     if ($payload['project_name'] === '') {
         throw new RuntimeException('Project name is required.');
+    }
+    if ($payload['vendor_id'] !== null) {
+        $stmt = db()->prepare("SELECT name, company_name FROM users WHERE id = :id AND role = 'external_vendor' LIMIT 1");
+        $stmt->execute(['id' => $payload['vendor_id']]);
+        $vendor = $stmt->fetch();
+        if (!$vendor) {
+            throw new RuntimeException('Select a valid vendor account.');
+        }
+        if ($payload['vendor_name'] === '') {
+            $payload['vendor_name'] = (string) (($vendor['company_name'] ?? '') ?: ($vendor['name'] ?? ''));
+        }
     }
     if ($payload['college_name'] === '') {
         throw new RuntimeException('College name is required.');
@@ -711,6 +736,7 @@ function save_project(array $source, ?int $projectId = null): int
 
         db()->prepare('UPDATE projects
             SET project_name = :project_name,
+                vendor_id = :vendor_id,
                 vendor_name = :vendor_name,
                 college_name = :college_name,
                 location = :location,
@@ -722,6 +748,7 @@ function save_project(array $source, ?int $projectId = null): int
                 'id' => $projectId,
                 'admin_id' => $adminId,
                 'project_name' => $payload['project_name'],
+                'vendor_id' => $payload['vendor_id'],
                 'vendor_name' => $payload['vendor_name'] !== '' ? $payload['vendor_name'] : null,
                 'college_name' => $payload['college_name'],
                 'location' => $payload['location'],
@@ -735,10 +762,11 @@ function save_project(array $source, ?int $projectId = null): int
         return $projectId;
     }
 
-    db()->prepare('INSERT INTO projects (admin_id, project_name, vendor_name, college_name, location, total_days, session_type, is_active)
-        VALUES (:admin_id, :project_name, :vendor_name, :college_name, :location, :total_days, :session_type, :is_active)')
+    db()->prepare('INSERT INTO projects (admin_id, vendor_id, project_name, vendor_name, college_name, location, total_days, session_type, is_active)
+        VALUES (:admin_id, :vendor_id, :project_name, :vendor_name, :college_name, :location, :total_days, :session_type, :is_active)')
         ->execute([
             'admin_id' => $adminId,
+            'vendor_id' => $payload['vendor_id'],
             'project_name' => $payload['project_name'],
             'vendor_name' => $payload['vendor_name'] !== '' ? $payload['vendor_name'] : null,
             'college_name' => $payload['college_name'],

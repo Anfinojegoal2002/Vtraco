@@ -859,6 +859,18 @@ function render_admin_profile_settings_modal(array $admin): void
         'company_logo' => trim((string) ($admin['company_logo_name'] ?? '')),
         'profile_photo' => trim((string) ($admin['profile_photo_name'] ?? '')),
     ];
+    $showBiometricIntegration = ($admin['role'] ?? '') === 'admin';
+    $biometricIntegration = $showBiometricIntegration ? biometric_integration_for_admin((int) $admin['id']) : null;
+    $biometricBaseUrl = (string) ($biometricIntegration['base_url'] ?? 'https://api.etimeoffice.com/api/');
+    $biometricCorporateId = (string) ($biometricIntegration['corporate_id'] ?? 'karyoun');
+    $biometricUsername = (string) ($biometricIntegration['username'] ?? 'Arun');
+    $biometricEnabled = $biometricIntegration ? !empty($biometricIntegration['is_enabled']) : true;
+    $biometricLastSync = !empty($biometricIntegration['last_sync_at'])
+        ? date('d M Y, h:i A', strtotime((string) $biometricIntegration['last_sync_at']))
+        : 'Not synced yet';
+    $biometricLastTest = !empty($biometricIntegration['last_test_at'])
+        ? date('d M Y, h:i A', strtotime((string) $biometricIntegration['last_test_at']))
+        : 'Not tested yet';
     ?>
     <div class="modal" id="admin-profile-settings-modal">
         <div class="modal-card profile-settings-modal-card<?= $isVendorProfile ? ' vendor-profile-settings-card' : '' ?>">
@@ -1034,9 +1046,69 @@ function render_admin_profile_settings_modal(array $admin): void
                         <button class="button solid" type="submit">Save Profile</button>
                     </div>
                 </form>
+                <?php if ($showBiometricIntegration): ?>
+                    <hr class="soft-divider">
+                    <button class="button outline profile-settings-toggle" type="button" data-switch-modal-target="admin-biometric-integration-modal">Biometric Integration</button>
+                <?php endif; ?>
             <?php endif; ?>
         </div>
     </div>
+    <?php if ($showBiometricIntegration): ?>
+    <div class="modal" id="admin-biometric-integration-modal">
+        <div class="modal-card" style="max-width:720px;">
+            <button class="modal-close" type="button" data-close-modal>&times;</button>
+            <span class="eyebrow">Biometric Integration</span>
+            <h2>eTime Office</h2>
+            <p>Connect this admin account to eTime Office so Track Attendance can mark biometric IN/OUT records automatically.</p>
+            <form method="post" class="stack-form" data-validate>
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="admin_biometric_integration_save">
+                <input type="hidden" name="return_page" value="<?= h($returnPage) ?>">
+                <label class="checkbox-line">
+                    <input type="checkbox" name="is_enabled" value="1" <?= $biometricEnabled ? 'checked' : '' ?>>
+                    <span>Enable automatic eTime Office attendance sync</span>
+                </label>
+                <div class="reports-filter-grid">
+                    <div class="field">
+                        <label>API Base URL</label>
+                        <div class="field-row"><input type="url" name="base_url" value="<?= h($biometricBaseUrl) ?>" required></div>
+                        <small class="field-error"><span>!</span>Base URL is required.</small>
+                    </div>
+                    <div class="field">
+                        <label>Corporate ID</label>
+                        <div class="field-row"><input type="text" name="corporate_id" value="<?= h($biometricCorporateId) ?>" required></div>
+                        <small class="field-error"><span>!</span>Corporate ID is required.</small>
+                    </div>
+                    <div class="field">
+                        <label>Username</label>
+                        <div class="field-row"><input type="text" name="username" value="<?= h($biometricUsername) ?>" required></div>
+                        <small class="field-error"><span>!</span>Username is required.</small>
+                    </div>
+                    <div class="field">
+                        <label>Password</label>
+                        <div class="field-row"><input type="password" name="password" autocomplete="new-password" placeholder="<?= $biometricIntegration ? 'Leave blank to keep saved password' : 'Enter eTime password' ?>" <?= $biometricIntegration ? '' : 'required' ?>></div>
+                        <small class="field-error"><span>!</span>Password is required.</small>
+                    </div>
+                </div>
+                <div class="profile-settings-grid">
+                    <div class="list-item">
+                        <strong>Last Sync</strong>
+                        <span><?= h($biometricLastSync) ?></span>
+                    </div>
+                    <div class="list-item">
+                        <strong>Last Test</strong>
+                        <span><?= h($biometricLastTest) ?></span>
+                    </div>
+                </div>
+                <div class="profile-settings-actions">
+                    <button class="button ghost" type="button" data-switch-modal-target="admin-profile-settings-modal">Back to Profile</button>
+                    <button class="button outline" type="submit" name="integration_mode" value="test">Test Connection</button>
+                    <button class="button solid" type="submit" name="integration_mode" value="save">Save Integration</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <?php endif; ?>
     <?php
 }
 

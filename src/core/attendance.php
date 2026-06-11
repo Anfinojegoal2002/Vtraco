@@ -489,6 +489,35 @@ function week_off_counts_as_present(string $status): bool
     return in_array(strtoupper(trim($status)), ['PRESENT', 'HALF DAY'], true);
 }
 
+function attendance_entry_has_work_punch(array $entry): bool
+{
+    $record = is_array($entry['record'] ?? null) ? $entry['record'] : [];
+    if (trim((string) ($record['punch_in_time'] ?? '')) !== ''
+        || trim((string) ($record['punch_out_time'] ?? '')) !== ''
+        || trim((string) ($record['biometric_in_time'] ?? '')) !== ''
+        || trim((string) ($record['biometric_out_time'] ?? '')) !== '') {
+        return true;
+    }
+
+    return !empty($entry['sessions']);
+}
+
+function attendance_status_for_counts(string $date, array $entry): string
+{
+    $record = is_array($entry['record'] ?? null) ? $entry['record'] : [];
+    $status = (string) ($record['status'] ?? '');
+    if (date('w', strtotime($date)) !== '0') {
+        return $status;
+    }
+
+    $hasAdminOverride = trim((string) ($record['admin_override_status'] ?? '')) !== '';
+    if (!$hasAdminOverride && !attendance_entry_has_work_punch($entry) && in_array($status, ['', 'Absent'], true)) {
+        return 'Week Off';
+    }
+
+    return $status;
+}
+
 function sandwich_week_off_absent_dates(array $monthAttendance): array
 {
     $absentDates = [];
@@ -539,8 +568,8 @@ function attendance_counts(array $monthAttendance): array
         'total_days' => count($monthAttendance),
     ];
 
-    foreach ($monthAttendance as $entry) {
-        $status = (string) ($entry['record']['status'] ?? '');
+    foreach ($monthAttendance as $date => $entry) {
+        $status = attendance_status_for_counts((string) $date, is_array($entry) ? $entry : []);
         $normStatus = strtoupper(trim($status));
         switch ($normStatus) {
             case 'PRESENT':
@@ -2608,8 +2637,6 @@ function optimized_punch_photo_database_contents(string $source): array|false
         ? ['data' => $encoded, 'mime' => 'image/jpeg']
         : ['data' => $raw, 'mime' => mime_content_type($source) ?: 'image/jpeg'];
 }
-
-
 
 
 

@@ -1107,8 +1107,8 @@ function handle_post_action(string $action): void
                 flash('error', 'Employee phone number is required.');
                 redirect_to('admin_employees');
             }
-            if (!$isVendorEmployee && !in_array((string) ($_POST['recruited_through'] ?? ''), employee_recruitment_sources(), true)) {
-                flash('error', 'Choose a valid sourced through option.');
+            if (!$isVendorEmployee && trim((string) ($_POST['recruited_through'] ?? '')) === '') {
+                flash('error', 'Sourced through is required.');
                 redirect_to('admin_employees');
             }
             if ($isFreelancerManager) {
@@ -1143,7 +1143,7 @@ function handle_post_action(string $action): void
                 'salary' => $isFreelancerManager ? (float) ($_POST['salary'] ?? 0) : (($isContractualEmployee || $isVendorEmployee) ? 0 : (float) ($_POST['salary'] ?? 0)),
                 'employee_type' => $employeeType,
                 'recruiter_name' => ($isContractualEmployee || $isVendorEmployee) ? (string) ($manager['name'] ?? 'Admin') : trim((string) ($_POST['recruiter_name'] ?? '')),
-                'recruited_through' => $isVendorEmployee ? 'Other' : trim((string) ($_POST['recruited_through'] ?? '')),
+                'recruited_through' => $isVendorEmployee ? '' : trim((string) ($_POST['recruited_through'] ?? '')),
                 'designation' => $isContractualEmployee ? 'Contractual' : ($isVendorEmployee ? 'Vendor' : trim((string) ($_POST['designation'] ?? ''))),
                 'date_of_joining' => ($isContractualEmployee || $isVendorEmployee) ? date('Y-m-d') : trim((string) ($_POST['date_of_joining'] ?? '')),
             ];
@@ -1194,7 +1194,7 @@ function handle_post_action(string $action): void
                 $_SESSION['pending_csv_import'] = array_map(
                     static fn (array $row): array => array_merge([
                         'recruiter_name' => (string) ($manager['name'] ?? 'Admin'),
-                        'recruited_through' => 'Other',
+                        'recruited_through' => '',
                         'designation' => $employeeType === 'corporate' ? 'Contractual' : ($employeeType === 'vendor' ? 'Vendor' : 'Regular Employee'),
                         'date_of_joining' => date('Y-m-d'),
                     ], $row, ['employee_type' => $employeeType]),
@@ -1314,7 +1314,7 @@ function handle_post_action(string $action): void
                     ? (trim((string) ($existingEmployee['recruiter_name'] ?? '')) ?: (string) ($admin['name'] ?? 'Admin'))
                     : trim((string) ($_POST['recruiter_name'] ?? ''));
                 $recruitedThrough = $isManagedEmployeeUpdate
-                    ? (trim((string) ($existingEmployee['recruited_through'] ?? '')) ?: 'Other')
+                    ? trim((string) ($existingEmployee['recruited_through'] ?? ''))
                     : trim((string) ($_POST['recruited_through'] ?? ''));
                 $designation = $isContractualEmployeeUpdate
                     ? 'Contractual'
@@ -1337,8 +1337,8 @@ function handle_post_action(string $action): void
                 if (!$isManagedEmployeeUpdate && $recruiterName === '') {
                     throw new RuntimeException('Recruiter name is required.');
                 }
-                if (!$isManagedEmployeeUpdate && !in_array($recruitedThrough, employee_recruitment_sources(), true)) {
-                    throw new RuntimeException('Choose a valid recruited through source.');
+                if (!$isManagedEmployeeUpdate && $recruitedThrough === '') {
+                    throw new RuntimeException('Recruited through is required.');
                 }
                 if (!$isManagedEmployeeUpdate && $designation === '') {
                     throw new RuntimeException('Designation is required.');
@@ -1357,6 +1357,9 @@ function handle_post_action(string $action): void
                 if (role_requires_unique_email($role) && role_email_exists($role, $email, $employeeId)) {
                     throw new RuntimeException('This employee email is already assigned.');
                 }
+                $shift = $isManagedEmployeeUpdate
+                    ? (string) ($existingEmployee['shift'] ?? '')
+                    : shift_selection_from_time_inputs($_POST, (string) ($existingEmployee['shift'] ?? ''));
                 
                 db()->prepare('UPDATE users SET role = :new_role, emp_id = :emp_id, name = :name, email = :email, phone = :phone, shift = :shift, salary = :salary, employee_type = :employee_type, recruiter_name = :recruiter_name, recruited_through = :recruited_through, designation = :designation, date_of_joining = :date_of_joining WHERE id = :id AND role = :existing_role AND admin_id = :admin_id')
                     ->execute([
@@ -1368,7 +1371,7 @@ function handle_post_action(string $action): void
                         'name' => $name,
                         'email' => $email,
                         'phone' => $phone,
-                        'shift' => $isManagedEmployeeUpdate ? (string) ($existingEmployee['shift'] ?? '') : trim((string) ($_POST['shift'] ?? '')),
+                        'shift' => $shift,
                         'salary' => $salary,
                         'employee_type' => $employeeType,
                         'recruiter_name' => $recruiterName,
@@ -1584,6 +1587,7 @@ function handle_post_action(string $action): void
                 'id' => $projectId,
                 'project_kind' => $projectKind,
                 'project_name' => trim((string) ($_POST['project_name'] ?? '')),
+                'vendor_id' => max(0, (int) ($_POST['vendor_id'] ?? 0)),
                 'vendor_name' => trim((string) ($_POST['vendor_name'] ?? '')),
                 'college_name' => trim((string) ($_POST['college_name'] ?? '')),
                 'location' => trim((string) ($_POST['location'] ?? '')),
@@ -2108,6 +2112,73 @@ function handle_post_action(string $action): void
             redirect_to($returnPage, $returnArgs);
             break;
 
+        case 'admin_etime_attendance_sync':
+            require_power_attendance_access(['admin']);
+            $returnPage = in_array((string) ($_POST['return_page'] ?? ''), ['admin_attendance', 'admin_employee_log'], true)
+                ? (string) $_POST['return_page']
+                : 'admin_employee_log';
+            $returnType = in_array((string) ($_POST['return_type'] ?? 'employee'), ['employee', 'trainer', 'freelancer', 'vendor', 'vendor_trainer', 'regular', 'corporate'], true)
+                ? (string) $_POST['return_type']
+                : 'employee';
+            $returnType = ['regular' => 'employee', 'corporate' => 'freelancer'][$returnType] ?? $returnType;
+            $returnView = in_array((string) ($_POST['return_view'] ?? 'attendance'), ['attendance', 'reimbursement'], true)
+                ? (string) $_POST['return_view']
+                : 'attendance';
+            $returnArgs = [
+                'type' => $returnType,
+                'view' => $returnView,
+            ];
+            $returnEmployeeId = (int) ($_POST['return_employee_id'] ?? 0);
+            if ($returnEmployeeId > 0) {
+                $returnArgs['employee_id'] = $returnEmployeeId;
+            }
+            $returnMonth = preg_match('/^\d{4}-\d{2}$/', (string) ($_POST['return_month'] ?? '')) ? (string) $_POST['return_month'] : '';
+            if ($returnMonth !== '') {
+                $returnArgs['month'] = $returnMonth;
+            }
+            $returnVendorId = (int) ($_POST['return_vendor_id'] ?? 0);
+            if ($returnType === 'vendor' && $returnVendorId > 0) {
+                $returnArgs['vendor_id'] = $returnVendorId;
+            }
+
+            $fromDate = trim((string) ($_POST['etime_from_date'] ?? ''));
+            $toDate = trim((string) ($_POST['etime_to_date'] ?? ''));
+            $empCode = trim((string) ($_POST['etime_empcode'] ?? 'ALL'));
+            $password = (string) ($_POST['etime_password'] ?? '');
+            try {
+                $result = sync_etime_inout_attendance($fromDate, $toDate, $empCode, $password);
+                if ($returnMonth === '' && !empty($result['dates'][0])) {
+                    $returnArgs['month'] = substr((string) $result['dates'][0], 0, 7);
+                }
+
+                $message = 'eTime Office sync completed. Imported: ' . (int) $result['imported'];
+                if (!empty($result['skipped'])) {
+                    $message .= ' | Skipped: ' . (int) $result['skipped'];
+                }
+                if (!empty($result['unmatched'])) {
+                    $message .= ' | Unmatched Employees: ' . implode(', ', $result['unmatched']);
+                }
+
+                audit_log('etime_attendance_sync_completed', [
+                    'from_date' => $fromDate,
+                    'to_date' => $toDate,
+                    'empcode' => $empCode,
+                    'imported' => (int) $result['imported'],
+                    'skipped' => (int) ($result['skipped'] ?? 0),
+                    'unmatched' => $result['unmatched'] ?? [],
+                ]);
+                flash('success', $message);
+            } catch (Throwable $exception) {
+                report_exception($exception, 'eTime Office sync failed.', [
+                    'from_date' => $fromDate,
+                    'to_date' => $toDate,
+                    'empcode' => $empCode,
+                ]);
+                flash('error', $exception->getMessage());
+            }
+            redirect_to($returnPage, $returnArgs);
+            break;
+
         case 'admin_set_status':
             $marker = require_roles(['admin', 'employee', 'corporate_employee']);
             $isHrMarker = employee_is_hr_reviewer($marker);
@@ -2299,6 +2370,63 @@ function handle_post_action(string $action): void
             } catch (Throwable $exception) {
                 report_exception($exception, 'Admin profile update failed.', ['admin_id' => (int) $admin['id']]);
                 flash('error', 'Unable to update profile.');
+            }
+            redirect_to($returnPage);
+            break;
+
+        case 'admin_biometric_integration_save':
+            $admin = require_role('admin');
+            $returnPage = (string) ($_POST['return_page'] ?? 'admin_profile_settings');
+            if (!str_starts_with($returnPage, 'admin_') || $returnPage === 'admin_profile_settings') {
+                $returnPage = 'admin_profile_settings';
+            }
+            $mode = (string) ($_POST['integration_mode'] ?? 'save');
+            $existing = biometric_integration_for_admin((int) $admin['id']);
+            $payload = [
+                'base_url' => trim((string) ($_POST['base_url'] ?? '')),
+                'corporate_id' => trim((string) ($_POST['corporate_id'] ?? '')),
+                'username' => trim((string) ($_POST['username'] ?? '')),
+                'password' => (string) ($_POST['password'] ?? ''),
+                'is_enabled' => !empty($_POST['is_enabled']),
+            ];
+            try {
+                if ($mode === 'test') {
+                    $password = trim((string) $payload['password']);
+                    if ($password === '' && $existing) {
+                        $password = (string) ($existing['password'] ?? '');
+                    }
+                    $testConfig = etime_config(null, [
+                        'base_url' => $payload['base_url'] !== '' ? $payload['base_url'] : 'https://api.etimeoffice.com/api/',
+                        'corporate_id' => $payload['corporate_id'],
+                        'username' => $payload['username'],
+                        'password' => $password,
+                        'timeout' => 15,
+                    ]);
+                    etime_request_json('DownloadInOutPunchData', [
+                        'Empcode' => 'ALL',
+                        'FromDate' => etime_api_date(date('Y-m-d')),
+                        'ToDate' => etime_api_date(date('Y-m-d')),
+                    ], null, $testConfig);
+                    if ($existing) {
+                        db()->prepare("UPDATE biometric_integrations SET last_test_at = :last_test_at WHERE admin_id = :admin_id AND provider = 'etime_office'")
+                            ->execute(['last_test_at' => now(), 'admin_id' => (int) $admin['id']]);
+                    }
+                    flash('success', 'eTime Office connection verified successfully.');
+                    redirect_to($returnPage);
+                }
+
+                $saved = save_biometric_integration_for_admin((int) $admin['id'], $payload, $existing['password'] ?? null);
+                audit_log('biometric_integration_saved', [
+                    'provider' => 'etime_office',
+                    'enabled' => !empty($saved['is_enabled']),
+                ], (int) $admin['id']);
+                flash('success', 'Biometric integration saved successfully.');
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Biometric integration update failed.', [
+                    'admin_id' => (int) $admin['id'],
+                    'mode' => $mode,
+                ]);
+                flash('error', $exception->getMessage());
             }
             redirect_to($returnPage);
             break;

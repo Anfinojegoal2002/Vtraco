@@ -147,8 +147,8 @@ function insert_employee(array $data, array $rules, array $projectIds = []): arr
     if ($recruiterName === '') {
         throw new RuntimeException('Recruiter name is required.');
     }
-    if (!in_array($recruitedThrough, employee_recruitment_sources(), true)) {
-        throw new RuntimeException('Choose a valid recruited through source.');
+    if ($recruitedThrough === '') {
+        throw new RuntimeException('Recruited through is required.');
     }
     if ($designation === '') {
         throw new RuntimeException('Employee designation is required.');
@@ -328,8 +328,8 @@ function import_employee_row(array $data, array $rules, array $projectIds = []):
     if ($recruiterName === '') {
         throw new RuntimeException('Recruiter name is required.');
     }
-    if (!in_array($recruitedThrough, employee_recruitment_sources(), true)) {
-        throw new RuntimeException('Choose a valid recruited through source.');
+    if ($recruitedThrough === '') {
+        throw new RuntimeException('Recruited through is required.');
     }
     if ($designation === '') {
         throw new RuntimeException('Employee designation is required.');
