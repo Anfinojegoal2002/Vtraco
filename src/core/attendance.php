@@ -1209,6 +1209,10 @@ function attendance_import_status(string $rawStatus, ?string $inTime, ?string $o
 {
     if ($inTime !== null && $outTime !== null) {
         return 'Present';
+        
+        
+        
+        
     }
 
     if ($inTime !== null || $outTime !== null) {
