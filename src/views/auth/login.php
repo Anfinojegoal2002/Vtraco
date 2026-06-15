@@ -132,4 +132,3 @@ function render_login(): void
     render_footer();
 }
 
-

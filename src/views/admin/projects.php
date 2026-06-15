@@ -154,7 +154,7 @@ function render_admin_projects(): void
             <p>Create and manage project colleges and locations from one place. Deactivated projects stay saved, become currently unavailable, and can be activated again later.</p>
         </div>
         <div class="action-bar">
-            <button class="button solid" type="button" data-modal-target="project-type-modal">Add Project</button>
+            <button class="button solid" type="button" data-modal-target="project-modal">Add Project</button>
         </div>
     </section>
 
@@ -381,29 +381,6 @@ function render_admin_projects(): void
             </div>
         </div>
     <?php endif; ?>
-
-    <div class="modal" id="project-type-modal">
-        <div class="modal-card project-type-modal-card">
-            <button class="modal-close" type="button" data-close-modal>&times;</button>
-            <span class="eyebrow">Project Type</span>
-            <h2>Add Project</h2>
-            <p class="hint">Choose who this project is for, then fill the matching project details.</p>
-            <div class="project-type-grid">
-                <button class="project-type-option" type="button" data-switch-modal-target="project-modal">
-                    <strong>Admin Employees</strong>
-                    <span>Create a regular project for admin-side employees and trainers.</span>
-                </button>
-                <button class="project-type-option" type="button" data-switch-modal-target="contractual-project-modal">
-                    <strong>Contractual Employees</strong>
-                    <span>Assign contractual employees with hourly or daily rate setup.</span>
-                </button>
-                <button class="project-type-option" type="button" data-switch-modal-target="vendor-project-modal">
-                    <strong>Vendor</strong>
-                    <span>Create a vendor project with vendor, college, and location details.</span>
-                </button>
-            </div>
-        </div>
-    </div>
 
     <div class="modal <?= $shouldOpenModal ? 'open' : '' ?>" id="project-modal" <?= $shouldOpenModal ? 'data-open-on-load' : '' ?>>
         <div class="modal-card project-modal-card">

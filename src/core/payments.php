@@ -988,7 +988,7 @@ function approved_reimbursement_requests(?int $employeeId = null): array
             FROM employee_reimbursements er
             JOIN users u ON u.id = er.user_id
             WHERE er.admin_id = :admin_id
-              AND er.status IN ("PENDING", "APPROVED", "PARTIALLY PAID")
+              AND er.status IN ("APPROVED", "PARTIALLY PAID")
               AND er.remaining_balance > 0';
     $params = ['admin_id' => (int) $admin['id']];
 

@@ -2,6 +2,11 @@
 
 declare(strict_types=1);
 
+3:23 PM
+
+_
+
+
 namespace Sabberworm\CSS\Value;
 
 use Sabberworm\CSS\OutputFormat;
@@ -10,7 +15,6 @@ use Sabberworm\CSS\Parsing\SourceException;
 use Sabberworm\CSS\Parsing\UnexpectedEOFException;
 use Sabberworm\CSS\Parsing\UnexpectedTokenException;
 use Sabberworm\CSS\ShortClassNameProvider;
-
 use function Safe\preg_match;
 
 /**

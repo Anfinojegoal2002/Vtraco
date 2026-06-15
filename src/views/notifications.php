@@ -40,7 +40,7 @@ function render_notifications(): void
             <strong><?= count($notifications) ?></strong>
             <span>Latest notifications shown</span>
         </div>
-    </section>
+    </section>                       
 
     <div class="spacer"></div>
 
