@@ -908,6 +908,101 @@
             .rules-detail-panel { display: grid; gap: 12px; min-width: 0; }
             .rules-detail-panel h3 { margin: 0; }
             .compact-detail-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); margin-top: 10px; }
+            .employee-detail-modal-card {
+                width: min(1180px, calc(100vw - 36px));
+                max-height: calc(100dvh - 34px);
+                padding: 0;
+                overflow: auto;
+                background: #f8fafc;
+                border-radius: 24px;
+            }
+            .employee-detail-modal-card > .modal-close {
+                top: 20px;
+                right: 20px;
+                background: #e5e7eb;
+                color: #111827;
+                border: 1px solid rgba(15,23,42,0.08);
+            }
+            .employee-detail-hero {
+                display: grid;
+                grid-template-columns: auto minmax(0, 1fr) auto;
+                gap: 18px;
+                align-items: center;
+                padding: 26px 72px 24px 28px;
+                background: #ffffff;
+                border-bottom: 1px solid rgba(15,23,42,0.08);
+            }
+            .employee-detail-avatar {
+                width: 68px;
+                height: 68px;
+                display: grid;
+                place-items: center;
+                border-radius: 18px;
+                background: linear-gradient(135deg, #4f46e5, #0f766e);
+                color: #ffffff;
+                font-weight: 800;
+                font-size: 1.35rem;
+                box-shadow: 0 18px 36px rgba(37,99,235,0.22);
+            }
+            .employee-detail-title { min-width: 0; display: grid; gap: 6px; }
+            .employee-detail-title h2 { margin: 0; font-size: 1.85rem; }
+            .employee-detail-submeta { display: flex; gap: 8px; flex-wrap: wrap; color: #475569; }
+            .employee-detail-submeta span {
+                min-width: 0;
+                max-width: 100%;
+                padding: 5px 9px;
+                border-radius: 999px;
+                background: #f1f5f9;
+                overflow-wrap: anywhere;
+                font-size: 0.82rem;
+                font-weight: 700;
+            }
+            .employee-detail-badges { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+            .employee-detail-modal-card .rules-detail-grid {
+                grid-template-columns: repeat(12, minmax(0, 1fr));
+                gap: 16px;
+                padding: 20px;
+            }
+            .employee-detail-modal-card .rules-detail-panel {
+                grid-column: span 6;
+                gap: 14px;
+                padding: 18px;
+                border-radius: 18px;
+                background: #ffffff;
+                border: 1px solid rgba(15,23,42,0.08);
+                box-shadow: 0 12px 28px rgba(15,23,42,0.05);
+            }
+            .employee-detail-modal-card .rules-detail-panel:nth-child(n + 5) {
+                grid-column: span 12;
+            }
+            .employee-detail-modal-card .rules-detail-panel h3 {
+                font-size: 1.08rem;
+                padding-bottom: 10px;
+                border-bottom: 1px solid rgba(15,23,42,0.08);
+            }
+            .employee-detail-modal-card .compact-detail-grid {
+                grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+                gap: 10px;
+                margin-top: 0;
+            }
+            .employee-detail-modal-card .session-detail-row {
+                min-height: 74px;
+                padding: 12px 14px;
+                border-radius: 12px;
+                background: #f8fafc;
+            }
+            .employee-detail-modal-card .session-detail-row strong {
+                font-size: 0.72rem;
+                letter-spacing: 0.08em;
+            }
+            .employee-detail-modal-card .session-detail-row span {
+                font-size: 0.94rem;
+                line-height: 1.35;
+            }
+            .employee-detail-modal-card .list-item {
+                background: #f8fafc;
+                border: 1px solid rgba(15,23,42,0.08);
+            }
             .project-modal-actions { justify-content: flex-end; }
             .scroll-panel { max-height: 620px; overflow: auto; }
             .attendance-panel { display: grid; gap: 18px; min-height: 0; }
@@ -1608,6 +1703,28 @@
                 .modal { padding: 14px; }
                 .modal-card { width: 100%; max-height: calc(100dvh - 28px); padding: 18px; }
                 .modal-close { right: 12px; top: 12px; }
+                .employee-detail-modal-card { padding: 0; width: 100%; }
+                .employee-detail-modal-card > .modal-close { top: 14px; right: 14px; }
+                .employee-detail-hero {
+                    grid-template-columns: 1fr;
+                    padding: 22px 18px;
+                    gap: 12px;
+                }
+                .employee-detail-avatar { width: 58px; height: 58px; border-radius: 16px; }
+                .employee-detail-title h2 { font-size: 1.45rem; padding-right: 48px; }
+                .employee-detail-badges { justify-content: flex-start; }
+                .employee-detail-modal-card .rules-detail-grid {
+                    grid-template-columns: 1fr;
+                    padding: 14px;
+                }
+                .employee-detail-modal-card .rules-detail-panel,
+                .employee-detail-modal-card .rules-detail-panel:nth-child(n + 5) {
+                    grid-column: span 1;
+                    padding: 14px;
+                }
+                .employee-detail-modal-card .compact-detail-grid {
+                    grid-template-columns: 1fr;
+                }
                 .employee-profile-settings-modal-card {
                     width: 100%;
                     height: calc(100dvh - 28px);

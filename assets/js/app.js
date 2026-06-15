@@ -98,6 +98,15 @@
             }
         }
 
+        function bindModalCloseHandlers(root) {
+            if (!root) {
+                return;
+            }
+            root.querySelectorAll('[data-close-modal]').forEach(button => {
+                button.addEventListener('click', () => closeModal(button.closest('.modal')));
+            });
+        }
+
         function openAttendanceModal(payload) {
             if (payload.context === 'employee' && payload.status === 'Week Off') {
                 return;
@@ -657,7 +666,7 @@
         document.querySelectorAll('[data-attendance]').forEach(button => {
             button.addEventListener('click', () => openAttendanceModal(JSON.parse(button.dataset.attendance)));
         });
-        document.querySelectorAll('[data-close-modal]').forEach(button => button.addEventListener('click', () => closeModal(button.closest('.modal'))));
+        bindModalCloseHandlers(document);
         if (modal) {
             modal.addEventListener('click', event => {
                 if (event.target === modal) {
@@ -665,6 +674,49 @@
                 }
             });
         }
+        document.querySelectorAll('[data-lazy-employee-details]').forEach(button => {
+            button.addEventListener('click', async () => {
+                const employeeId = button.dataset.lazyEmployeeDetails || '';
+                const modalId = button.dataset.modalId || `employee-rules-modal-${employeeId}`;
+                if (document.getElementById(modalId)) {
+                    openModalById(modalId);
+                    return;
+                }
+
+                const originalText = button.textContent;
+                button.disabled = true;
+                button.textContent = 'Loading...';
+                try {
+                    const response = await fetch(`?action=admin_employee_details_modal&employee_id=${encodeURIComponent(employeeId)}`, {
+                        headers: { 'Accept': 'application/json' },
+                    });
+                    const payload = await response.json();
+                    if (!response.ok || !payload.success || !payload.html) {
+                        throw new Error(payload.message || 'Unable to load employee details.');
+                    }
+
+                    const wrapper = document.createElement('div');
+                    wrapper.innerHTML = payload.html;
+                    const loadedModal = wrapper.firstElementChild;
+                    if (!loadedModal) {
+                        throw new Error('Employee details response was empty.');
+                    }
+                    document.body.appendChild(loadedModal);
+                    bindModalCloseHandlers(loadedModal);
+                    loadedModal.addEventListener('click', event => {
+                        if (event.target === loadedModal) {
+                            closeModal(loadedModal);
+                        }
+                    });
+                    openModalById(modalId);
+                } catch (error) {
+                    alert(error.message || 'Unable to load employee details.');
+                } finally {
+                    button.disabled = false;
+                    button.textContent = originalText;
+                }
+            });
+        });
         document.querySelectorAll('[data-modal-target]').forEach(button => {
             button.addEventListener('click', () => openModalById(button.dataset.modalTarget));
         });
@@ -1034,7 +1086,7 @@
         });
         function wireProfilePhoto() {
             const card = document.querySelector('[data-profile-card]');
-            if (!card || !window.localStorage) {
+            if (!card) {
                 return;
             }
 
@@ -1049,7 +1101,6 @@
             const fallback = card.querySelector('[data-profile-fallback]');
             const input = settingsModal.querySelector('[data-profile-photo-input]');
             const status = settingsModal.querySelector('[data-profile-photo-status]');
-            const storageKey = 'vtraco:' + role + '-profile-photo:' + (card.dataset.profileId || 'default');
             const applyPhoto = value => {
                 if (!photo || !fallback) {
                     return;
@@ -1064,15 +1115,6 @@
                     fallback.classList.remove('hidden');
                 }
             };
-
-            try {
-                applyPhoto(localStorage.getItem(storageKey) || '');
-            } catch (error) {
-                if (status) {
-                    status.textContent = 'Browser storage is unavailable on this device.';
-                }
-                return;
-            }
 
             if (!input) {
                 return;
@@ -1098,14 +1140,13 @@
                         return;
                     }
                     try {
-                        localStorage.setItem(storageKey, result);
                         applyPhoto(result);
                         if (status) {
-                            status.textContent = 'Profile photo saved in this browser.';
+                            status.textContent = 'Profile photo selected. Save profile to store it.';
                         }
                     } catch (error) {
                         if (status) {
-                            status.textContent = 'This image is too large to store locally.';
+                            status.textContent = 'Unable to preview this image.';
                         }
                     }
                 };

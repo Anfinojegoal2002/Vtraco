@@ -41,7 +41,7 @@ try {
     if (!$integrations) {
         echo '[' . now() . "] No enabled eTime Office integrations found.\n";
         exit(0);
-    }
+    }  
 
     $previousUserId = $_SESSION['user_id'] ?? null;
     foreach ($integrations as $integration) {

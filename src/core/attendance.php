@@ -2299,7 +2299,7 @@ function parse_attendance_report_csv(string $path, ?string $overrideDate = null,
         )));
         sort($entryDates);
 
-        return [
+        return [        
             'date' => $entryDates[0] ?? $reportDate,
             'dates' => $entryDates,
             'entries' => $monthlyEntries,

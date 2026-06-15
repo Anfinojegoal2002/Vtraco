@@ -26,7 +26,15 @@ function ensure_database_exists(): void
     }
 
     $databaseName = str_replace('`', '``', DB_NAME);
-    db_server()->exec('CREATE DATABASE IF NOT EXISTS `' . $databaseName . '` CHARACTER SET ' . DB_CHARSET . ' COLLATE ' . DB_COLLATION);
+    try {
+        db_server()->exec('CREATE DATABASE IF NOT EXISTS `' . $databaseName . '` CHARACTER SET ' . DB_CHARSET . ' COLLATE ' . DB_COLLATION);
+    } catch (PDOException $exception) {
+        $sqlState = (string) $exception->getCode();
+        $mysqlCode = (string) ($exception->errorInfo[1] ?? '');
+        if (!in_array($sqlState, ['42000', 'HY000'], true) && !in_array($mysqlCode, ['1044', '1045'], true)) {
+            throw $exception;
+        }
+    }
     $ensured = true;
 }
 

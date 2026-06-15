@@ -77,6 +77,64 @@ function employee_offer_letter_filename(array $employee): string
     return 'offer_letter_' . $name . '_' . date('Ymd_His') . '.pdf';
 }
 
+function employee_is_contractual_assignment_target(array $employee): bool
+{
+    $role = strtolower(trim((string) ($employee['role'] ?? '')));
+    $employeeType = strtolower(trim((string) ($employee['employee_type'] ?? '')));
+    $designation = strtolower(trim((string) ($employee['designation'] ?? '')));
+
+    return $role === 'corporate_employee'
+        || $employeeType === 'corporate'
+        || $designation === 'contractual';
+}
+
+function contractual_assignment_confirmation_admin(array $admin): array
+{
+    $adminId = (int) ($admin['id'] ?? 0);
+    if ($adminId <= 0) {
+        return $admin;
+    }
+
+    $stmt = db()->prepare('SELECT * FROM users WHERE id = :id AND role IN ("admin", "freelancer", "external_vendor") LIMIT 1');
+    $stmt->execute(['id' => $adminId]);
+    $row = $stmt->fetch();
+
+    return $row ?: $admin;
+}
+
+function publish_contractual_assignment_confirmations(array $employee, array $admin, array $projectIds, array $projectRanges): array
+{
+    $summary = [
+        'processed' => 0,
+        'skipped' => 0,
+        'errors' => [],
+    ];
+
+    if (!employee_is_contractual_assignment_target($employee)) {
+        return $summary;
+    }
+
+    $assignmentProjectIds = normalize_project_assignment_ids($projectIds);
+    if ($assignmentProjectIds === []) {
+        return $summary;
+    }
+
+    $letterAdmin = contractual_assignment_confirmation_admin($admin);
+    $adminId = current_admin_id() ?? (int) ($letterAdmin['id'] ?? 0);
+    foreach ($assignmentProjectIds as $projectId) {
+        $project = project_by_id($projectId, $adminId > 0 ? $adminId : null);
+        if (!$project) {
+            $summary['skipped']++;
+            $summary['errors'][] = 'Project not found for confirmation letter.';
+            continue;
+        }
+
+        $summary['processed']++;
+    }
+
+    return $summary;
+}
+
 function employee_offer_letter_html(array $employee, string $employerName): string
 {
     $offerName = trim((string) ($employee['offer_letter_name'] ?? '')) ?: (string) ($employee['name'] ?? '');
@@ -391,9 +449,6 @@ function employee_profile_save_payload(array $employee): array
     if (role_email_exists((string) $employee['role'], $payload['email'], (int) $employee['id'])) {
         throw new RuntimeException('This mail ID is already assigned.');
     }
-    if (!valid_employee_designation($payload['designation'])) {
-        throw new RuntimeException('Choose a valid employee designation.');
-    }
     $payload['shift'] = normalize_shift_selection($payload['shift']);
     if ($payload['shift'] === '') {
         throw new RuntimeException('Shift is required.');
@@ -607,7 +662,7 @@ function handle_post_action(string $action): void
     $actionUser = current_user();
     if ($actionUser && employee_profile_requires_completion($actionUser) && !in_array($action, ['employee_profile_submit', 'employee_profile_update', 'logout'], true)) {
         flash('info', 'Complete profile verification before using the dashboard.');
-        redirect_to(home_page_for_user($actionUser));
+        redirect_to('employee_profile_completion');
     }
 
     switch ($action) {
@@ -1040,6 +1095,55 @@ function handle_post_action(string $action): void
             }
             audit_log('vendor_status_updated', ['status' => $status], $vendorId);
             flash('success', $status === 'ACTIVE' ? 'Vendor account activated successfully.' : 'Vendor account marked inactive successfully.');
+            redirect_to($redirectPage, $redirectParams);
+            break;
+
+        case 'admin_vendor_project_assign':
+            $admin = require_role('admin');
+            $vendorId = (int) ($_POST['vendor_id'] ?? 0);
+            $redirectPage = trim((string) ($_POST['redirect_page'] ?? 'admin_employees'));
+            $redirectPage = in_array($redirectPage, ['admin_vendors', 'admin_employees'], true) ? $redirectPage : 'admin_employees';
+            $redirectParams = $redirectPage === 'admin_employees' ? ['type' => 'vendor'] : [];
+            $projectIds = array_values(array_unique(array_filter(array_map('intval', (array) ($_POST['project_ids'] ?? [])))));
+
+            try {
+                $vendorStmt = db()->prepare("SELECT id, name, company_name FROM users WHERE id = :id AND role = 'external_vendor' LIMIT 1");
+                $vendorStmt->execute(['id' => $vendorId]);
+                $vendor = $vendorStmt->fetch();
+                if (!$vendor) {
+                    throw new RuntimeException('Select a valid vendor account.');
+                }
+
+                $vendorName = trim((string) (($vendor['company_name'] ?? '') ?: ($vendor['name'] ?? '')));
+                $adminId = (int) (current_admin_id() ?? ($admin['id'] ?? 0));
+                $pdo = db();
+                $pdo->beginTransaction();
+                $pdo->prepare('UPDATE projects SET vendor_id = NULL, vendor_name = NULL WHERE admin_id = :admin_id AND vendor_id = :vendor_id')
+                    ->execute([
+                        'admin_id' => $adminId,
+                        'vendor_id' => $vendorId,
+                    ]);
+
+                if ($projectIds !== []) {
+                    $placeholders = implode(',', array_fill(0, count($projectIds), '?'));
+                    $params = array_merge([$vendorId, $vendorName, $adminId], $projectIds);
+                    $pdo->prepare("UPDATE projects SET vendor_id = ?, vendor_name = ? WHERE admin_id = ? AND id IN ($placeholders)")
+                        ->execute($params);
+                }
+
+                $pdo->commit();
+                audit_log('vendor_project_assignment_updated', [
+                    'project_ids' => $projectIds,
+                ], $vendorId);
+                flash('success', 'Vendor project assignment saved successfully.');
+            } catch (Throwable $exception) {
+                if (db()->inTransaction()) {
+                    db()->rollBack();
+                }
+                report_exception($exception, 'Vendor project assignment failed.', ['vendor_id' => $vendorId]);
+                flash('error', $exception->getMessage() ?: 'Unable to save vendor project assignment.');
+            }
+
             redirect_to($redirectPage, $redirectParams);
             break;
 
@@ -1513,7 +1617,7 @@ function handle_post_action(string $action): void
             break;
 
         case 'admin_employee_project_assign':
-            require_power_team_access(['admin', 'freelancer', 'external_vendor']);
+            $admin = require_power_team_access(['admin', 'freelancer', 'external_vendor']);
 
             $employeeId = (int) ($_POST['user_id'] ?? 0);
             $employee = employee_by_id($employeeId);
@@ -1534,10 +1638,21 @@ function handle_post_action(string $action): void
                     $_POST['project_daily_salary'] ?? []
                 );
                 save_employee_project_assignments($employeeId, $projectIds, $projectRanges);
+                $confirmationSummary = publish_contractual_assignment_confirmations($employee, $admin, $projectIds, $projectRanges);
                 audit_log('employee_project_assignment_updated', [
                     'project_ids' => $projectIds,
+                    'confirmation_processed' => $confirmationSummary['processed'] ?? 0,
+                    'confirmation_skipped' => $confirmationSummary['skipped'] ?? 0,
                 ], $employeeId);
-                flash('success', 'Project assignment saved successfully.');
+                $message = 'Project assignment saved successfully.';
+                if (($confirmationSummary['processed'] ?? 0) > 0) {
+                    $published = (int) ($confirmationSummary['processed'] ?? 0);
+                    $message .= ' Project confirmation letter available in the contractual employee dashboard for ' . $published . ' project' . ($published === 1 ? '' : 's') . '.';
+                    if (($confirmationSummary['skipped'] ?? 0) > 0) {
+                        $message .= ' ' . (int) $confirmationSummary['skipped'] . ' skipped.';
+                    }
+                }
+                flash('success', $message);
             } catch (Throwable $exception) {
                 report_exception($exception, 'Team project assignment failed.', ['employee_id' => $employeeId]);
                 flash('error', $exception->getMessage() ?: 'Unable to save project assignment.');
@@ -1626,7 +1741,7 @@ function handle_post_action(string $action): void
                 ], null);
                 $successMessage = $projectId > 0 ? 'Project updated successfully.' : 'Project added successfully.';
                 if ($isContractualProject) {
-                    flash('success', 'Contractual project added successfully. Review the confirmation letter before sending it to the contractual employee.');
+                    flash('success', 'Contractual project added successfully. Review the confirmation letter before publishing it to the contractual employee dashboard.');
                     redirect_to('admin_projects', ['stage' => 'contractual_confirm', 'project_id' => $savedProjectId]);
                 } elseif ($isVendorProject) {
                     $successMessage = 'Vendor project added successfully.';
@@ -1652,39 +1767,29 @@ function handle_post_action(string $action): void
                 if (!$project) {
                     throw new RuntimeException('Project not found.');
                 }
-                $editedLetters = [];
-                foreach (($_POST['confirmation_html'] ?? []) as $employeeId => $letterHtml) {
-                    $employeeId = (int) $employeeId;
-                    if ($employeeId > 0 && is_string($letterHtml)) {
-                        $editedLetters[$employeeId] = $letterHtml;
-                    }
-                }
-                $summary = send_contractual_project_confirmation_letters($project, $admin, $editedLetters);
-                $processedLetters = (int) ($summary['processed'] ?? 0);
+                $assignmentStmt = db()->prepare("SELECT COUNT(*) FROM employee_project_assignments a
+                    INNER JOIN users u ON u.id = a.user_id
+                    WHERE a.project_id = :project_id
+                      AND u.admin_id = :admin_id
+                      AND (u.role = 'corporate_employee' OR u.employee_type = 'corporate')");
+                $assignmentStmt->execute([
+                    'project_id' => $projectId,
+                    'admin_id' => (int) $admin['id'],
+                ]);
+                $processedLetters = (int) $assignmentStmt->fetchColumn();
                 if ($processedLetters <= 0) {
                     throw new RuntimeException('No contractual employees are assigned to this project.');
                 }
 
-                $message = 'Project confirmation letter processed for ' . $processedLetters . ' contractual employee' . ($processedLetters === 1 ? '' : 's') . '.';
-                $sentLetters = (int) ($summary['sent'] ?? 0);
-                $loggedLetters = (int) ($summary['logged'] ?? 0);
-                if ($sentLetters > 0) {
-                    $message .= ' Sent: ' . $sentLetters . '.';
-                }
-                if ($loggedLetters > 0) {
-                    $message .= ' Saved in email log: ' . $loggedLetters . '.';
-                }
-                audit_log('contractual_project_confirmation_sent', [
+                $message = 'Project confirmation letter is available in the contractual employee dashboard for ' . $processedLetters . ' contractual employee' . ($processedLetters === 1 ? '' : 's') . '.';
+                audit_log('contractual_project_confirmation_published', [
                     'project_id' => $projectId,
                     'processed' => $processedLetters,
-                    'sent' => $sentLetters,
-                    'logged' => $loggedLetters,
-                    'skipped' => (int) ($summary['skipped'] ?? 0),
                 ], null);
                 flash('success', $message);
             } catch (Throwable $exception) {
-                report_exception($exception, 'Contractual project confirmation send failed.', ['project_id' => $projectId]);
-                flash('error', $exception->getMessage() ?: 'Unable to send the confirmation letter.');
+                report_exception($exception, 'Contractual project confirmation publish failed.', ['project_id' => $projectId]);
+                flash('error', $exception->getMessage() ?: 'Unable to publish the confirmation letter.');
                 if ($projectId > 0) {
                     redirect_to('admin_projects', ['stage' => 'contractual_confirm', 'project_id' => $projectId]);
                 }
@@ -2018,8 +2123,17 @@ function handle_post_action(string $action): void
                             ]);
                         $employee['shift'] = $resolvedShift;
                     }
-                    save_employee_rules((int) $employee['id'], $rules);
-                    $currentRules = $rules;
+                    if ($allocationType === 'time') {
+                        $existingRules = employee_rules((int) $employee['id']);
+                        foreach (['project_session_from', 'project_session_to', 'shift_from', 'shift_to', 'employee_from', 'employee_to'] as $timeKey) {
+                            $existingRules[$timeKey] = (string) ($rules[$timeKey] ?? '');
+                        }
+                        save_employee_rules((int) $employee['id'], $existingRules);
+                        $currentRules = $existingRules;
+                    } else {
+                        save_employee_rules((int) $employee['id'], $rules);
+                        $currentRules = $rules;
+                    }
                 }
                 if ($allocationType === 'project' || $allocationType === 'all') {
                     save_employee_project_assignments((int) $employee['id'], $projectIds, $projectRanges);
@@ -2352,14 +2466,27 @@ function handle_post_action(string $action): void
                     db()->prepare('UPDATE users SET ' . implode(', ', $setParts) . ' WHERE id = :id AND role = :role')
                         ->execute($updates);
                 } else {
-                    db()->prepare('UPDATE users SET name = :name, email = :email, phone = :phone WHERE id = :id AND role = :role')
-                        ->execute([
-                            'id' => (int) $admin['id'],
-                            'role' => $admin['role'],
-                            'name' => $name,
-                            'email' => $email,
-                            'phone' => $phone,
-                        ]);
+                    $updates = [
+                        'id' => (int) $admin['id'],
+                        'role' => $admin['role'],
+                        'name' => $name,
+                        'email' => $email,
+                        'phone' => $phone,
+                    ];
+                    $profilePhotoFile = $_FILES['profile_photo'] ?? [];
+                    if ((int) ($profilePhotoFile['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+                        $stored = store_vendor_profile_upload($profilePhotoFile, (int) $admin['id'], 'profile_photo');
+                        $updates['profile_photo_path'] = $stored['path'];
+                        $updates['profile_photo_name'] = $stored['name'];
+                    }
+
+                    $setParts = ['name = :name', 'email = :email', 'phone = :phone'];
+                    if (isset($updates['profile_photo_path'])) {
+                        $setParts[] = 'profile_photo_path = :profile_photo_path';
+                        $setParts[] = 'profile_photo_name = :profile_photo_name';
+                    }
+                    db()->prepare('UPDATE users SET ' . implode(', ', $setParts) . ' WHERE id = :id AND role = :role')
+                        ->execute($updates);
                 }
                 audit_log('admin_profile_updated', [
                     'email' => $email,
@@ -3463,6 +3590,39 @@ function handle_post_action(string $action): void
             redirect_to('employee_payments', ['payment_date' => $requestDate]);
             break;
 
+        case 'employee_project_confirmation_download':
+            $employee = require_roles(['employee', 'corporate_employee']);
+            if (!employee_is_contractual_assignment_target($employee)) {
+                throw new RuntimeException('Project confirmation download is available only for contractual employees.');
+            }
+
+            $projectId = max(0, (int) ($_POST['project_id'] ?? 0));
+            $matchedProject = null;
+            foreach (assigned_projects_for_employee((int) ($employee['id'] ?? 0)) as $project) {
+                if ((int) ($project['id'] ?? 0) === $projectId) {
+                    $matchedProject = $project;
+                    break;
+                }
+            }
+            if (!$matchedProject) {
+                throw new RuntimeException('Project confirmation letter not found.');
+            }
+
+            $admin = contractual_assignment_confirmation_admin(['id' => (int) ($employee['admin_id'] ?? 0)]);
+            $letterHtml = contractual_project_confirmation_letter_html($employee, $matchedProject, $matchedProject, $admin);
+            $pdf = contractual_project_confirmation_pdf($employee, $matchedProject, $matchedProject, $admin, $letterHtml);
+            if ($pdf === '') {
+                throw new RuntimeException('Unable to generate the project confirmation PDF.');
+            }
+
+            $projectName = preg_replace('/[^a-z0-9]+/i', '_', strtolower((string) ($matchedProject['project_name'] ?? 'project'))) ?: 'project';
+            $employeeName = preg_replace('/[^a-z0-9]+/i', '_', strtolower((string) (($employee['emp_id'] ?? '') ?: ($employee['name'] ?? 'employee')))) ?: 'employee';
+            header('Content-Type: application/pdf');
+            header('Content-Disposition: attachment; filename="project_confirmation_' . trim($projectName, '_') . '_' . trim($employeeName, '_') . '.pdf"');
+            header('Content-Length: ' . strlen($pdf));
+            echo $pdf;
+            exit;
+
         case 'mark_notifications_read':
             $user = require_roles(['admin', 'employee', 'corporate_employee', 'external_vendor', 'freelancer']);
             mark_notifications_read((int) $user['id']);
@@ -3489,6 +3649,24 @@ function handle_post_action(string $action): void
             // This case doesn't redirect, it just lets the page render with POST data
             break;
 
+        case 'admin_employee_details_modal':
+            require_power_team_access(['admin', 'freelancer', 'external_vendor']);
+            $employeeId = max(0, (int) ($_GET['employee_id'] ?? $_POST['employee_id'] ?? 0));
+            $employee = $employeeId > 0 ? employee_by_id($employeeId) : null;
+            if (!$employee) {
+                render_json(['success' => false, 'message' => 'Employee not found.'], 404);
+            }
+            ob_start();
+            render_employee_rules_detail_modal(
+                $employee,
+                employee_rules($employeeId),
+                assigned_projects_for_employee($employeeId),
+                'employee-rules-modal-' . $employeeId
+            );
+            $html = (string) ob_get_clean();
+            render_json(['success' => true, 'html' => $html]);
+            break;
+
         case 'export_reports_csv':
             require_role('admin');
             $filters = [
@@ -3498,7 +3676,7 @@ function handle_post_action(string $action): void
                 'to_date' => $_POST['to_date'] ?? '',
             ];
             $data = get_attendance_report_data($filters);
-            export_report_csv($data);
+            export_report_csv($data, $filters);
             break;
 
         case 'export_reports_pdf':
@@ -3510,7 +3688,7 @@ function handle_post_action(string $action): void
                 'to_date' => $_POST['to_date'] ?? '',
             ];
             $data = get_attendance_report_data($filters);
-            export_report_pdf($data);
+            export_report_pdf($data, $filters);
             break;
 
         case 'export_reimbursements_excel':

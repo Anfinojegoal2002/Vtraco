@@ -21,7 +21,7 @@ function etime_webhook_request_secret(): string
         ?? $_GET['secret']
         ?? ''
     ));
-}
+}   
 
 function verify_etime_webhook_request(): void
 {

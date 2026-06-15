@@ -393,12 +393,9 @@ function contractual_employee_confirmation_docx(array $employee): string
     ], $admin);
 }
 
-function contractual_confirmation_template_preview_html(array $employee, array $project, array $assignment, array $admin): string
+function contractual_confirmation_terms(): array
 {
-    $employeeName = trim((string) ($employee['name'] ?? 'Employee')) ?: 'Employee';
-    $empId = trim((string) ($employee['emp_id'] ?? ''));
-    $adminName = trim((string) ($admin['name'] ?? $admin['representative_name'] ?? '')) ?: 'Project Coordinator';
-    $terms = [
+    return [
         'Training Quality & Performance' => 'Trainers are expected to deliver sessions professionally and effectively. Negative feedback, unsuitable conduct, technical concerns, or delivery issues may result in withheld payment.',
         'Anti-Harassment Policy' => 'Karyoun Innovation maintains a zero-tolerance policy towards sexual harassment, discrimination, misconduct, and unprofessional behavior.',
         'Travel & Transportation Responsibility' => 'Trainers must ensure timely arrival for travel arrangements booked by the client or Karyoun Innovation. Missed transport due to personal reasons will not be reimbursed.',
@@ -411,15 +408,38 @@ function contractual_confirmation_template_preview_html(array $employee, array $
         'Payment Terms' => 'Payments will be processed within 15 working days after successful completion, subject to required documents and approvals.',
         'Session Tracker & Reporting Compliance' => 'Session tracker, attendance, topics, learner progress, assessments, and requested reporting must be updated accurately and on time.',
     ];
+}
+
+function contractual_confirmation_terms_html(): string
+{
+    return '<section class="karyoun-letter-preview" style="margin-top:24px;">'
+        . '<header><h3>KARYOUN INNOVATION</h3><span>Training & Development Solutions</span><h4>FREELANCE TRAINER GUIDELINES<br>TERMS &amp; CONDITIONS</h4></header>'
+        . '<p>By accepting a training assignment from Karyoun Innovation, you agree to comply with the following terms and conditions:</p>'
+        . '<ol class="karyoun-terms-list">' . contractual_confirmation_terms_list_html() . '</ol>'
+        . '<p><strong>Declaration:</strong> I hereby acknowledge that I have read, understood, and agreed to comply with all the above terms and conditions of Karyoun Innovation.</p>'
+        . '</section>';
+}
+
+function contractual_confirmation_terms_list_html(): string
+{
     $termsHtml = '';
-    foreach ($terms as $title => $copy) {
+    foreach (contractual_confirmation_terms() as $title => $copy) {
         $termsHtml .= '<li><strong>' . h($title) . '</strong><p>' . h($copy) . '</p></li>';
     }
+
+    return $termsHtml;
+}
+
+function contractual_confirmation_template_preview_html(array $employee, array $project, array $assignment, array $admin): string
+{
+    $employeeName = trim((string) ($employee['name'] ?? 'Employee')) ?: 'Employee';
+    $empId = trim((string) ($employee['emp_id'] ?? ''));
+    $adminName = trim((string) ($admin['name'] ?? $admin['representative_name'] ?? '')) ?: 'Project Coordinator';
 
     return '<article class="karyoun-letter-preview">'
         . '<header><h3>KARYOUN INNOVATION</h3><span>Training & Development Solutions</span><h4>FREELANCE TRAINER GUIDELINES<br>TERMS &amp; CONDITIONS</h4></header>'
         . '<p>By accepting a training assignment from Karyoun Innovation, you agree to comply with the following terms and conditions:</p>'
-        . '<ol class="karyoun-terms-list">' . $termsHtml . '</ol>'
+        . '<ol class="karyoun-terms-list">' . contractual_confirmation_terms_list_html() . '</ol>'
         . '<p><strong>Declaration:</strong> I hereby acknowledge that I have read, understood, and agreed to comply with all the above terms and conditions of Karyoun Innovation.</p>'
         . '<div class="karyoun-sign-grid"><div><strong>Authorized Signatory - Karyoun Innovation</strong><span data-signature-slot>Signature: ____________________</span><span>Name: ' . h($adminName) . '</span><span>Date: ' . h(date('d-m-Y')) . '</span><span>Seal / Stamp:</span></div><div><strong>Trainer / Employee Acknowledgement</strong><span data-trainer-signature-slot>Signature: ____________________</span><span>Name: ' . h($employeeName) . '</span><span>Date: ' . h(date('d-m-Y')) . '</span><span>Place: ________________________</span><span>EMP ID: ' . h($empId !== '' ? $empId : '-') . '</span></div></div>'
         . '</article>';
@@ -459,6 +479,7 @@ function contractual_project_confirmation_letter_html(array $employee, array $pr
         . '<p>This letter confirms that you have been assigned to the following contractual project by ' . h($adminName) . '.</p>'
         . '<table style="border-collapse:collapse;width:100%;max-width:720px;margin:14px 0;">' . $detailRows . '</table>'
         . '<p>Please follow the assigned project schedule and submit your attendance/project records in V Traco as required.</p>'
+        . contractual_confirmation_terms_html()
         . '<p>Regards,<br><strong>' . h($adminName) . '</strong></p>'
         . '</div>';
 }

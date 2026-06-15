@@ -193,8 +193,14 @@ function report_photo_label_from_row(array $row): string
 /**
  * Exports report data to CSV.
  */
-function export_report_csv(array $data): void
+function export_report_csv(array $data, array $filters = []): void
 {
+    $month = report_calendar_month_from_filters($filters);
+    $employees = $month !== '' ? report_calendar_employees_from_filters($filters) : [];
+    if ($month !== '' && $employees !== []) {
+        export_report_calendar_csv($month, $employees);
+    }
+
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename=attendance_report_' . date('Ymd_His') . '.csv');
 
@@ -224,13 +230,301 @@ function export_report_csv(array $data): void
     exit;
 }
 
+function export_report_calendar_csv(string $month, array $employees): void
+{
+    [$start] = month_bounds($month);
+    $monthLabel = $start->format('F Y');
+    $monthShort = strtoupper($start->format('M'));
+
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename=attendance_calendar_' . date('Ymd_His') . '.csv');
+
+    $output = fopen('php://output', 'w');
+    foreach ($employees as $employee) {
+        $monthAttendance = month_attendance_for_user((int) ($employee['id'] ?? 0), $month);
+        $counts = attendance_counts($monthAttendance);
+        $offset = (int) $start->format('w');
+        $cells = [];
+        for ($i = 0; $i < $offset; $i++) {
+            $cells[] = null;
+        }
+        foreach ($monthAttendance as $date => $entry) {
+            $cells[] = ['date' => $date, 'entry' => $entry];
+        }
+        while (count($cells) % 7 !== 0) {
+            $cells[] = null;
+        }
+
+        fputcsv($output, ['Track Attendance Calendar']);
+        fputcsv($output, [
+            'Employee',
+            (string) ($employee['name'] ?? 'Employee'),
+            'Emp ID',
+            (string) (($employee['emp_id'] ?? '') ?: '-'),
+            'Month',
+            $monthLabel,
+        ]);
+        fputcsv($output, ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
+
+        foreach (array_chunk($cells, 7) as $week) {
+            $row = [];
+            foreach ($week as $cell) {
+                if ($cell === null) {
+                    $row[] = '';
+                    continue;
+                }
+
+                $entry = $cell['entry'];
+                $record = is_array($entry['record'] ?? null) ? $entry['record'] : [];
+                $status = (string) ($record['status'] ?? '');
+                if (!empty($record['sandwich_week_off_absent'])) {
+                    $status = 'Absent';
+                }
+                if ($status === 'Pending') {
+                    $status = 'Half Day';
+                }
+                $times = attendance_resolved_work_times($record, is_array($entry['sessions'] ?? null) ? $entry['sessions'] : []);
+                $row[] = $monthShort . '-' . (int) date('j', strtotime((string) $cell['date']))
+                    . "\nStatus: " . ($status !== '' ? $status : '-')
+                    . "\nLog in: " . report_calendar_time($times['in_time'] ?? null)
+                    . "\nLogout: " . report_calendar_time($times['out_time'] ?? null)
+                    . "\nProject: " . report_calendar_project_label($entry);
+            }
+            fputcsv($output, $row);
+        }
+
+        fputcsv($output, []);
+        fputcsv($output, [
+            'Present',
+            (string) ($counts['present'] ?? 0),
+            'Half Day',
+            (string) ($counts['half_day'] ?? 0),
+            'Absent',
+            (string) ($counts['absent'] ?? 0),
+            'Working Days',
+            (string) ($counts['working_days'] ?? 0),
+        ]);
+        fputcsv($output, []);
+        fputcsv($output, []);
+    }
+
+    fclose($output);
+    exit;
+}
+
 /**
  * Exports report data to PDF using Dompdf.
  */
-function export_report_pdf(array $data): void
+function report_calendar_month_from_filters(array $filters): string
+{
+    $fromDate = (string) ($filters['from_date'] ?? '');
+    $toDate = (string) ($filters['to_date'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $fromDate) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $toDate)) {
+        return '';
+    }
+    if (substr($fromDate, 0, 7) !== substr($toDate, 0, 7)) {
+        return '';
+    }
+
+    return substr($fromDate, 0, 7);
+}
+
+function report_calendar_employees_from_filters(array $filters): array
+{
+    if (!empty($filters['project_ids'])) {
+        return [];
+    }
+
+    $employeeIds = array_values(array_unique(array_filter(array_map('intval', (array) ($filters['employee_ids'] ?? [])))));
+    if ($employeeIds === []) {
+        return employees();
+    }
+
+    $selected = [];
+    foreach (employees() as $employee) {
+        if (in_array((int) ($employee['id'] ?? 0), $employeeIds, true)) {
+            $selected[] = $employee;
+        }
+    }
+
+    return $selected;
+}
+
+function report_calendar_time(?string $value): string
+{
+    $value = trim((string) $value);
+    if ($value === '') {
+        return '-';
+    }
+
+    $timestamp = strtotime($value);
+    return $timestamp !== false ? date('h:i A', $timestamp) : $value;
+}
+
+function report_calendar_status_class(string $status): string
+{
+    $normalized = strtolower(str_replace(' ', '-', trim($status)));
+    return in_array($normalized, ['present', 'half-day', 'absent', 'week-off', 'leave'], true) ? $normalized : 'blank';
+}
+
+function report_calendar_project_label(array $entry): string
+{
+    $sessions = is_array($entry['sessions'] ?? null) ? $entry['sessions'] : [];
+    if ($sessions === []) {
+        return '-';
+    }
+
+    $labels = [];
+    foreach ($sessions as $session) {
+        $label = trim((string) (($session['college_name'] ?? '') ?: ($session['session_name'] ?? '') ?: ($session['location'] ?? '')));
+        if ($label === '' && !empty($session['project_id'])) {
+            $label = 'Project #' . (int) $session['project_id'];
+        }
+        if ($label !== '') {
+            $labels[$label] = $label;
+        }
+    }
+
+    return $labels ? implode(', ', array_slice(array_values($labels), 0, 2)) : '-';
+}
+
+function report_calendar_pdf_html(array $filters): string
+{
+    $month = report_calendar_month_from_filters($filters);
+    $employees = $month !== '' ? report_calendar_employees_from_filters($filters) : [];
+    if ($month === '' || $employees === []) {
+        return '';
+    }
+
+    [$start] = month_bounds($month);
+    $monthLabel = $start->format('F Y');
+    $monthShort = strtoupper($start->format('M'));
+
+    ob_start();
+    ?>
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            @page { margin: 18px; }
+            body { font-family: DejaVu Sans, Arial, sans-serif; color: #111827; font-size: 10px; }
+            .employee-sheet { page-break-after: always; }
+            .employee-sheet:last-child { page-break-after: auto; }
+            .sheet-head { margin-bottom: 10px; }
+            .sheet-head h1 { margin: 0 0 4px; font-size: 18px; color: #172554; }
+            .sheet-head p { margin: 0; color: #475569; }
+            .legend { margin: 8px 0 10px; }
+            .legend span { display: inline-block; margin-right: 10px; }
+            .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 4px; vertical-align: middle; border: 1px solid #94a3b8; }
+            table.calendar { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1px solid #9ca3af; }
+            .calendar-title { border: 1px solid #9ca3af; padding: 5px 6px; font-weight: 700; text-align: left; color: #000; background: #fff; }
+            .weekday { border: 1px solid #9ca3af; padding: 4px 6px; text-transform: uppercase; font-weight: 700; color: #000; background: #fff; }
+            .day { height: 82px; border: 1px solid #9ca3af; padding: 5px 6px; vertical-align: top; color: #000; overflow: hidden; }
+            .day.blank { background: #fff; }
+            .day.present { background: #34a853; }
+            .day.half-day { background: #fbbc04; }
+            .day.absent { background: #ff1f1f; }
+            .day.week-off, .day.leave { background: #1111ff; color: #fff; }
+            .date { display: block; font-size: 11px; font-weight: 800; margin-bottom: 3px; color: inherit; }
+            .line { display: block; font-size: 8.5px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: inherit; }
+            .summary { margin-top: 10px; width: 100%; border-collapse: collapse; }
+            .summary td { border: 1px solid #cbd5e1; padding: 6px; }
+            .summary strong { display: block; font-size: 12px; color: #172554; }
+        </style>
+    </head>
+    <body>
+        <?php foreach ($employees as $employee): ?>
+            <?php
+                $monthAttendance = month_attendance_for_user((int) ($employee['id'] ?? 0), $month);
+                $counts = attendance_counts($monthAttendance);
+                $offset = (int) $start->format('w');
+                $cells = [];
+                for ($i = 0; $i < $offset; $i++) {
+                    $cells[] = null;
+                }
+                foreach ($monthAttendance as $date => $entry) {
+                    $cells[] = ['date' => $date, 'entry' => $entry];
+                }
+                while (count($cells) % 7 !== 0) {
+                    $cells[] = null;
+                }
+            ?>
+            <section class="employee-sheet">
+                <div class="sheet-head">
+                    <h1>Track Attendance Calendar</h1>
+                    <p><?= h((string) ($employee['name'] ?? 'Employee')) ?> (<?= h((string) (($employee['emp_id'] ?? '') ?: '-')) ?>) - <?= h($monthLabel) ?></p>
+                </div>
+                <div class="legend">
+                    <span><i class="swatch" style="background:#34a853;"></i>Present</span>
+                    <span><i class="swatch" style="background:#ff1f1f;"></i>Absent</span>
+                    <span><i class="swatch" style="background:#fbbc04;"></i>Half Day</span>
+                    <span><i class="swatch" style="background:#1111ff;"></i>Week Off / Leave</span>
+                </div>
+                <table class="calendar">
+                    <tr><th class="calendar-title" colspan="7">ACTUAL WORK TIME</th></tr>
+                    <tr>
+                        <?php foreach (['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as $weekday): ?>
+                            <th class="weekday"><?= h($weekday) ?></th>
+                        <?php endforeach; ?>
+                    </tr>
+                    <?php foreach (array_chunk($cells, 7) as $week): ?>
+                        <tr>
+                            <?php foreach ($week as $cell): ?>
+                                <?php if ($cell === null): ?>
+                                    <td class="day blank"></td>
+                                <?php else: ?>
+                                    <?php
+                                        $entry = $cell['entry'];
+                                        $record = is_array($entry['record'] ?? null) ? $entry['record'] : [];
+                                        $status = (string) ($record['status'] ?? '');
+                                        if (!empty($record['sandwich_week_off_absent'])) {
+                                            $status = 'Absent';
+                                        }
+                                        if ($status === 'Pending') {
+                                            $status = 'Half Day';
+                                        }
+                                        $times = attendance_resolved_work_times($record, is_array($entry['sessions'] ?? null) ? $entry['sessions'] : []);
+                                    ?>
+                                    <td class="day <?= h(report_calendar_status_class($status)) ?>">
+                                        <span class="date"><?= h($monthShort . '-' . (int) date('j', strtotime((string) $cell['date']))) ?></span>
+                                        <span class="line">log in: <?= h(report_calendar_time($times['in_time'] ?? null)) ?></span>
+                                        <span class="line">logout: <?= h(report_calendar_time($times['out_time'] ?? null)) ?></span>
+                                        <span class="line">project: <?= h(report_calendar_project_label($entry)) ?></span>
+                                    </td>
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+                        </tr>
+                    <?php endforeach; ?>
+                </table>
+                <table class="summary">
+                    <tr>
+                        <td><strong><?= h((string) ($counts['present'] ?? 0)) ?></strong>Present</td>
+                        <td><strong><?= h((string) ($counts['half_day'] ?? 0)) ?></strong>Half Day</td>
+                        <td><strong><?= h((string) ($counts['absent'] ?? 0)) ?></strong>Absent</td>
+                        <td><strong><?= h((string) ($counts['working_days'] ?? 0)) ?></strong>Working Days</td>
+                    </tr>
+                </table>
+            </section>
+        <?php endforeach; ?>
+    </body>
+    </html>
+    <?php
+    return (string) ob_get_clean();
+}
+
+function export_report_pdf(array $data, array $filters = []): void
 {
     require_once __DIR__ . '/../../vendor/autoload.php';
     $dompdf = new \Dompdf\Dompdf();
+    $calendarHtml = report_calendar_pdf_html($filters);
+    if ($calendarHtml !== '') {
+        $dompdf->loadHtml($calendarHtml);
+        $dompdf->setPaper('A4', 'landscape');
+        $dompdf->render();
+        $dompdf->stream('attendance_calendar_' . date('Ymd_His') . '.pdf');
+        exit;
+    }
+
     $canEmbedPhotos = extension_loaded('gd');
 
     ob_start();
