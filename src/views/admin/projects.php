@@ -248,95 +248,138 @@ function render_admin_projects(): void
                 <button class="modal-close" type="button" data-close-modal>&times;</button>
                 <span class="eyebrow">Assigned Trainers</span>
                 <h2><?= h((string) ($project['project_name'] ?? 'Project')) ?></h2>
-                <p class="hint"><?= h((string) (($project['college_name'] ?? '') ?: '-')) ?> | <?= h((string) (($project['location'] ?? '') ?: '-')) ?></p>
-                <h3>Currently Assigned</h3>
-                <?php if ($assignedTrainers): ?>
-                    <div class="project-trainer-list">
-                        <div class="project-trainer-list-head" aria-hidden="true">
-                            <span>Emp ID</span>
-                            <span>Name</span>
-                            <span>Project</span>
-                        </div>
-                        <?php foreach ($assignedTrainers as $trainer): ?>
-                            <?php
-                            $trainerProjectRecords = $projectTrainerRecordLookup[$projectId . ':' . (int) ($trainer['id'] ?? 0)] ?? [];
-                            ?>
-                            <details class="project-trainer-detail">
-                                <summary>
-                                    <span><?= h((string) (($trainer['emp_id'] ?? '') ?: '-')) ?></span>
-                                    <span><?= h((string) (($trainer['name'] ?? '') ?: '-')) ?></span>
-                                    <span><?= h((string) ($project['project_name'] ?? 'Project')) ?></span>
-                                </summary>
-                                <div class="project-trainer-profile">
-                                    <div class="rules-detail-grid project-trainer-grid">
-                                        <section class="rules-detail-panel project-records-panel">
-                                            <div class="project-records-section-head">
-                                                <div>
-                                                    <span class="eyebrow">Project Records</span>
-                                                    <h3><?= h((string) (($trainer['name'] ?? '') ?: 'Trainer')) ?></h3>
-                                                    <p class="hint"><?= h((string) (($trainer['emp_id'] ?? '') ?: '-')) ?> | <?= h((string) ($project['project_name'] ?? 'Project')) ?></p>
-                                                </div>
-                                                <span class="badge"><?= count($trainerProjectRecords) ?> submitted</span>
-                                            </div>
-                                            <?php if ($trainerProjectRecords): ?>
-                                                <div class="project-record-table-wrap">
-                                                    <table class="project-record-table">
-                                                        <thead>
-                                                            <tr>
-                                                                <th>Sn</th>
-                                                                <th>Date</th>
-                                                                <th>College</th>
-                                                                <th>Subject</th>
-                                                                <th>Day Type</th>
-                                                                <th>Topics Handled</th>
-                                                                <th>Total</th>
-                                                                <th>Present</th>
-                                                                <th>Absent</th>
-                                                                <th>Location</th>
-                                                                <th>GPS Photo</th>
-                                                                <th>Status</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            <?php foreach ($trainerProjectRecords as $recordIndex => $record): ?>
-                                                                <?php
-                                                                $totalStudents = (int) ($record['total_students'] ?? 0);
-                                                                $presentStudents = (int) ($record['present_students'] ?? 0);
-                                                                $absentStudents = max(0, $totalStudents - $presentStudents);
-                                                                $recordDate = !empty($record['attend_date']) ? date('d M Y', strtotime((string) $record['attend_date'])) : '-';
-                                                                $gpsPhotoPath = trim((string) ($record['punch_in_path'] ?? ''));
-                                                                $gpsPhotoUrl = $gpsPhotoPath !== '' ? public_file_path($gpsPhotoPath) : '';
-                                                                ?>
-                                                                <tr>
-                                                                    <td data-label="#"><?= (int) ($recordIndex + 1) ?></td>
-                                                                    <td data-label="Date"><?= h($recordDate) ?></td>
-                                                                    <td data-label="College"><?= h((string) (($record['college_name'] ?? '') ?: '-')) ?></td>
-                                                                    <td data-label="Subject"><?= h((string) (($record['session_name'] ?? '') ?: '-')) ?></td>
-                                                                    <td data-label="Day Type"><?= h((string) (($record['day_portion'] ?? '') ?: 'Full Day')) ?></td>
-                                                                    <td data-label="Topics Handled" class="project-record-topic-cell"><?= h((string) (($record['topics_handled'] ?? '') ?: '-')) ?></td>
-                                                                    <td data-label="Total"><?= h((string) $totalStudents) ?></td>
-                                                                    <td data-label="Present"><?= h((string) $presentStudents) ?></td>
-                                                                    <td data-label="Absent"><?= h((string) $absentStudents) ?></td>
-                                                                    <td data-label="Location"><?= h((string) (($record['location'] ?? '') ?: '-')) ?></td>
-                                                                    <td data-label="GPS Photo"><?php if ($gpsPhotoUrl !== ''): ?><a class="project-record-photo-link" href="<?= h($gpsPhotoUrl) ?>" target="_blank" rel="noopener">View</a><?php else: ?>-<?php endif; ?></td>
-                                                                    <td data-label="Status"><span class="status-pill status-Present">Present</span></td>
-                                                                </tr>
-                                                            <?php endforeach; ?>
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            <?php else: ?>
-                                                <div class="list-item muted">No project records submitted for this trainer and project.</div>
-                                            <?php endif; ?>
-                                        </section>
-                                    </div>
+                <p class="hint" style="margin-bottom: 20px;"><?= h((string) (($project['college_name'] ?? '') ?: '-')) ?> | <?= h((string) (($project['location'] ?? '') ?: '-')) ?></p>
+                
+                <div class="rules-detail-grid">
+                    <section class="rules-detail-panel">
+                        <h3>Currently Assigned</h3>
+                        <?php if ($assignedTrainers): ?>
+                            <div class="project-trainer-list">
+                                <div class="project-trainer-list-head" aria-hidden="true">
+                                    <span>Emp ID</span>
+                                    <span>Name</span>
+                                    <span>Project</span>
                                 </div>
-                            </details>
-                        <?php endforeach; ?>
-                    </div>
-                <?php else: ?>
-                    <div class="list-item muted" style="display:block;">No trainers are assigned to this project.</div>
-                <?php endif; ?>
+                                <?php foreach ($assignedTrainers as $trainer): ?>
+                                    <?php
+                                    $trainerProjectRecords = $projectTrainerRecordLookup[$projectId . ':' . (int) ($trainer['id'] ?? 0)] ?? [];
+                                    ?>
+                                    <details class="project-trainer-detail">
+                                        <summary>
+                                            <span><?= h((string) (($trainer['emp_id'] ?? '') ?: '-')) ?></span>
+                                            <span><?= h((string) (($trainer['name'] ?? '') ?: '-')) ?></span>
+                                            <span><?= h((string) ($project['project_name'] ?? 'Project')) ?></span>
+                                        </summary>
+                                        <div class="project-trainer-profile">
+                                            <div class="rules-detail-grid project-trainer-grid">
+                                                <section class="rules-detail-panel project-records-panel">
+                                                    <div class="project-records-section-head">
+                                                        <div>
+                                                            <span class="eyebrow">Project Records</span>
+                                                            <h3><?= h((string) (($trainer['name'] ?? '') ?: 'Trainer')) ?></h3>
+                                                            <p class="hint"><?= h((string) (($trainer['emp_id'] ?? '') ?: '-')) ?> | <?= h((string) ($project['project_name'] ?? 'Project')) ?></p>
+                                                        </div>
+                                                        <span class="badge"><?= count($trainerProjectRecords) ?> submitted</span>
+                                                    </div>
+                                                    <?php if ($trainerProjectRecords): ?>
+                                                        <div class="project-record-table-wrap">
+                                                            <table class="project-record-table">
+                                                                <thead>
+                                                                    <tr>
+                                                                        <th>Sn</th>
+                                                                        <th>Date</th>
+                                                                        <th>College</th>
+                                                                        <th>Subject</th>
+                                                                        <th>Day Type</th>
+                                                                        <th>Topics Handled</th>
+                                                                        <th>Total</th>
+                                                                        <th>Present</th>
+                                                                        <th>Absent</th>
+                                                                        <th>Location</th>
+                                                                        <th>GPS Photo</th>
+                                                                        <th>Status</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    <?php foreach ($trainerProjectRecords as $recordIndex => $record): ?>
+                                                                        <?php
+                                                                        $totalStudents = (int) ($record['total_students'] ?? 0);
+                                                                        $presentStudents = (int) ($record['present_students'] ?? 0);
+                                                                        $absentStudents = max(0, $totalStudents - $presentStudents);
+                                                                        $recordDate = !empty($record['attend_date']) ? date('d M Y', strtotime((string) $record['attend_date'])) : '-';
+                                                                        $gpsPhotoPath = trim((string) ($record['punch_in_path'] ?? ''));
+                                                                        $gpsPhotoUrl = $gpsPhotoPath !== '' ? public_file_path($gpsPhotoPath) : '';
+                                                                        ?>
+                                                                        <tr>
+                                                                            <td data-label="#"><?= (int) ($recordIndex + 1) ?></td>
+                                                                            <td data-label="Date"><?= h($recordDate) ?></td>
+                                                                            <td data-label="College"><?= h((string) (($record['college_name'] ?? '') ?: '-')) ?></td>
+                                                                            <td data-label="Subject"><?= h((string) (($record['session_name'] ?? '') ?: '-')) ?></td>
+                                                                            <td data-label="Day Type"><?= h((string) (($record['day_portion'] ?? '') ?: 'Full Day')) ?></td>
+                                                                            <td data-label="Topics Handled" class="project-record-topic-cell"><?= h((string) (($record['topics_handled'] ?? '') ?: '-')) ?></td>
+                                                                            <td data-label="Total"><?= h((string) $totalStudents) ?></td>
+                                                                            <td data-label="Present"><?= h((string) $presentStudents) ?></td>
+                                                                            <td data-label="Absent"><?= h((string) $absentStudents) ?></td>
+                                                                            <td data-label="Location"><?= h((string) (($record['location'] ?? '') ?: '-')) ?></td>
+                                                                            <td data-label="GPS Photo"><?php if ($gpsPhotoUrl !== ''): ?><a class="project-record-photo-link" href="<?= h($gpsPhotoUrl) ?>" target="_blank" rel="noopener">View</a><?php else: ?>-<?php endif; ?></td>
+                                                                            <td data-label="Status"><span class="status-pill status-Present">Present</span></td>
+                                                                        </tr>
+                                                                    <?php endforeach; ?>
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    <?php else: ?>
+                                                        <div class="list-item muted">No project records submitted for this trainer and project.</div>
+                                                    <?php endif; ?>
+                                                </section>
+                                            </div>
+                                        </div>
+                                    </details>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php else: ?>
+                            <div class="list-item muted" style="display:block;">No trainers are assigned to this project.</div>
+                        <?php endif; ?>
+                    </section>
+                    
+                    <section class="rules-detail-panel">
+                        <h3>Assign Trainers</h3>
+                        <form method="post" class="stack-form project-trainer-assignment-form">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="action" value="admin_project_trainers_save">
+                            <input type="hidden" name="project_id" value="<?= $projectId ?>">
+                            <div class="employee-picker">
+                                <div class="split">
+                                    <strong>Search & Select</strong>
+                                    <span class="hint">Select trainers to assign.</span>
+                                </div>
+                                <input type="text" placeholder="Search trainers..." data-employee-filter="project-trainers-options-<?= $projectId ?>">
+                                <div class="tag-list" id="project-trainers-selected-tags-<?= $projectId ?>"></div>
+                                <div class="employee-options" id="project-trainers-options-<?= $projectId ?>" data-tag-source="project-trainers-selected-tags-<?= $projectId ?>">
+                                    <?php foreach ($projectAssignableEmployees as $employee): ?>
+                                        <?php
+                                        $employeeId = (int) ($employee['id'] ?? 0);
+                                        $isAssigned = false;
+                                        foreach ($assignedTrainers as $trainer) {
+                                            if ((int) ($trainer['id'] ?? 0) === $employeeId) {
+                                                $isAssigned = true;
+                                                break;
+                                            }
+                                        }
+                                        ?>
+                                        <label class="employee-option">
+                                            <input type="checkbox" name="employee_ids[]" value="<?= $employeeId ?>" data-label="<?= h((string) $employee['name']) ?>" <?= $isAssigned ? 'checked' : '' ?>>
+                                            <span><?= h((string) $employee['name']) ?> (<?= h((string) ($employee['emp_id'] ?? '')) ?>)</span>
+                                        </label>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
+                            <div class="inline-actions project-modal-actions" style="margin-top: 12px;">
+                                <button class="button solid" type="submit">Save Assignments</button>
+                            </div>
+                        </form>
+                    </section>
+                </div>
             </div>
         </div>
     <?php endforeach; ?>

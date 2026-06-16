@@ -48,16 +48,16 @@ class CSSFunction extends ValueList
      * @internal since V8.8.0
      */
     public static function parse(ParserState $parserState, bool $ignoreCase = false): CSSFunction
-    {
-        $name = self::parseName($parserState, $ignoreCase);
-        $parserState->consume('(');
-        $arguments = self::parseArguments($parserState);
+        {
+            $name = self::parseName($parserState, $ignoreCase);
+            $parserState->consume('(');
+            $arguments = self::parseArguments($parserState);
 
-        $result = new CSSFunction($name, $arguments, ',', $parserState->currentLine());
-        $parserState->consume(')');
+            $result = new CSSFunction($name, $arguments, ',', $parserState->currentLine());
+            $parserState->consume(')');
 
-        return $result;
-    }
+            return $result;
+        }
 
     /**
      * @throws SourceException

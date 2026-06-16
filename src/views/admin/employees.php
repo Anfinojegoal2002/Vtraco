@@ -1140,15 +1140,7 @@ function render_admin_employees(): void
                             <label>Recruited Through<input type="text" name="recruited_through" value="<?= h((string) ($editEmployee['recruited_through'] ?? '')) ?>" required></label>
                         <?php endif; ?>
                         <label class="<?= $editUsesManagedFields ? 'hidden' : '' ?>" data-contractual-hidden-field>Designation
-                            <select name="designation" <?= $editUsesManagedFields ? 'disabled' : 'required' ?>>
-                                <?php foreach (employee_designation_groups() as $groupLabel => $options): ?>
-                                    <optgroup label="<?= h($groupLabel) ?>">
-                                        <?php foreach ($options as $value => $optionLabel): ?>
-                                            <option value="<?= h($value) ?>" <?= ((string) ($editEmployee['designation'] ?? '')) === $value ? 'selected' : '' ?>><?= h($optionLabel) ?></option>
-                                        <?php endforeach; ?>
-                                    </optgroup>
-                                <?php endforeach; ?>
-                            </select>
+                            <input type="text" name="designation" value="<?= h((string) ($editEmployee['designation'] ?? '')) ?>" <?= $editUsesManagedFields ? 'disabled' : 'required' ?>>
                         </label>
                         <?php if ($editUsesManagedFields): ?>
                             <input type="hidden" name="designation" value="<?= h($editEmployeeType === 'corporate' ? 'Contractual' : ($editEmployeeType === 'vendor' ? 'Vendor' : (string) ($editEmployee['designation'] ?? ''))) ?>">
