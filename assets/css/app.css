@@ -594,6 +594,7 @@
             .profile-verification-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
             .profile-verification-section-head strong { color: var(--ink); font-size: 0.96rem; }
             .profile-verification-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+            .profile-readonly-value { min-height: 50px; display: flex; align-items: center; border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; background: #f8fafc; color: var(--ink); font-weight: 500; }
             .profile-verification-wide { display: grid; gap: 8px; }
             .profile-verification-wide textarea { min-height: 82px; resize: vertical; }
             .profile-document-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -616,7 +617,8 @@
                 backdrop-filter: blur(24px) saturate(140%);
                 -webkit-backdrop-filter: blur(24px) saturate(140%);
             }
-            .modal-close { position: absolute; right: 18px; top: 18px; width: 42px; height: 42px; border-radius: 50%; border: 0; background: rgba(19,34,56,0.08); font-size: 1.2rem; cursor: pointer; }
+            .modal-close { position: absolute; right: 18px; top: 18px; width: 42px; height: 42px; border-radius: 50%; border: 0; background: rgba(15,23,42,0.9); color: #ffffff; font-size: 1.2rem; cursor: pointer; }
+            .modal-close:hover { background: #020617; }
             .modal-grid { display: grid; gap: 18px; }
             #attendance-modal .modal-grid { gap: 16px; }
             #attendance-modal .attendance-modal-hero,
@@ -1151,8 +1153,13 @@
                 height: 42px;
                 border-radius: 50%;
                 background: rgba(255,255,255,0.92);
+                color: #172554;
                 border: 1px solid rgba(15,23,42,0.08);
                 box-shadow: 0 12px 26px rgba(15,23,42,0.12);
+            }
+            .employee-profile-settings-modal-card > .modal-close:hover {
+                background: #ffffff;
+                color: #020617;
             }
             .employee-profile-settings-summary {
                 display: grid;

@@ -719,6 +719,9 @@ function render_admin_accounts(): void
         .accounts-pay-check input { width: 18px; height: 18px; }
         .accounts-payment-card,
         .accounts-approval-card { width: min(920px, 100%); }
+        .accounts-approval-card { max-height: calc(100dvh - 40px); overflow: hidden; display: flex; flex-direction: column; }
+        .accounts-approval-card > .modal-close { z-index: 5; }
+        .accounts-approval-card > .stack-form { min-height: 0; overflow: auto; padding-right: 4px; }
         .accounts-payment-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
         .accounts-method-field { grid-column: 1 / -1; }
         .payment-method-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }

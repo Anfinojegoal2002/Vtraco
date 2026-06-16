@@ -88,8 +88,8 @@ function render_employee_profile_settings_modal(array $employee, string $employe
                         <div class="field"><label>Name</label><div class="field-row"><input type="text" name="name" value="<?= h((string) ($employee['name'] ?? '')) ?>" required></div><small class="field-error"><span>!</span>Name is required.</small></div>
                         <div class="field"><label>Email</label><div class="field-row"><input type="email" name="email" value="<?= h((string) ($employee['email'] ?? '')) ?>" required></div><small class="field-error"><span>!</span>Valid email is required.</small></div>
                         <div class="field"><label>Date of Joining</label><div class="field-row"><input type="date" name="date_of_joining" value="<?= h((string) ($employee['date_of_joining'] ?? '')) ?>" required></div><small class="field-error"><span>!</span>Date of joining is required.</small></div>
-                        <div class="field"><label>Designation</label><div class="field-row"><select name="designation" required><option value="">Select designation</option><?php foreach (employee_designation_options() as $value => $label): ?><option value="<?= h($value) ?>" <?= ((string) ($employee['designation'] ?? '')) === $value ? 'selected' : '' ?>><?= h($label) ?></option><?php endforeach; ?></select></div><small class="field-error"><span>!</span>Designation is required.</small></div>
-                        <div class="field"><label>Shift</label><div class="field-row"><input type="text" name="shift" value="<?= h(normalize_shift_selection((string) ($employee['shift'] ?? ''))) ?>" required></div><small class="field-error"><span>!</span>Shift is required.</small></div>
+                        <div class="field"><label>Designation</label><div class="profile-readonly-value"><?= h((string) (($employee['designation'] ?? '') ?: 'Not assigned')) ?></div></div>
+                        <div class="field"><label>Shift</label><div class="profile-readonly-value"><?= h(employee_shift_display($employee)) ?></div></div>
                     </div>
                 </div>
 

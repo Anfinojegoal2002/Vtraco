@@ -400,8 +400,6 @@ function employee_profile_save_payload(array $employee): array
             'date_of_joining',
             'date_of_birth',
             'gender',
-            'designation',
-            'shift',
             'training_experience_years',
             'languages_known',
             'email',
@@ -419,8 +417,6 @@ function employee_profile_save_payload(array $employee): array
             'date_of_joining',
             'date_of_birth',
             'gender',
-            'designation',
-            'shift',
             'highest_qualification',
             'phone',
             'address',
@@ -449,9 +445,14 @@ function employee_profile_save_payload(array $employee): array
     if (role_email_exists((string) $employee['role'], $payload['email'], (int) $employee['id'])) {
         throw new RuntimeException('This mail ID is already assigned.');
     }
-    $payload['shift'] = normalize_shift_selection($payload['shift']);
+
+    $payload['designation'] = trim((string) ($employee['designation'] ?? ''));
+    if ($payload['designation'] === '') {
+        throw new RuntimeException('Designation is assigned by admin. Please contact your admin to update it.');
+    }
+    $payload['shift'] = normalize_shift_selection((string) ($employee['shift'] ?? ''));
     if ($payload['shift'] === '') {
-        throw new RuntimeException('Shift is required.');
+        throw new RuntimeException('Shift is assigned by admin. Please contact your admin to update it.');
     }
     $stmt = db()->prepare("SELECT COUNT(*) FROM users WHERE role IN ('employee', 'corporate_employee') AND emp_id = :emp_id AND id <> :id");
     $stmt->execute([

@@ -505,6 +505,10 @@ function attendance_entry_has_work_punch(array $entry): bool
 function attendance_status_for_counts(string $date, array $entry): string
 {
     $record = is_array($entry['record'] ?? null) ? $entry['record'] : [];
+    if (!empty($record['sandwich_week_off_absent'])) {
+        return 'Absent';
+    }
+
     $status = (string) ($record['status'] ?? '');
     if (date('w', strtotime($date)) !== '0') {
         return $status;
@@ -2641,7 +2645,6 @@ function optimized_punch_photo_database_contents(string $source): array|false
         ? ['data' => $encoded, 'mime' => 'image/jpeg']
         : ['data' => $raw, 'mime' => mime_content_type($source) ?: 'image/jpeg'];
 }
-
 
 
 
