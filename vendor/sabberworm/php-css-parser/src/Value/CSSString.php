@@ -117,7 +117,11 @@ class CSSString extends PrimitiveValue
     }
 
     private function escape(string $string, OutputFormat $outputFormat): string
-    {
+    {do the reponsive for everything undo this
+    
+    Checking the repository state so I can undo any changes cleanly.
+    
+    
         $charactersToEscape = '\\';
         $charactersToEscape .= ($outputFormat->getStringQuotingType() === '"' ? '"' : "'");
         $withEscapedQuotes = \addcslashes($string, $charactersToEscape);

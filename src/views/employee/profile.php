@@ -23,6 +23,24 @@ function render_employee_profile(): void
 
     render_header('My Profile', 'employee-profile-page');
     ?>
+    <?php if ($status !== 'verified'): ?>
+        <div style="background: linear-gradient(135deg, #fef3c7, #fde68a); border-left: 4px solid #f59e0b; padding: 16px 20px; margin-bottom: 24px; border-radius: 8px;">
+            <div style="display: flex; gap: 12px; align-items: flex-start;">
+                <div style="flex: 1;">
+                    <?php if ($status === 'incomplete'): ?>
+                        <h3 style="margin: 0 0 6px 0; color: #92400e; font-size: 1rem;">Complete Your Profile</h3>
+                        <p style="margin: 0; color: #b45309; font-size: 0.95rem;">Please fill in all required fields below. Once submitted, your profile will be reviewed by an admin. You'll get full access to V Traco features after verification.</p>
+                    <?php elseif ($status === 'pending'): ?>
+                        <h3 style="margin: 0 0 6px 0; color: #92400e; font-size: 1rem;">Awaiting Admin Verification</h3>
+                        <p style="margin: 0; color: #b45309; font-size: 0.95rem;">Your profile has been submitted and is under review by our admin team. You'll receive a notification once it's verified.</p>
+                    <?php elseif ($status === 'rejected'): ?>
+                        <h3 style="margin: 0 0 6px 0; color: #dc2626; font-size: 1rem;">Profile Update Required</h3>
+                        <p style="margin: 0; color: #991b1b; font-size: 0.95rem;">Your profile was returned with feedback. Please review the rejection reason below and update the necessary fields, then resubmit for verification.</p>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    <?php endif; ?>
     <section class="page-title">
         <div>
             <span class="eyebrow">Employee Profile</span>

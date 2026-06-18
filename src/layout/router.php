@@ -5,7 +5,14 @@ declare(strict_types=1);
 function render_page(string $page): void
 {
     $user = current_user();
-    if ($user && employee_profile_requires_completion($user) && $page !== 'employee_profile_completion') {
+    if ($user && in_array((string) ($user['role'] ?? ''), ['employee', 'corporate_employee'], true)) {
+        if (employee_profile_requires_completion($user) && !in_array($page, ['employee_profile', 'employee_profile_completion'], true)) {
+            redirect_to('employee_profile_completion');
+        }
+        if (!employee_profile_requires_completion($user) && !employee_profile_is_verified($user) && !in_array($page, ['employee_profile', 'employee_profile_completion'], true)) {
+            redirect_to('employee_profile');
+        }
+    } elseif ($user && employee_profile_requires_completion($user) && !in_array($page, ['employee_profile', 'employee_profile_completion'], true)) {
         redirect_to('employee_profile_completion');
     }
 

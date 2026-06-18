@@ -454,17 +454,90 @@ function employee_recruitment_sources(): array
     return ['Referral', 'Job Portal', 'Walk-in', 'Campus', 'Social Media', 'Consultancy', 'Other'];
 }
 
+function employee_profile_required_text_fields(?array $user): array
+{
+    $isContractual = (string) ($user['role'] ?? '') === 'corporate_employee';
+
+    return $isContractual
+        ? [
+            'emp_id',
+            'name',
+            'date_of_joining',
+            'date_of_birth',
+            'gender',
+            'training_experience_years',
+            'languages_known',
+            'email',
+            'phone',
+            'technical_skills',
+            'bank_name',
+            'bank_account_no',
+            'bank_ifsc_code',
+            'account_holder_name',
+        ]
+        : [
+            'emp_id',
+            'name',
+            'email',
+            'date_of_joining',
+            'date_of_birth',
+            'gender',
+            'highest_qualification',
+            'phone',
+            'address',
+            'bank_name',
+            'bank_account_no',
+            'bank_ifsc_code',
+            'account_holder_name',
+        ];
+}
+
+function employee_profile_required_document_fields(?array $user): array
+{
+    $isContractual = (string) ($user['role'] ?? '') === 'corporate_employee';
+
+    return $isContractual
+        ? ['pan_card', 'bank_proof', 'profile_photo', 'resume']
+        : ['aadhaar_card', 'pan_card', 'profile_photo', 'qualification_certificate', 'bank_proof', 'resume'];
+}
+
+function employee_profile_fields_complete(?array $user): bool
+{
+    if (!$user || !in_array((string) ($user['role'] ?? ''), ['employee', 'corporate_employee'], true)) {
+        return true;
+    }
+
+    foreach (employee_profile_required_text_fields($user) as $field) {
+        if (trim((string) ($user[$field] ?? '')) === '') {
+            return false;
+        }
+    }
+
+    foreach (employee_profile_required_document_fields($user) as $field) {
+        if (trim((string) ($user[$field . '_path'] ?? '')) === '') {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 function employee_profile_requires_completion(?array $user): bool
 {
     if (!$user || !in_array((string) ($user['role'] ?? ''), ['employee', 'corporate_employee'], true)) {
         return false;
     }
 
-    if (employee_profile_verification_exempt($user)) {
-        return false;
+    return !employee_profile_fields_complete($user);
+}
+
+function employee_profile_is_verified(?array $user): bool
+{
+    if (!$user || !in_array((string) ($user['role'] ?? ''), ['employee', 'corporate_employee'], true)) {
+        return true;
     }
 
-    return (string) ($user['profile_status'] ?? 'incomplete') !== 'verified';
+    return (string) ($user['profile_status'] ?? '') === 'verified';
 }
 
 function employee_profile_verification_exempt(?array $user): bool

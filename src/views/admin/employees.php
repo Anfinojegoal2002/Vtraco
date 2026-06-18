@@ -28,6 +28,12 @@ function render_employee_rules_detail_modal(array $employee, array $rules, array
         'bank_proof' => 'Bank Proof',
         'resume' => 'Resume',
     ];
+    $changedFields = [];
+    if (!empty($employee['profile_changed_fields_json'])) {
+        $decodedChangedFields = json_decode((string) $employee['profile_changed_fields_json'], true);
+        $changedFields = is_array($decodedChangedFields) ? array_values(array_filter(array_map('strval', $decodedChangedFields))) : [];
+    }
+    $changedAt = trim((string) ($employee['profile_changed_at'] ?? ''));
     ?>
     <div class="modal" id="<?= h($modalId) ?>">
         <div class="modal-card employee-rules-modal-card employee-detail-modal-card">
@@ -146,6 +152,38 @@ function render_employee_rules_detail_modal(array $employee, array $rules, array
                         <?php endforeach; ?>
                     </div>
                 </section>
+                <?php if ($changedFields): ?>
+                    <section class="rules-detail-panel">
+                        <h3>What Changed</h3>
+                        <div class="inline-actions" style="margin-bottom: 10px;">
+                            <?php foreach ($changedFields as $changedField): ?>
+                                <span class="badge"><?= h($changedField) ?></span>
+                            <?php endforeach; ?>
+                            <?php if ($changedAt !== ''): ?>
+                                <span class="hint"><?= h(date('d M Y h:i A', strtotime($changedAt))) ?></span>
+                            <?php endif; ?>
+                        </div>
+                        <p class="hint" style="margin: 0;">These are the profile fields the employee last submitted for approval. Review them before approving the profile.</p>
+                    </section>
+                <?php endif; ?>
+                <?php if (in_array((string) ($employee['profile_status'] ?? 'incomplete'), ['pending', 'rejected'], true)): ?>
+                    <section class="rules-detail-panel">
+                        <h3>Profile Review</h3>
+                        <?php if (trim((string) ($employee['profile_rejection_reason'] ?? '')) !== ''): ?>
+                            <p class="hint"><strong>Last rejection:</strong> <?= h((string) $employee['profile_rejection_reason']) ?></p>
+                        <?php endif; ?>
+                        <form method="post" class="stack-form" style="max-width: 420px;">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="action" value="admin_review_employee_profile">
+                            <input type="hidden" name="user_id" value="<?= (int) $employee['id'] ?>">
+                            <textarea name="rejection_reason" placeholder="Reason if rejecting"></textarea>
+                            <div class="inline-actions">
+                                <button class="button solid small" type="submit" name="decision" value="approve">Approve</button>
+                                <button class="button outline small" type="submit" name="decision" value="reject">Reject</button>
+                            </div>
+                        </form>
+                    </section>
+                <?php endif; ?>
             </div>
         </div>
     </div>
@@ -923,6 +961,9 @@ function render_admin_employees(): void
         <table class="employee-list-table">
             <thead>
                 <tr>
+                    <?php if ($canCreateEmployees): ?>
+                        <th><input type="checkbox" id="admin-profile-select-all" aria-label="Select all employees"></th>
+                    <?php endif; ?>
                     <th>Project</th>
                     <th>Name</th>
                     <?php if (!$isCompactEmployeeTable): ?>
@@ -990,6 +1031,18 @@ function render_admin_employees(): void
                     ]));
                 ?>
                     <tr data-filter-row data-filter-text="<?= h($searchText) ?>">
+                        <?php if ($canCreateEmployees): ?>
+                        <td data-label="Select">
+                            <input
+                                type="checkbox"
+                                form="admin-employee-bulk-form"
+                                name="employee_ids[]"
+                                value="<?= $employeeId ?>"
+                                data-profile-review-checkbox
+                                aria-label="Select employee profile"
+                            >
+                        </td>
+                        <?php endif; ?>
                         <td data-label="Project">
                             <div class="team-project-cell">
                                 <?php if ($projectLabel !== ''): ?>
@@ -1016,22 +1069,10 @@ function render_admin_employees(): void
                                 <div class="inline-actions team-modify-actions">
                                     <button class="button ghost small" type="button" data-lazy-employee-details="<?= $employeeId ?>" data-modal-id="<?= h($rulesModalId) ?>">View</button>
                                     <a class="button ghost small" href="<?= h(BASE_URL) ?>?page=admin_employees&type=<?= h($employeeType) ?>&edit=<?= (int) $employee['id'] ?>">Edit</a>
-                                    <button class="button outline small" type="button" data-confirm-delete data-user-id="<?= (int) $employee['id'] ?>" data-user-name="<?= h($employee['name']) ?>">Delete</button>
-                                    <form method="post">
-                                        <?= csrf_field() ?>
-                                        <input type="hidden" name="action" value="employee_status_update">
-                                        <input type="hidden" name="user_id" value="<?= (int) $employee['id'] ?>">
-                                        <input type="hidden" name="status" value="BLOCKED">
-                                        <button class="button outline small" type="submit">Inactive</button>
-                                    </form>
-                                    <?php if (!$isApprovedEmployee): ?>
-                                        <form method="post">
-                                            <?= csrf_field() ?>
-                                            <input type="hidden" name="action" value="employee_status_update">
-                                            <input type="hidden" name="user_id" value="<?= (int) $employee['id'] ?>">
-                                            <input type="hidden" name="status" value="ACTIVE">
-                                            <button class="button solid small" type="submit">Approve</button>
-                                        </form>
+                                    <button class="button outline small" type="button" data-bulk-row-action data-bulk-row-action-label="delete" data-bulk-action="delete">Delete</button>
+                                    <button class="button outline small" type="button" data-bulk-row-action data-bulk-row-action-label="mark inactive" data-bulk-action="inactive">Inactive</button>
+                                    <?php if ($profileStatus !== 'verified'): ?>
+                                        <button class="button solid small" type="button" data-bulk-row-action data-bulk-row-action-label="approve" data-bulk-action="approve">Approve</button>
                                     <?php endif; ?>
                                 </div>
                             <?php else: ?>
@@ -1050,6 +1091,100 @@ function render_admin_employees(): void
         <div class="list-item muted hidden table-empty-state" id="admin-employees-empty">No records match your search.</div>
         <?php endif; ?>
     </section>
+    <?php if (!$showVendorAccountsOnly && $canCreateEmployees): ?>
+        <form method="post" id="admin-employee-bulk-form" style="display:none;">
+            <?= csrf_field() ?>
+            <input type="hidden" name="action" value="admin_bulk_employee_action">
+            <input type="hidden" name="return_type" value="<?= h($employeeType) ?>">
+            <input type="hidden" name="bulk_action" value="">
+            <?php if (!empty($_GET['vendor_id'])): ?>
+                <input type="hidden" name="vendor_id" value="<?= (int) $_GET['vendor_id'] ?>">
+            <?php endif; ?>
+        </form>
+        <div class="modal" id="employee-bulk-action-modal">
+            <div class="modal-card" style="max-width:560px;">
+                <button class="modal-close" type="button" data-close-modal>&times;</button>
+                <span class="eyebrow">Confirm Action</span>
+                <h2 id="employee-bulk-action-title">Confirm</h2>
+                <p id="employee-bulk-action-copy">Are you sure?</p>
+                <div class="inline-actions">
+                    <button class="button outline" type="button" data-close-modal>Cancel</button>
+                    <button class="button solid" type="button" id="employee-bulk-action-confirm">Confirm</button>
+                </div>
+            </div>
+        </div>
+    <?php endif; ?>
+    <script>
+        (() => {
+            const selectAll = document.getElementById('admin-profile-select-all');
+            const table = document.getElementById('admin-employees-table');
+            const bulkForm = document.getElementById('admin-employee-bulk-form');
+            const bulkModal = document.getElementById('employee-bulk-action-modal');
+            const bulkActionInput = bulkForm ? bulkForm.querySelector('input[name="bulk_action"]') : null;
+            const bulkActionTitle = document.getElementById('employee-bulk-action-title');
+            const bulkActionCopy = document.getElementById('employee-bulk-action-copy');
+            const bulkActionConfirm = document.getElementById('employee-bulk-action-confirm');
+            if (!table) {
+                return;
+            }
+            const rowCheckboxes = () => Array.from(table.querySelectorAll('[data-profile-review-checkbox]'));
+            if (selectAll) {
+                selectAll.addEventListener('change', () => {
+                    const checked = selectAll.checked;
+                    rowCheckboxes().forEach((checkbox) => {
+                        checkbox.checked = checked;
+                    });
+                });
+            }
+            table.addEventListener('change', (event) => {
+                if (!event.target || !event.target.matches('[data-profile-review-checkbox]')) {
+                    return;
+                }
+                const boxes = rowCheckboxes();
+                if (selectAll) {
+                    selectAll.checked = boxes.length > 0 && boxes.every((checkbox) => checkbox.checked);
+                }
+            });
+            table.addEventListener('click', (event) => {
+                const button = event.target && event.target.closest('[data-bulk-row-action]');
+                if (!button || !bulkForm || !bulkModal || !bulkActionInput) {
+                    return;
+                }
+                const selected = rowCheckboxes().filter((checkbox) => checkbox.checked);
+                if (selected.length === 0) {
+                    event.preventDefault();
+                    if (bulkActionCopy) {
+                        bulkActionCopy.textContent = 'Select at least one employee first.';
+                    }
+                    if (bulkActionTitle) {
+                        bulkActionTitle.textContent = 'No employees selected';
+                    }
+                    bulkModal.classList.add('open');
+                    return;
+                }
+                const action = String(button.dataset.bulkAction || '');
+                const actionLabel = String(button.dataset.bulkRowActionLabel || 'this action');
+                const targetLabel = selected.length === 1 ? 'this employee' : 'these employees';
+                if (bulkActionTitle) {
+                    bulkActionTitle.textContent = action === 'delete' ? 'Delete employees' : (action === 'inactive' ? 'Mark inactive' : 'Approve employees');
+                }
+                if (bulkActionCopy) {
+                    bulkActionCopy.textContent = `Are you sure you want to ${actionLabel} ${targetLabel}?`;
+                }
+                bulkActionInput.value = action;
+                bulkModal.classList.add('open');
+            });
+            if (bulkActionConfirm && bulkForm) {
+                bulkActionConfirm.addEventListener('click', () => {
+                    if (typeof bulkForm.requestSubmit === 'function') {
+                        bulkForm.requestSubmit();
+                    } else {
+                        bulkForm.submit();
+                    }
+                });
+            }
+        })();
+    </script>
     <?php if (!$showVendorAccountsOnly): ?>
         <?php foreach ($filteredEmployees as $employee): ?>
             <?php
@@ -1124,9 +1259,18 @@ function render_admin_employees(): void
                         <?php if (!$isVendorTrainerView): ?>
                             <?php
                                 $editSelectedShift = normalize_shift_selection((string) ($editEmployee['shift'] ?? ''));
-                                $editShiftWindow = shift_window_from_label($editSelectedShift);
+                                if ($editSelectedShift === '') {
+                                    $editSelectedShift = standard_shift_options()[0] ?? '';
+                                }
+                                $editShiftWindow = shift_window_for_employee_on_date($editEmployee, date('Y-m-d'))
+                                    ?? shift_window_from_label($editSelectedShift);
                                 $editShiftStart = shift_time_input_value((string) ($editShiftWindow['start_time'] ?? ''));
                                 $editShiftEnd = shift_time_input_value((string) ($editShiftWindow['end_time'] ?? ''));
+                                if ($editShiftStart === '' || $editShiftEnd === '') {
+                                    $defaultShiftWindow = shift_window_from_label(standard_shift_options()[0] ?? '');
+                                    $editShiftStart = shift_time_input_value((string) ($defaultShiftWindow['start_time'] ?? ''));
+                                    $editShiftEnd = shift_time_input_value((string) ($defaultShiftWindow['end_time'] ?? ''));
+                                }
                             ?>
                             <input type="hidden" name="shift" value="<?= h($editSelectedShift) ?>">
                             <label class="<?= $editUsesManagedFields ? 'hidden' : '' ?>" data-contractual-hidden-field>Shift From Time<input type="time" name="shift_start_time" value="<?= h($editShiftStart) ?>" <?= $editUsesManagedFields ? 'disabled' : '' ?>></label>

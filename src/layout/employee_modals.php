@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-function render_employee_profile_settings_modal(array $employee, string $employerName): void
+function render_employee_profile_settings_modal(array $employee, string $employerName, bool $openOnLoad = false): void
 {
     $employerDisplay = $employerName !== '' ? $employerName : 'Not assigned yet';
     if ($employerName !== '' && strcasecmp($employerName, (string) $employee['name']) === 0) {
@@ -30,7 +30,7 @@ function render_employee_profile_settings_modal(array $employee, string $employe
         'resume' => 'Resume',
     ];
     ?>
-    <div class="modal" id="employee-profile-settings-modal">
+    <div class="modal<?= $openOnLoad ? ' open' : '' ?>" id="employee-profile-settings-modal"<?= $openOnLoad ? ' data-open-on-load' : '' ?>>
         <div class="modal-card profile-settings-modal-card employee-profile-settings-modal-card">
             <button class="modal-close" type="button" data-close-modal>&times;</button>
             <div class="employee-profile-card employee-profile-settings-summary">

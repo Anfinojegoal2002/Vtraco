@@ -98,4 +98,4 @@ class URL extends PrimitiveValue
             'uri' => $this->url->getArrayRepresentation(),
         ];
     }
-}
+}    

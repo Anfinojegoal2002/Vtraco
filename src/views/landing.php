@@ -10,6 +10,7 @@ function render_landing(): void
     ?>
     <section class="landing-page">
         <a class="landing-scroll-button" href="#how-it-works">How It Works?</a>
+        <a class="landing-scroll-button" href="#contact">Contact Us</a>
         <section class="landing-hero">
             <div class="landing-grid">
                 <div class="landing-copy">
@@ -128,6 +129,40 @@ function render_landing(): void
                     <strong data-counter="<?= (int) $landingEmployeeCount ?>"><?= (int) $landingEmployeeCount ?></strong>
                     <span>Employees Managed</span>
                 </div>
+            </div>
+        </section>
+
+        <section class="marketing-section contact-section" id="contact">
+            <div class="marketing-wrap">
+                <div class="section-heading reveal">
+                    <span class="eyebrow">Get in Touch</span>
+                    <h2>Have Questions? We're Here to Help</h2>
+                    <p>Reach out to our team for support, inquiries, or feedback about V Traco.</p>
+                </div>
+                <form class="contact-form reveal" method="post" action="">
+                    <input type="hidden" name="action" value="landing_contact_submit">
+                    <div class="contact-grid">
+                        <div class="form-group">
+                            <label for="contact-name">Full Name</label>
+                            <input type="text" id="contact-name" name="name" placeholder="Your name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="contact-email">Email Address</label>
+                            <input type="email" id="contact-email" name="email" placeholder="your@email.com" required>
+                        </div>
+                        <div class="form-group full-width">
+                            <label for="contact-company">Company / Organization</label>
+                            <input type="text" id="contact-company" name="company" placeholder="Your company name">
+                        </div>
+                        <div class="form-group full-width">
+                            <label for="contact-message">Message</label>
+                            <textarea id="contact-message" name="message" placeholder="Tell us about your needs..." rows="5" required></textarea>
+                        </div>
+                        <div class="form-actions full-width">
+                            <button type="submit" class="button solid">Send Message</button>
+                        </div>
+                    </div>
+                </form>
             </div>
         </section>
 

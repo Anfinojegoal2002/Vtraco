@@ -18,6 +18,12 @@ function render_footer(): void
         $stmt->execute(['id' => (int) $user['admin_id']]);
         $employerName = (string) ($stmt->fetchColumn() ?: '');
     }
+    $showEmployeeProfileOnLogin = false;
+    if ($isEmployeeShell && !empty($_SESSION['show_employee_profile_on_login'])) {
+        $showEmployeeProfileOnLogin = true;
+        unset($_SESSION['show_employee_profile_on_login']);
+    }
+    $employeeNeedsProfileCompletion = $isEmployeeShell && employee_profile_requires_completion($user);
     ?>
         </main>
         <?php if ($isSidebarShell): ?>
@@ -29,7 +35,10 @@ function render_footer(): void
         <?php render_admin_password_modal(); ?>
     <?php endif; ?>
     <?php if ($isEmployeeShell): ?>
-        <?php render_employee_profile_settings_modal($user, $employerName); ?>
+        <?php render_employee_profile_settings_modal($user, $employerName, $showEmployeeProfileOnLogin && !$employeeNeedsProfileCompletion); ?>
+        <?php if ($employeeNeedsProfileCompletion): ?>
+            <?php render_employee_profile_completion_modal($user); ?>
+        <?php endif; ?>
         <?php render_employee_password_modal(); ?>
     <?php endif; ?>
     <?php if ($showLandingLoginModal): ?>

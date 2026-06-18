@@ -4,12 +4,10 @@ declare(strict_types=1);
 
 function render_employee_onboarding_reviews(): void
 {
-    $reviewer = require_roles(['employee', 'corporate_employee']);
-    flash('error', 'Employee profile verification is handled by admin.');
-    redirect_to(home_page_for_user($reviewer));
+    $reviewer = require_power_team_access(['admin', 'freelancer']);
 
     $stmt = db()->prepare("SELECT * FROM users WHERE admin_id = :admin_id AND role IN ('employee', 'corporate_employee') AND profile_status IN ('pending', 'rejected') ORDER BY FIELD(profile_status, 'pending', 'rejected'), name");
-    $stmt->execute(['admin_id' => (int) ($reviewer['admin_id'] ?? 0)]);
+    $stmt->execute(['admin_id' => (int) $reviewer['id']]);
     $employees = $stmt->fetchAll();
     render_header('Profile Reviews', 'employee-onboarding-reviews-page');
     ?>
@@ -64,5 +62,5 @@ function render_employee_onboarding_reviews(): void
     </section>
     <?php
     render_footer();
-}
+}   
 

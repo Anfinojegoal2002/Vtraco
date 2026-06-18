@@ -844,7 +844,7 @@ function normalize_shift_selection(?string $shift): string
         return '';
     }
 
-    $normalized = str_replace('–', '-', $shift);
+    $normalized = str_replace(["\xE2\x80\x93", "\xE2\x80\x94", "\xE2\x88\x92"], '-', $shift);
     $normalized = preg_replace('/\s+/', ' ', $normalized) ?? $normalized;
     $normalized = trim($normalized);
 
@@ -883,7 +883,7 @@ function shift_window_from_label(?string $shift): ?array
         return null;
     }
 
-    $parts = preg_split('/\s*-\s*/', $shift, 2);
+    $parts = preg_split('/\s*(?:-|to)\s*/i', $shift, 2);
     if (!is_array($parts) || count($parts) !== 2) {
         return null;
     }

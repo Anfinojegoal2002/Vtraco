@@ -299,6 +299,39 @@ function notify_profile_reviewers(array $employee): void
     }
 }
 
+function approve_employee_profile_submission(array $employee, array $reviewer): void
+{
+    $employeeId = (int) ($employee['id'] ?? 0);
+    $reviewerId = (int) ($reviewer['id'] ?? 0);
+    if ($employeeId <= 0 || $reviewerId <= 0) {
+        throw new RuntimeException('Employee not found for approval.');
+    }
+
+    db()->prepare('UPDATE users
+        SET admin_id = COALESCE(NULLIF(admin_id, 0), :admin_id),
+            profile_status = "verified",
+            profile_rejection_reason = NULL
+        WHERE id = :id
+          AND role IN ("employee", "corporate_employee")
+          AND (admin_id = :admin_id OR (role = "corporate_employee" AND (admin_id IS NULL OR admin_id = 0)))')
+        ->execute([
+            'id' => $employeeId,
+            'admin_id' => $reviewerId,
+        ]);
+
+    create_notification_entry(
+        $employeeId,
+        'Profile verified',
+        'Your profile has been approved. Dashboard access is now enabled.',
+        'success',
+        'employee_profile',
+        $employeeId,
+        $reviewerId
+    );
+    $updatedEmployee = array_merge($employee, ['profile_status' => 'verified', 'profile_rejection_reason' => null]);
+    send_employee_profile_status_email($updatedEmployee, 'verified');
+}
+
 function employee_profile_reviewer_ids(array $employee): array
 {
     $adminId = (int) ($employee['admin_id'] ?? 0);
@@ -896,6 +929,11 @@ function handle_post_action(string $action): void
                     }
                 }
 
+                if (in_array((string) ($candidate['role'] ?? ''), ['employee', 'corporate_employee'], true) && (string) ($candidate['profile_status'] ?? '') !== 'verified') {
+                    flash('error', 'Your profile is waiting for admin approval. Please login again after approval.');
+                    redirect_to($returnPage === 'landing' ? 'landing' : 'login', ['role' => $role]);
+                }
+
                 $user = $candidate;
                 break;
             }
@@ -903,6 +941,9 @@ function handle_post_action(string $action): void
             if ($user) {
                 session_regenerate_id(true);
                 $_SESSION['user_id'] = $user['id'];
+                if (in_array(($user['role'] ?? ''), ['employee', 'corporate_employee'], true)) {
+                    $_SESSION['show_employee_profile_on_login'] = 1;
+                }
                 audit_log('login_success', [
                     'email' => $email,
                 ], (int) $user['id'], $user);
@@ -920,6 +961,82 @@ function handle_post_action(string $action): void
                 redirect_to('landing', ['auth' => $role]);
             }
             redirect_to('login', ['role' => $role]);
+            break;
+
+        case 'landing_contact_submit':
+            $name = trim((string) ($_POST['name'] ?? ''));
+            $email = trim((string) ($_POST['email'] ?? ''));
+            $company = trim((string) ($_POST['company'] ?? ''));
+            $message = trim((string) ($_POST['message'] ?? ''));
+
+            if ($name === '' || $email === '' || $message === '') {
+                flash('error', 'Name, email, and message are required.');
+                redirect_to('landing');
+            }
+
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                flash('error', 'Please enter a valid email address.');
+                redirect_to('landing');
+            }
+
+            try {
+                $subject = 'V Traco - New Contact Form Submission from ' . $name;
+                $htmlContent = <<<'HTML'
+                <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto;">
+                    <h2 style="color: #4338ca;">New Contact Form Submission</h2>
+                    <div style="background: #f8fafc; padding: 20px; border-radius: 12px; margin: 20px 0;">
+                        <p><strong>Name:</strong> %NAME%</p>
+                        <p><strong>Email:</strong> %EMAIL%</p>
+                        <p><strong>Company:</strong> %COMPANY%</p>
+                        <p><strong>Message:</strong></p>
+                        <p style="white-space: pre-wrap; background: white; padding: 15px; border-radius: 8px; border-left: 4px solid #4338ca;">%MESSAGE%</p>
+                    </div>
+                    <p style="color: #666; font-size: 12px;">This is an automated message from V Traco contact form.</p>
+                </div>
+                HTML;
+
+                $htmlContent = str_replace(
+                    ['%NAME%', '%EMAIL%', '%COMPANY%', '%MESSAGE%'],
+                    [
+                        htmlspecialchars($name),
+                        htmlspecialchars($email),
+                        htmlspecialchars($company !== '' ? $company : 'Not provided'),
+                        htmlspecialchars($message),
+                    ],
+                    $htmlContent
+                );
+
+                $contactEmails = ['admin@training.com', 'anfinojegoal@gmail.com'];
+                $mailSent = false;
+                
+                foreach ($contactEmails as $recipientEmail) {
+                    $mailResult = send_html_mail(
+                        to: $recipientEmail,
+                        subject: $subject,
+                        html: $htmlContent
+                    );
+                    if (!empty($mailResult['sent'])) {
+                        $mailSent = true;
+                    }
+                }
+
+                app_log('info', 'Contact form submission received.', [
+                    'name' => $name,
+                    'email' => $email,
+                    'company' => $company,
+                    'mail_sent' => $mailSent,
+                ]);
+
+                flash('success', 'Thank you! Your message has been received. We will get back to you soon.');
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Contact form submission failed.', [
+                    'name' => $name,
+                    'email' => $email,
+                ]);
+                flash('error', 'Unable to submit your message right now. Error: ' . $exception->getMessage());
+            }
+
+            redirect_to('landing');
             break;
 
         case 'register_user':
@@ -1299,7 +1416,7 @@ function handle_post_action(string $action): void
                 $_SESSION['pending_csv_import'] = array_map(
                     static fn (array $row): array => array_merge([
                         'recruiter_name' => (string) ($manager['name'] ?? 'Admin'),
-                        'recruited_through' => '',
+                        'recruited_through' => 'Bulk Import',
                         'designation' => $employeeType === 'corporate' ? 'Contractual' : ($employeeType === 'vendor' ? 'Vendor' : 'Regular Employee'),
                         'date_of_joining' => date('Y-m-d'),
                     ], $row, ['employee_type' => $employeeType]),
@@ -1514,17 +1631,7 @@ function handle_post_action(string $action): void
             }
             try {
                 if ($decision === 'approve') {
-                    db()->prepare('UPDATE users
-                        SET admin_id = COALESCE(NULLIF(admin_id, 0), :admin_id),
-                            profile_status = "verified",
-                            profile_rejection_reason = NULL
-                        WHERE id = :id
-                          AND role IN ("employee", "corporate_employee")
-                          AND (admin_id = :admin_id OR (role = "corporate_employee" AND (admin_id IS NULL OR admin_id = 0)))')
-                        ->execute(['id' => $employeeId, 'admin_id' => $reviewAdminId]);
-                    create_notification_entry($employeeId, 'Profile verified', 'Your profile has been approved. Dashboard access is now enabled.', 'success', 'employee_profile', $employeeId, (int) $reviewer['id']);
-                    $updatedEmployee = array_merge($employee, ['profile_status' => 'verified']);
-                    send_employee_profile_status_email($updatedEmployee, 'verified');
+                    approve_employee_profile_submission($employee, $reviewer);
                     audit_log('employee_profile_approved', [], $employeeId);
                     flash('success', 'Employee profile approved.');
                 } elseif ($decision === 'reject') {
@@ -1614,6 +1721,104 @@ function handle_post_action(string $action): void
             }
             audit_log('employee_status_updated', ['status' => $status], $employeeId);
             flash('success', $status === 'ACTIVE' ? 'Employee approved successfully.' : 'Employee marked inactive successfully.');
+            redirect_to('admin_employees', $redirectParams);
+            break;
+
+        case 'admin_bulk_employee_action':
+            $admin = require_power_team_access(['admin', 'freelancer', 'external_vendor']);
+            $bulkAction = (string) ($_POST['bulk_action'] ?? '');
+            $employeeIds = $_POST['employee_ids'] ?? [];
+            $employeeIds = is_array($employeeIds) ? array_values(array_unique(array_filter(array_map('intval', $employeeIds)))) : [];
+            $redirectParams = [];
+            $returnType = (string) ($_POST['return_type'] ?? 'regular');
+            if (in_array($returnType, ['regular', 'vendor', 'corporate'], true)) {
+                $redirectParams['type'] = $returnType;
+            }
+            if (!empty($_POST['vendor_id'])) {
+                $redirectParams['vendor_id'] = (int) $_POST['vendor_id'];
+            }
+
+            try {
+                if ($employeeIds === []) {
+                    throw new RuntimeException('Please select at least one employee.');
+                }
+                if (!in_array($bulkAction, ['approve', 'inactive', 'delete'], true)) {
+                    throw new RuntimeException('Choose a bulk action.');
+                }
+
+                $processed = 0;
+                $changed = 0;
+                foreach ($employeeIds as $employeeId) {
+                    $employee = employee_by_id($employeeId);
+                    if (!$employee) {
+                        continue;
+                    }
+                    if ((int) ($employee['admin_id'] ?? 0) !== (int) $admin['id']) {
+                        continue;
+                    }
+                    if ((string) ($employee['role'] ?? '') === 'corporate_employee' || (string) ($employee['employee_type'] ?? '') === 'corporate') {
+                        $redirectParams['type'] = 'corporate';
+                    } elseif ((string) ($employee['employee_type'] ?? '') === 'vendor') {
+                        $redirectParams['type'] = 'vendor';
+                    }
+                    $processed++;
+
+                    if ($bulkAction === 'delete') {
+                        $deleteStmt = db()->prepare('DELETE FROM users WHERE id = :id AND role = :role AND admin_id = :admin_id');
+                        $deleteStmt->execute([
+                            'id' => $employeeId,
+                            'role' => (string) $employee['role'],
+                            'admin_id' => (int) $admin['id'],
+                        ]);
+                        if ($deleteStmt->rowCount() > 0) {
+                            audit_log('employee_deleted', ['bulk' => true], $employeeId);
+                            $changed++;
+                        }
+                        continue;
+                    }
+
+                    $status = $bulkAction === 'approve' ? 'ACTIVE' : 'BLOCKED';
+                    $setParts = ['status = :status'];
+                    $params = [
+                        'status' => $status,
+                        'id' => $employeeId,
+                        'admin_id' => (int) $admin['id'],
+                    ];
+                    if ($status === 'ACTIVE') {
+                        $setParts[] = 'admin_id = COALESCE(NULLIF(admin_id, 0), :admin_id)';
+                        $setParts[] = 'profile_status = "verified"';
+                        $setParts[] = 'profile_rejection_reason = NULL';
+                    }
+                    $updateStmt = db()->prepare('UPDATE users SET ' . implode(', ', $setParts) . ' WHERE id = :id AND role IN ("employee", "corporate_employee") AND (admin_id = :admin_id OR (role = "corporate_employee" AND (admin_id IS NULL OR admin_id = 0)))');
+                    $updateStmt->execute($params);
+                    if ($updateStmt->rowCount() > 0) {
+                        audit_log('employee_status_updated', ['status' => $status, 'bulk' => true], $employeeId);
+                        $changed++;
+                    }
+                }
+
+                if ($processed < 1) {
+                    throw new RuntimeException('No selected employees were updated.');
+                }
+
+                $actionLabel = $bulkAction === 'approve' ? 'approved' : ($bulkAction === 'inactive' ? 'marked inactive' : 'deleted');
+                flash(
+                    'success',
+                    $processed === 1
+                        ? 'Employee ' . $actionLabel . ' successfully.'
+                        : $processed . ' employees ' . $actionLabel . ' successfully.'
+                );
+            } catch (Throwable $exception) {
+                report_exception($exception, 'Bulk employee action failed.', [
+                    'admin_id' => (int) $admin['id'],
+                    'bulk_action' => $bulkAction,
+                    'selected_count' => count($employeeIds),
+                    'processed_count' => $processed ?? 0,
+                    'changed_count' => $changed ?? 0,
+                ]);
+                flash('error', $exception->getMessage() ?: 'Unable to complete the selected employee action.');
+            }
+
             redirect_to('admin_employees', $redirectParams);
             break;
 
@@ -2692,7 +2897,7 @@ function handle_post_action(string $action): void
             try {
                 [$payload, $documentValues] = employee_profile_save_payload($employee);
                 $changedLabels = employee_profile_change_labels($employee, $payload, $documentValues);
-                $nextStatus = employee_profile_verification_exempt($employee) ? 'verified' : 'pending';
+                $nextStatus = 'pending';
                 $setParts = [];
                 foreach (array_keys(array_merge($payload, $documentValues)) as $field) {
                     $setParts[] = $field . ' = :' . $field;
@@ -2710,11 +2915,9 @@ function handle_post_action(string $action): void
                         'role' => (string) $employee['role'],
                     ]));
 
-                if ($nextStatus === 'pending') {
-                    notify_profile_reviewers(array_merge($employee, $payload, ['profile_status' => $nextStatus]));
-                }
+                notify_profile_reviewers(array_merge($employee, $payload, ['profile_status' => $nextStatus]));
                 audit_log('employee_profile_submitted', [], (int) $employee['id'], $employee);
-                flash('success', $nextStatus === 'pending' ? 'Profile submitted for admin verification.' : 'Profile verified successfully.');
+                flash('success', 'Profile submitted for admin verification.');
             } catch (Throwable $exception) {
                 report_exception($exception, 'Employee profile submission failed.', ['employee_id' => (int) $employee['id']]);
                 flash('error', $exception->getMessage() ?: 'Unable to submit profile verification.');
@@ -2727,7 +2930,7 @@ function handle_post_action(string $action): void
             try {
                 [$payload, $documentValues] = employee_profile_save_payload($employee);
                 $changedLabels = employee_profile_change_labels($employee, $payload, $documentValues);
-                $nextStatus = employee_profile_verification_exempt($employee) ? 'verified' : 'pending';
+                $nextStatus = 'pending';
                 $setParts = [];
                 foreach (array_keys(array_merge($payload, $documentValues)) as $field) {
                     $setParts[] = $field . ' = :' . $field;
@@ -2746,7 +2949,7 @@ function handle_post_action(string $action): void
                     ]));
 
                 notify_employee_profile_updated(array_merge($employee, $payload), $changedLabels);
-                flash('success', $nextStatus === 'pending' ? 'Profile updated and sent for admin verification.' : 'Profile updated successfully.');
+                flash('success', 'Profile updated and sent for admin verification.');
                 audit_log('employee_profile_updated', [
                     'profile_status' => $nextStatus,
                     'changed_fields' => $changedLabels,

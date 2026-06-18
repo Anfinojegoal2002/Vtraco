@@ -1512,7 +1512,9 @@
                 linear-gradient(180deg, #08122f 0%, #0b1740 55%, #eff3ff 55%, #f8fbff 100%);
             }
             .landing-hero { min-height: 100vh; padding: 140px 24px 60px; position: relative; overflow: hidden; }
-            .landing-scroll-button { position: fixed; right: 24px; bottom: 24px; z-index: 140; display: inline-flex; align-items: center; justify-content: center; padding: 12px 18px; border-radius: 999px; background: linear-gradient(135deg, #4f46e5, #1e40af); color: #ffffff; border: 1px solid rgba(255,255,255,0.18); box-shadow: 0 24px 54px rgba(15,23,42,0.24); font-size: 0.94rem; font-weight: 700; letter-spacing: 0.01em; transition: transform .25s ease, box-shadow .25s ease, background .25s ease; }
+            .landing-scroll-button { position: fixed; right: 24px; z-index: 140; display: inline-flex; align-items: center; justify-content: center; padding: 12px 18px; border-radius: 999px; background: linear-gradient(135deg, #4f46e5, #1e40af); color: #ffffff; border: 1px solid rgba(255,255,255,0.18); box-shadow: 0 24px 54px rgba(15,23,42,0.24); font-size: 0.94rem; font-weight: 700; letter-spacing: 0.01em; transition: transform .25s ease, box-shadow .25s ease, background .25s ease; }
+            .landing-scroll-button:nth-of-type(1) { bottom: 100px; }
+            .landing-scroll-button:nth-of-type(2) { bottom: 24px; }
             .landing-scroll-button:hover { transform: translateY(-3px); box-shadow: 0 28px 62px rgba(79,70,229,0.28); background: linear-gradient(135deg, #4338ca, #1d4ed8); }
             #how-it-works { scroll-margin-top: 120px; }
             .landing-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr); gap: 40px; align-items: center; max-width: 1360px; margin: 0 auto; }
@@ -1556,6 +1558,19 @@
             .stat-item { text-align: center; padding: 18px 14px; border-right: 1px solid rgba(255,255,255,0.12); }
             .stat-item:last-child { border-right: 0; }
             .stat-item strong { font-size: clamp(1.8rem, 4vw, 3rem); display: block; margin-bottom: 8px; }
+            .contact-section { background: #ffffff; }
+            .contact-form { max-width: 660px; margin: 0 auto; }
+            .contact-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+            .contact-grid .full-width { grid-column: 1 / -1; }
+            .form-group { display: flex; flex-direction: column; gap: 8px; }
+            .form-group label { font-weight: 600; color: #0f172a; font-size: 0.95rem; }
+            .form-group input,
+            .form-group textarea { width: 100%; border-radius: 14px; border: 1px solid rgba(15,23,42,0.12); padding: 12px 14px; font-family: inherit; font-size: 0.95rem; background: #f8fafc; transition: all 0.2s ease; }
+            .form-group input:focus,
+            .form-group textarea:focus { outline: none; background: #ffffff; border-color: #4338ca; box-shadow: 0 0 0 4px rgba(67,56,202,0.08); }
+            .form-group textarea { resize: vertical; min-height: 140px; }
+            .form-actions { display: flex; gap: 12px; justify-content: center; }
+            .form-actions .button { min-width: 160px; }
             .landing-login-modal { width: min(920px, 100%); padding: 34px; display: flex; flex-direction: column; gap: 24px; align-items: stretch; background: #ffffff !important; background-color: #ffffff !important; background-image: none !important; border: 1px solid rgba(15,23,42,0.08); color: #172554; box-shadow: 0 30px 80px rgba(15,23,42,0.16); opacity: 1; }
             #landing-login-modal .modal-card.landing-login-modal { background: #ffffff !important; background-color: #ffffff !important; background-image: none !important; color: #172554; }
             .landing-login-head { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-bottom: 0; padding-right: 0; }
@@ -1608,7 +1623,9 @@
                 .landing-shell .topbar { top: 0; left: 0; right: 0; }
                 .landing-grid, .mock-grid { grid-template-columns: 1fr; }
                 .landing-hero { padding-top: 120px; }
-                .landing-scroll-button { right: 16px; bottom: 16px; top: auto; transform: none; padding: 9px 14px; }
+                .landing-scroll-button { right: 16px; top: auto; transform: none; padding: 9px 14px; }
+                .landing-scroll-button:nth-of-type(1) { bottom: 76px; }
+                .landing-scroll-button:nth-of-type(2) { bottom: 16px; }
                 .landing-login-modal { padding: 24px; }
                 .landing-login-head { padding-right: 0; }
                 .landing-login-grid { grid-template-columns: 1fr; }
@@ -1617,6 +1634,11 @@
                 .employee-profile-media { justify-content: flex-start; }
                 .stat-item { border-right: 0; border-bottom: 1px solid rgba(255,255,255,0.12); }
                 .stat-item:last-child { border-bottom: 0; }
+                .contact-grid { grid-template-columns: 1fr; }
+                .form-group input,
+                .form-group textarea { font-size: 16px; }
+                .form-actions { flex-direction: column; }
+                .form-actions .button { width: 100%; }
             }
 
 

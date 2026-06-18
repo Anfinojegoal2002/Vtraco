@@ -9,6 +9,18 @@ function render_header(string $title, string $pageClass = ''): void
     $page = $page ?? ($_GET['page'] ?? 'landing');
     $isAdminShell = $user && in_array($user['role'], ['admin', 'freelancer', 'external_vendor'], true);
     $isEmployeeShell = $user && in_array($user['role'], ['employee', 'corporate_employee'], true);
+    $profileIncomplete = $isEmployeeShell && employee_profile_requires_completion($user);
+    $profileStatus = $isEmployeeShell ? (string) ($user['profile_status'] ?? 'incomplete') : '';
+    $profileVerified = $isEmployeeShell ? employee_profile_is_verified($user) : true;
+    
+    // Redirect incomplete profiles to profile completion until required details are saved
+    if ($profileIncomplete && !in_array($page, ['employee_profile', 'employee_profile_completion'], true)) {
+        redirect_to('employee_profile_completion');
+    }
+    if ($isEmployeeShell && !$profileIncomplete && !$profileVerified && !in_array($page, ['employee_profile', 'employee_profile_completion'], true)) {
+        redirect_to('employee_profile');
+    }
+    
     $hasPowerAdminAccess = $isEmployeeShell && employee_has_power_access($user);
     $hasPowerAttendanceAccess = $isEmployeeShell && employee_has_power_attendance_access($user);
     $hasPowerTeamAccess = $isEmployeeShell && employee_has_power_team_access($user);
@@ -104,7 +116,7 @@ function render_header(string $title, string $pageClass = ''): void
                             <span class="sidebar-section-title">Track Attendance</span>
                             <a class="sidebar-link <?= in_array($page, ['admin_attendance', 'admin_employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employee_log"><span class="nav-icon">L</span><span>Track Attendance</span></a>
                             <a class="sidebar-link <?= $page === 'notifications' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=notifications"><span class="nav-icon">N</span><span>Notifications</span><?php if ($unreadNotifications > 0): ?><span class="sidebar-link-badge"><?= (int) $unreadNotifications ?></span><?php endif; ?></a>
-                        <?php else: ?>
+                        <?php elseif ($profileVerified): ?>
                         <a class="sidebar-link <?= $page === 'admin_dashboard' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_dashboard"><span class="nav-icon">D</span><span>Dashboard</span></a>
                         <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">T</span><span>Team</span></a>
                         <a class="sidebar-link <?= $page === 'admin_projects' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_projects"><span class="nav-icon">P</span><span>Projects</span></a>
@@ -119,34 +131,52 @@ function render_header(string $title, string $pageClass = ''): void
                         <?php $isContractualEmployeeShell = ($user['role'] ?? '') === 'corporate_employee'; ?>
                         <?php $isVendorTrainerShell = employee_is_vendor_trainer($user); ?>
                         <?php $isProjectCoordinatorShell = employee_is_project_coordinator($user); ?>
-                        <?php if ($isContractualEmployeeShell || $isVendorTrainerShell || $isProjectCoordinatorShell): ?>
-                            <a class="sidebar-link <?= in_array($page, ['employee_attendance', 'employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_attendance"><span class="nav-icon">D</span><span>Dashboard</span></a>
-                            <a class="sidebar-link <?= $page === 'employee_projects' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_projects"><span class="nav-icon">P</span><span>Projects</span></a>
-                            <?php if ($isContractualEmployeeShell): ?>
-                                <a class="sidebar-link <?= $page === 'employee_payments' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_payments"><span class="nav-icon">$</span><span>Payment</span></a>
-                            <?php endif; ?>
+
+                        <?php if ($profileStatus === 'pending'): ?>
+                            <div style="padding: 12px 16px; background: rgba(59, 130, 246, 0.1); border-radius: 8px; margin-bottom: 12px; border-left: 3px solid #3b82f6;">
+                                <p style="margin: 0; font-size: 0.9rem; color: #1e40af; font-weight: 600;">⏳ Profile Under Review</p>
+                                <p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #1e3a8a; opacity: 0.85;">Your profile is awaiting admin verification. Other tabs stay locked until approval.</p>
+                            </div>
+                        <?php elseif ($profileStatus === 'rejected'): ?>
+                            <div style="padding: 12px 16px; background: rgba(239, 68, 68, 0.1); border-radius: 8px; margin-bottom: 12px; border-left: 3px solid #ef4444;">
+                                <p style="margin: 0; font-size: 0.9rem; color: #b91c1c; font-weight: 600;">⚠️ Profile Update Needed</p>
+                                <p style="margin: 4px 0 0 0; font-size: 0.85rem; color: #991b1b; opacity: 0.85;">Please update your profile based on the feedback received. Other tabs stay locked until approval.</p>
+                            </div>
                         <?php endif; ?>
-                        <span class="sidebar-section-title">Track Attendance</span>
-                        <a class="sidebar-link <?= in_array($page, ['employee_attendance', 'employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_log"><span class="nav-icon">L</span><span>Track Attendance</span></a>
-                        <?php if (employee_is_in_house_trainer($user) && !$isContractualEmployeeShell && !$isVendorTrainerShell && !$isProjectCoordinatorShell): ?>
-                            <a class="sidebar-link <?= $page === 'employee_projects' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_projects"><span class="nav-icon">P</span><span>Projects</span></a>
+
+                        <?php if ($profileIncomplete): ?>
+                            <span class="sidebar-section-title">Complete Profile</span>
+                            <a class="sidebar-link <?= in_array($page, ['employee_profile', 'employee_profile_completion'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_profile_completion"><span class="nav-icon">U</span><span>Profile Completion</span></a>
+                        <?php else: ?>
+                            <?php if ($isContractualEmployeeShell || $isVendorTrainerShell || $isProjectCoordinatorShell): ?>
+                                <a class="sidebar-link <?= in_array($page, ['employee_attendance', 'employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_attendance"><span class="nav-icon">D</span><span>Dashboard</span></a>
+                                <a class="sidebar-link <?= $page === 'employee_projects' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_projects"><span class="nav-icon">P</span><span>Projects</span></a>
+                                <?php if ($isContractualEmployeeShell): ?>
+                                    <a class="sidebar-link <?= $page === 'employee_payments' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_payments"><span class="nav-icon">$</span><span>Payment</span></a>
+                                <?php endif; ?>
+                            <?php endif; ?>
+                            <span class="sidebar-section-title">Track Attendance</span>
+                            <a class="sidebar-link <?= in_array($page, ['employee_attendance', 'employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_log"><span class="nav-icon">L</span><span>Track Attendance</span></a>
+                            <?php if (employee_is_in_house_trainer($user) && !$isContractualEmployeeShell && !$isVendorTrainerShell && !$isProjectCoordinatorShell): ?>
+                                <a class="sidebar-link <?= $page === 'employee_projects' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=employee_projects"><span class="nav-icon">P</span><span>Projects</span></a>
+                            <?php endif; ?>
+                            <?php if ($hasPowerAttendanceAccess || $hasPowerTeamAccess || $hasPowerProjectsAccess || $hasPowerAccountsAccess): ?>
+                                <span class="sidebar-section-title">Power</span>
+                                <?php if ($hasPowerAttendanceAccess): ?>
+                                    <a class="sidebar-link <?= in_array($page, ['admin_attendance', 'admin_employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employee_log"><span class="nav-icon">L</span><span>Track Attendance</span></a>
+                                <?php endif; ?>
+                                <?php if ($hasPowerTeamAccess): ?>
+                                    <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">T</span><span>Team</span></a>
+                                <?php endif; ?>
+                                <?php if ($hasPowerProjectsAccess): ?>
+                                    <a class="sidebar-link <?= $page === 'admin_projects' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_projects"><span class="nav-icon">P</span><span>Team Projects</span></a>
+                                <?php endif; ?>
+                                <?php if ($hasPowerAccountsAccess): ?>
+                                    <a class="sidebar-link <?= $page === 'admin_accounts' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_accounts"><span class="nav-icon">A</span><span>Accounts</span></a>
+                                <?php endif; ?>
+                            <?php endif; ?>
+                            <a class="sidebar-link <?= $page === 'notifications' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=notifications"><span class="nav-icon">N</span><span>Notifications</span><?php if ($unreadNotifications > 0): ?><span class="sidebar-link-badge"><?= (int) $unreadNotifications ?></span><?php endif; ?></a>
                         <?php endif; ?>
-                        <?php if ($hasPowerAttendanceAccess || $hasPowerTeamAccess || $hasPowerProjectsAccess || $hasPowerAccountsAccess): ?>
-                            <span class="sidebar-section-title">Power</span>
-                            <?php if ($hasPowerAttendanceAccess): ?>
-                                <a class="sidebar-link <?= in_array($page, ['admin_attendance', 'admin_employee_log'], true) ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employee_log"><span class="nav-icon">L</span><span>Track Attendance</span></a>
-                            <?php endif; ?>
-                            <?php if ($hasPowerTeamAccess): ?>
-                                <a class="sidebar-link <?= $page === 'admin_employees' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_employees"><span class="nav-icon">T</span><span>Team</span></a>
-                            <?php endif; ?>
-                            <?php if ($hasPowerProjectsAccess): ?>
-                                <a class="sidebar-link <?= $page === 'admin_projects' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_projects"><span class="nav-icon">P</span><span>Team Projects</span></a>
-                            <?php endif; ?>
-                            <?php if ($hasPowerAccountsAccess): ?>
-                                <a class="sidebar-link <?= $page === 'admin_accounts' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=admin_accounts"><span class="nav-icon">A</span><span>Accounts</span></a>
-                            <?php endif; ?>
-                        <?php endif; ?>
-                        <a class="sidebar-link <?= $page === 'notifications' ? 'active' : '' ?>" href="<?= h(BASE_URL) ?>?page=notifications"><span class="nav-icon">N</span><span>Notifications</span><?php if ($unreadNotifications > 0): ?><span class="sidebar-link-badge"><?= (int) $unreadNotifications ?></span><?php endif; ?></a>
                     <?php endif; ?>
                 </nav>
                 <?php if ($user): ?>
