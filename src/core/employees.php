@@ -961,14 +961,10 @@ function shift_window_for_employee_on_date(array $employee, string $date): ?arra
         $shiftFrom = normalize_rule_date_value($rules['shift_from'] ?? '');
         $shiftTo = normalize_rule_date_value($rules['shift_to'] ?? '');
         if ($shiftFrom !== '' || $shiftTo !== '') {
-            if ($shiftFrom === '') {
-                $shiftFrom = $shiftTo;
+            if ($shiftFrom !== '' && $shiftTo !== '') {
+                [$shiftFrom, $shiftTo] = ordered_rule_date_range($shiftFrom, $shiftTo);
             }
-            if ($shiftTo === '') {
-                $shiftTo = $shiftFrom;
-            }
-            [$shiftFrom, $shiftTo] = ordered_rule_date_range($shiftFrom, $shiftTo);
-            if ($date < $shiftFrom || $date > $shiftTo) {
+            if (($shiftFrom !== '' && $date < $shiftFrom) || ($shiftTo !== '' && $date > $shiftTo)) {
                 return null;
             }
         }

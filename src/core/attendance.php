@@ -184,14 +184,6 @@ function attendance_seconds_between(?string $start, ?string $end): ?int
 
 function attendance_shift_window_for_record(array $record): ?array
 {
-    $employee = employee_by_id((int) ($record['user_id'] ?? 0));
-    if ($employee) {
-        $dateWindow = shift_window_for_employee_on_date($employee, (string) ($record['attend_date'] ?? ''));
-        if ($dateWindow !== null) {
-            return $dateWindow;
-        }
-    }
-
     $startTime = trim((string) ($record['shift_start_time'] ?? ''));
     $endTime = trim((string) ($record['shift_end_time'] ?? ''));
     if ($startTime !== '' && $endTime !== '' && $startTime !== $endTime) {
@@ -199,6 +191,14 @@ function attendance_shift_window_for_record(array $record): ?array
             'start_time' => $startTime,
             'end_time' => $endTime,
         ];
+    }
+
+    $employee = employee_by_id((int) ($record['user_id'] ?? 0));
+    if ($employee) {
+        $dateWindow = shift_window_for_employee_on_date($employee, (string) ($record['attend_date'] ?? ''));
+        if ($dateWindow !== null) {
+            return $dateWindow;
+        }
     }
 
     return null;
@@ -1243,14 +1243,14 @@ function attendance_import_status(string $rawStatus, ?string $inTime, ?string $o
     };
 }
 
-function attendance_import_status_for_employee(array $employee, string $date, string $rawStatus, ?string $inTime, ?string $outTime): string
+function attendance_import_status_for_employee(array $employee, string $date, string $rawStatus, ?string $inTime, ?string $outTime, ?array $shiftWindowOverride = null): string
 {
     $status = attendance_import_status($rawStatus, $inTime, $outTime);
     if ($status === 'Absent' && $inTime === null && $outTime === null && date('w', strtotime($date)) === '0') {
         return 'Week Off';
     }
 
-    $shiftWindow = shift_window_for_employee_on_date($employee, $date);
+    $shiftWindow = $shiftWindowOverride ?? shift_window_for_employee_on_date($employee, $date);
     if ($shiftWindow !== null && $inTime !== null && $outTime !== null) {
         $shiftStart = strtotime($date . ' ' . $shiftWindow['start_time']);
         $shiftEnd = strtotime($date . ' ' . $shiftWindow['end_time']);
@@ -2475,16 +2475,19 @@ function import_attendance_report_csv(string $path, ?string $overrideDate = null
             continue;
         }
 
-        $shiftWindow = shift_window_for_employee_on_date($employee, (string) $entry['date']);
+        $existingRecord = attendance_record((int) $employee['id'], (string) $entry['date']);
+        $shiftWindow = $existingRecord
+            ? attendance_shift_window_for_record($existingRecord)
+            : shift_window_for_employee_on_date($employee, (string) $entry['date']);
         $resolvedStatus = attendance_import_status_for_employee(
             $employee,
             (string) $entry['date'],
             (string) ($entry['status'] ?? ''),
             $entry['biometric_in_time'] ?? null,
-            $entry['biometric_out_time'] ?? null
+            $entry['biometric_out_time'] ?? null,
+            $shiftWindow
         );
 
-        $existingRecord = attendance_record((int) $employee['id'], (string) $entry['date']);
         $hasAdminOverride = trim((string) ($existingRecord['admin_override_status'] ?? '')) !== '';
         $recordFields = [
             'biometric_in_time' => $entry['biometric_in_time'],
@@ -2645,8 +2648,6 @@ function optimized_punch_photo_database_contents(string $source): array|false
         ? ['data' => $encoded, 'mime' => 'image/jpeg']
         : ['data' => $raw, 'mime' => mime_content_type($source) ?: 'image/jpeg'];
 }
-
-
 
 
 

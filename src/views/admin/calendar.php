@@ -97,6 +97,33 @@ function calendar_sheet_project_label(array $entry): string
 
 function calendar_sheet_shift_label(array $employee, array $monthAttendance): string
 {
+    $recordWindows = [];
+    foreach ($monthAttendance as $date => $entry) {
+        $record = is_array($entry['record'] ?? null) ? $entry['record'] : [];
+        $startTime = trim((string) ($record['shift_start_time'] ?? ''));
+        $endTime = trim((string) ($record['shift_end_time'] ?? ''));
+        if ($startTime === '' || $endTime === '') {
+            continue;
+        }
+        $recordWindows[(string) $date] = [
+            'start_time' => $startTime,
+            'end_time' => $endTime,
+        ];
+    }
+
+    if ($recordWindows !== []) {
+        ksort($recordWindows);
+        $selectedWindow = null;
+        foreach ($recordWindows as $date => $window) {
+            if ($date <= date('Y-m-d')) {
+                $selectedWindow = $window;
+            }
+        }
+        $selectedWindow ??= reset($recordWindows);
+
+        return calendar_sheet_time($selectedWindow['start_time'] ?? '') . ' TO ' . calendar_sheet_time($selectedWindow['end_time'] ?? '');
+    }
+
     $window = shift_window_for_employee($employee);
     if ($window !== null) {
         return calendar_sheet_time($window['start_time'] ?? '') . ' TO ' . calendar_sheet_time($window['end_time'] ?? '');
@@ -178,6 +205,11 @@ function render_calendar(string $context, array $employee, string $month, array 
                 <span class="legend-chip"><span class="legend-swatch legend-week-off"></span>Week Off</span>
             <?php endif; ?>
         </div>
+        <?php if ($viewMode !== 'reimbursement'): ?>
+            <p class="hint" style="margin: 0 0 14px;">
+                Sandwich week off is marked only when the week-off day is surrounded by attended days. If the previous or next working day is missing, that week-off day becomes absent.
+            </p>
+        <?php endif; ?>
         <div class="calendar-grid calendar-grid-sheet<?= $compact ? ' calendar-grid-compact' : '' ?>"<?= $compact ? ' style="--calendar-week-rows: ' . $weekRows . ';"' : '' ?>>
             <div class="calendar-sheet-title">ACTUAL WORK TIME - <?= h($sheetShiftLabel) ?></div>
             <?php foreach (['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as $weekday): ?>

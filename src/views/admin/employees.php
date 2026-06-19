@@ -1008,11 +1008,13 @@ function render_admin_employees(): void
                     $designationLabel = trim((string) ($employee['designation'] ?? '')) ?: '-';
                     $powersLabel = employee_power_summary($employee, $rules);
                     $profileStatus = trim((string) ($employee['profile_status'] ?? 'incomplete')) ?: 'incomplete';
+                    $employeeStatus = strtoupper(trim((string) ($employee['status'] ?? 'ACTIVE'))) ?: 'ACTIVE';
                     $shiftWindow = shift_window_for_employee($employee);
                     $loginLabel = !empty($shiftWindow['start_time']) ? date('h:i A', strtotime((string) $shiftWindow['start_time'])) : '-';
                     $logoutLabel = !empty($shiftWindow['end_time']) ? date('h:i A', strtotime((string) $shiftWindow['end_time'])) : '-';
-                    $isApprovedEmployee = strtoupper((string) ($employee['status'] ?? 'ACTIVE')) === 'ACTIVE'
+                    $isApprovedEmployee = $employeeStatus === 'ACTIVE'
                         && strtolower((string) ($employee['profile_status'] ?? '')) === 'verified';
+                    $showApproveButton = $employeeStatus !== 'ACTIVE' || strtolower((string) ($employee['profile_status'] ?? '')) !== 'verified';
                     $searchText = strtolower(implode(' ', [
                         (string) $employee['emp_id'],
                         (string) $employee['name'],
@@ -1071,7 +1073,7 @@ function render_admin_employees(): void
                                     <a class="button ghost small" href="<?= h(BASE_URL) ?>?page=admin_employees&type=<?= h($employeeType) ?>&edit=<?= (int) $employee['id'] ?>">Edit</a>
                                     <button class="button outline small" type="button" data-bulk-row-action data-bulk-row-action-label="delete" data-bulk-action="delete">Delete</button>
                                     <button class="button outline small" type="button" data-bulk-row-action data-bulk-row-action-label="mark inactive" data-bulk-action="inactive">Inactive</button>
-                                    <?php if ($profileStatus !== 'verified'): ?>
+                                    <?php if ($showApproveButton): ?>
                                         <button class="button solid small" type="button" data-bulk-row-action data-bulk-row-action-label="approve" data-bulk-action="approve">Approve</button>
                                     <?php endif; ?>
                                 </div>
@@ -1275,6 +1277,12 @@ function render_admin_employees(): void
                             <input type="hidden" name="shift" value="<?= h($editSelectedShift) ?>">
                             <label class="<?= $editUsesManagedFields ? 'hidden' : '' ?>" data-contractual-hidden-field>Shift From Time<input type="time" name="shift_start_time" value="<?= h($editShiftStart) ?>" <?= $editUsesManagedFields ? 'disabled' : '' ?>></label>
                             <label class="<?= $editUsesManagedFields ? 'hidden' : '' ?>" data-contractual-hidden-field>Shift To Time<input type="time" name="shift_end_time" value="<?= h($editShiftEnd) ?>" <?= $editUsesManagedFields ? 'disabled' : '' ?>></label>
+                            <label class="<?= $editUsesManagedFields ? 'hidden' : '' ?>" data-contractual-hidden-field>Apply Shift Timing
+                                <select name="shift_effective_scope" <?= $editUsesManagedFields ? 'disabled' : 'required' ?>>
+                                    <option value="from_today" selected>Hereafter</option>
+                                    <option value="till_today">Till Today</option>
+                                </select>
+                            </label>
                             <label class="<?= $editHideCompensationField ? 'hidden' : '' ?>"<?= $usesHourlyRate ? '' : ' data-contractual-hidden-field' ?>><?= $usesHourlyRate ? 'Hourly Rate' : 'Salary' ?><input type="number" step="0.01" min="0" name="salary" value="<?= h((string) $editEmployee['salary']) ?>" <?= $editHideCompensationField ? 'disabled' : 'required' ?>></label>
                         <?php endif; ?>
                         <label class="<?= $editUsesManagedFields ? 'hidden' : '' ?>" data-contractual-hidden-field>Recruiter Name<input type="text" name="recruiter_name" value="<?= h((string) ($editEmployee['recruiter_name'] ?? '')) ?>" <?= $editUsesManagedFields ? 'disabled' : 'required' ?>></label>

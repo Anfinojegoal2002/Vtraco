@@ -1579,9 +1579,15 @@ function handle_post_action(string $action): void
                 if (role_requires_unique_email($role) && role_email_exists($role, $email, $employeeId)) {
                     throw new RuntimeException('This employee email is already assigned.');
                 }
-                $shift = $isManagedEmployeeUpdate
+                $shiftEffectiveScope = in_array((string) ($_POST['shift_effective_scope'] ?? ''), ['from_today', 'till_today'], true)
+                    ? (string) $_POST['shift_effective_scope']
+                    : 'from_today';
+                $submittedShift = $isManagedEmployeeUpdate
                     ? (string) ($existingEmployee['shift'] ?? '')
                     : shift_selection_from_time_inputs($_POST, (string) ($existingEmployee['shift'] ?? ''));
+                $shift = (!$isManagedEmployeeUpdate && $shiftEffectiveScope === 'till_today')
+                    ? (string) ($existingEmployee['shift'] ?? '')
+                    : $submittedShift;
                 
                 db()->prepare('UPDATE users SET role = :new_role, emp_id = :emp_id, name = :name, email = :email, phone = :phone, shift = :shift, salary = :salary, employee_type = :employee_type, recruiter_name = :recruiter_name, recruited_through = :recruited_through, designation = :designation, date_of_joining = :date_of_joining WHERE id = :id AND role = :existing_role AND admin_id = :admin_id')
                     ->execute([
@@ -1601,6 +1607,44 @@ function handle_post_action(string $action): void
                         'designation' => $designation,
                         'date_of_joining' => $dateOfJoining,
                     ]);
+                if (!$isManagedEmployeeUpdate && $submittedShift !== '') {
+                    $today = date('Y-m-d');
+                    $shiftFrom = $shiftEffectiveScope === 'till_today' ? null : $today;
+                    $shiftTo = $shiftEffectiveScope === 'till_today' ? $today : null;
+                    $shiftWindow = shift_window_from_label($submittedShift);
+                    $ruleDateStmt = db()->prepare('SELECT id FROM employee_rules WHERE user_id = :user_id AND rule_type = "rule_dates" ORDER BY id LIMIT 1');
+                    $ruleDateStmt->execute(['user_id' => $employeeId]);
+                    $ruleDateId = (int) ($ruleDateStmt->fetchColumn() ?: 0);
+                    if ($ruleDateId > 0) {
+                        db()->prepare('UPDATE employee_rules SET shift_from = :shift_from, shift_to = :shift_to WHERE id = :id AND user_id = :user_id')
+                            ->execute([
+                                'id' => $ruleDateId,
+                                'user_id' => $employeeId,
+                                'shift_from' => $shiftFrom,
+                                'shift_to' => $shiftTo,
+                            ]);
+                    } else {
+                        db()->prepare('INSERT INTO employee_rules (user_id, rule_type, slot_name, project_session_from, project_session_to, shift_from, shift_to, employee_from, employee_to, sort_order, created_at) VALUES (:user_id, "rule_dates", NULL, NULL, NULL, :shift_from, :shift_to, NULL, NULL, :sort_order, :created_at)')
+                            ->execute([
+                                'user_id' => $employeeId,
+                                'shift_from' => $shiftFrom,
+                                'shift_to' => $shiftTo,
+                                'sort_order' => 999,
+                                'created_at' => now(),
+                            ]);
+                    }
+                    if ($shiftWindow !== null) {
+                        $dateOperator = $shiftEffectiveScope === 'till_today' ? '<=' : '>=';
+                        db()->prepare('UPDATE attendance_records SET shift_start_time = :shift_start_time, shift_end_time = :shift_end_time, updated_at = :updated_at WHERE user_id = :user_id AND attend_date ' . $dateOperator . ' :today')
+                            ->execute([
+                                'user_id' => $employeeId,
+                                'today' => $today,
+                                'shift_start_time' => $shiftWindow['start_time'],
+                                'shift_end_time' => $shiftWindow['end_time'],
+                                'updated_at' => now(),
+                            ]);
+                    }
+                }
                 audit_log('employee_updated', [
                     'email' => $email,
                 ], $employeeId);

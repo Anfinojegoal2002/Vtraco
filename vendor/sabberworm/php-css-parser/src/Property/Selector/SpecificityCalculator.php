@@ -71,7 +71,7 @@ final class SpecificityCalculator
         }
 
         return self::$cache[$selector];
-    }
+    }                     
 
     /**
      * Clears the cache in order to lower memory usage.
